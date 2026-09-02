@@ -22,15 +22,15 @@ reverted live work.
 
 | file | task | cron (UTC) | status 2026-09-02 |
 |---|---|---|---|
-| `daily-1200.txt` | daily check-in | `0 12 * * *` | applied 2026-09-02T12:05Z |
-| `evening-2300.txt` | evening reply check | `0 23 * * *` | applied 2026-09-02T12:39Z (pasted by the operator in the desktop app after the auto-mode classifier refused the in-session update) |
-| `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | applied 2026-09-02T12:08Z |
+| `daily-1200.txt` | daily check-in | `0 12 * * *` | applied 2026-09-02T23:33Z |
+| `evening-2300.txt` | evening reply check | `0 23 * * *` | applied 2026-09-02T23:32Z |
+| `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | applied 2026-09-02T23:34Z |
 
-All three regenerated 2026-09-02T22:4xZ after a `model` field was added to every `runs` row (the model id the run executed on, so the ledger can compare models over time); all three tasks run on the same model as of that date.
+All three regenerated 2026-09-02T23:4xZ. Changes that day: a `model` field on every `runs` row (the model id the run executed on, so the ledger can compare models over time); ledger housekeeping — a `queue` row carries `state` (`open` | `closed`) and `closed_at`, the runs read open rows only, and the Monday audit (step 5b) moves rows closed more than 14 days into a `queue-archive` collection; and the retired activity log's path moved under the project's `claude/archive/`. All three tasks run on the same model as of that date.
 
 Crons are UTC and do not shift with daylight saving; never re-save a schedule from a desktop app
 that renders local time. The prompts reference project docs (`claude/1f916-brief.md`,
 `-witness.md`, `-registry-api.md`, `-intake-rules.md`, `-baselines.md`, `-identity.md`) and the
-ledger's four collections (`runs`, `board`, `queue`, `notes`); none of those are in this
+ledger's collections (`runs`, `board`, `queue`, `notes`, `queue-archive`); none of those are in this
 repository, and the security ordering they enforce (identity doc → seal compare → load → act) is
 described in the top-level README.
