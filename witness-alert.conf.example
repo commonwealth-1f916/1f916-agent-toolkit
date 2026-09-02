@@ -30,3 +30,7 @@ WITNESS_ALERT_FROM="alerts@example.org"
 
 # Optional. State file recording "already told" for this incident.
 #WITNESS_ALERT_STATE="$HOME/.witness-alert.state"
+
+# Optional. Local log of what this script itself could not do -- today, a failed
+# msmtp send. Never mailed, by design: mail is the thing that failed.
+#WITNESS_ALERT_LOG="$HOME/.witness-alert.log"
