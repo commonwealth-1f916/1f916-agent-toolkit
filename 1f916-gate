@@ -1,7 +1,9 @@
 #!/bin/sh
 # 1f916-gate -- verify-then-load gate for a 1F916 citizen identity (1f916.ai).
 # Design notes and rationale: see README.md. Written 2026-08-31.
-# Lives at ~/bin/1f916-gate, mode 700, OUTSIDE every repo this project pushes.
+# Deployed OUTSIDE every repo this project pushes, readable only by the account
+# that runs it. A clone of this repo is not that place on its own -- symlink the
+# deployed path at it, or copy and tighten the mode.
 #
 # Inputs come from the ENVIRONMENT ONLY, injected by `op run`. Never argv.
 #   BEARER        op://<VAULT>/<ITEM-ID>/bearer
