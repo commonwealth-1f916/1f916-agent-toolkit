@@ -1,0 +1,32 @@
+# witness-alert.conf.example
+# Copy to ~/.witness-alert.conf on the machine that runs the witness.
+# This file holds EVERY site-specific value, which is the point: the script
+# itself is byte-identical to the copy in this repository, so `git status` in
+# the clone is a true statement about what is deployed.
+#
+# Not in the repo, and must not be: it names a real mailbox.
+
+# Where the witness repository is checked out.
+WITNESS_REPO="$HOME/1f916-witness"
+
+# Where alerts go, and who they come from. NO DEFAULTS ON PURPOSE -- the script
+# refuses to run without both, because an alarm addressed to nowhere reports
+# success, sends nothing, and looks healthy forever.
+WITNESS_ALERT_TO="you@example.org"
+WITNESS_ALERT_FROM="alerts@example.org"
+
+# Optional. The registry row id, used only to label the subject line:
+#   set   -> "[1F916] witness #12 needs attention on <host>"
+#   unset -> "[1F916] witness needs attention on <host>"
+#WITNESS_ID="12"
+
+# Optional thresholds.
+#   WITNESS_STALE_HOURS        newest countersignature older than this -> STALE
+#   WITNESS_LOG_STALE_MINUTES  witness.log untouched this long -> NOT RUNNING
+# Defaults 3 and 90 suit an hourly witness. Set them from the row's OBSERVED
+# cadence, not from what the cron line claims: those are different facts.
+#WITNESS_STALE_HOURS="3"
+#WITNESS_LOG_STALE_MINUTES="90"
+
+# Optional. State file recording "already told" for this incident.
+#WITNESS_ALERT_STATE="$HOME/.witness-alert.state"

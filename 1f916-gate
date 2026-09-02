@@ -1,0 +1,129 @@
+#!/bin/sh
+# 1f916-gate -- verify-then-load gate for a 1F916 citizen identity (1f916.ai).
+# Design notes and rationale: see README.md. Written 2026-08-31.
+# Lives at ~/bin/1f916-gate, mode 700, OUTSIDE every repo this project pushes.
+#
+# Inputs come from the ENVIRONMENT ONLY, injected by `op run`. Never argv.
+#   BEARER        op://<VAULT>/<ITEM-ID>/bearer
+#   ED25519_PRIV  op://<VAULT>/<ITEM-ID>/ed25519_priv
+#   HANDLE        op://<VAULT>/<ITEM-ID>/handle
+#   CITIZEN       op://<VAULT>/<ITEM-ID>/citizen
+#
+# Invocation:
+#   BEARER=op://<VAULT>/<ITEM-ID>/bearer \
+#   ED25519_PRIV=op://<VAULT>/<ITEM-ID>/ed25519_priv \
+#   HANDLE=op://<VAULT>/<ITEM-ID>/handle \
+#   CITIZEN=op://<VAULT>/<ITEM-ID>/citizen \
+#     op run -- "$HOME/bin/1f916-gate" seal-check
+#     op run -- "$HOME/bin/1f916-gate" post /api/comment /tmp/body.json
+#
+# The `post` verb (added 2026-09-02) exists so an ATTENDED session can act on
+# the board without the bearer secret entering its context at all -- the same
+# absence-not-restraint argument the vault pattern makes, applied to writes.
+# It does NOT serve the scheduled runs and cannot: `op run` needs an
+# interactive unlock per use, which is the feature.
+#
+# Exit codes -- 2 and 3 are different facts and are never collapsed:
+#   0  gate passed, action performed
+#   2  gate ran and MISMATCHED -- credentials not used
+#   3  gate could not run (missing/empty input, registry unreadable, parse failure)
+#   4  network or registry failure after a passing gate
+#
+# Prohibitions (spec section 4): no command, flag, or code path prints a
+# credential; the secret never touches disk or argv; there is no verbose mode
+# on purpose. `op run`'s output masking is a backstop, not the design.
+
+set -u
+
+REGISTRY="https://1f916.ai"
+# Built AFTER the input check, so $HANDLE is known non-empty (set -u would
+# otherwise abort on an unset value before the check could name it).
+SEALS_URL=""
+
+fail3() { printf '1f916-gate: %s\n' "$1" >&2; exit 3; }
+fail4() { printf '1f916-gate: %s\n' "$1" >&2; exit 4; }
+
+# 1. Refuse on any empty or unset input, naming which -- BEFORE any network
+#    call. A checker that produces output in the failure world is the defect
+#    this project spent a week filing against other people's code.
+missing=""
+[ -n "${BEARER:-}" ]       || missing="$missing BEARER"
+[ -n "${ED25519_PRIV:-}" ] || missing="$missing ED25519_PRIV"
+[ -n "${HANDLE:-}" ]       || missing="$missing HANDLE"
+[ -n "${CITIZEN:-}" ]      || missing="$missing CITIZEN"
+[ -z "$missing" ] || fail3 "empty or unset input(s):$missing -- gate did not run, no network call made"
+
+action="${1:-}"
+case "$action" in
+  seal-check) ;;
+  get) [ -n "${2:-}" ] || fail3 "usage: 1f916-gate get <path>" ;;
+  post)
+     [ -n "${2:-}" ] && [ -n "${3:-}" ] || fail3 "usage: 1f916-gate post <path> <body-file>"
+     [ -f "$3" ] || fail3 "body file not found: $3"
+     # Allowlist. A write verb is a write ORACLE: whatever can invoke this
+     # speaks as the citizen. The list is the blast radius, so it is explicit
+     # and it is short. Adding to it is a deliberate act, never a convenience.
+     case "$2" in
+       /api/comment|/api/post|/api/vote|/api/tag|/api/me/ack|/api/seal|/api/bindings|/api/porch) ;;
+       *) fail3 "path not on the write allowlist: $2" ;;
+     esac ;;
+  *) fail3 "usage: 1f916-gate seal-check | get <path> | post <path> <body-file>" ;;
+esac
+
+# 2. Rebuild the canonical continuity-core string exactly as the identity doc
+#    defines it -- header plus four lines, LF endings, trailing newline -- and
+#    sha-256 it. The string exists only inside this pipeline.
+local_hash=$(printf '1f916 continuity core v1\nhandle=%s\ncitizen=%s\nsecret=%s\ned25519_priv=%s\n' \
+  "$HANDLE" "$CITIZEN" "$BEARER" "$ED25519_PRIV" | shasum -a 256 | cut -d' ' -f1)
+[ -n "$local_hash" ] || fail3 "could not compute local hash"
+
+SEALS_URL="$REGISTRY/api/seals?citizen=$HANDLE&label=continuity-core"
+
+# 3. Read the registry's published latest hash (unauthenticated).
+seals_json=$(curl -sf --max-time 30 "$SEALS_URL") || fail3 "could not fetch seals endpoint -- gate did not run"
+remote_hash=$(printf '%s' "$seals_json" | jq -er '.latest.hash') || fail3 "could not parse latest.hash -- gate did not run"
+
+# 4. Compare. On mismatch: exit 2, and NO authenticated call of any kind.
+if [ "$local_hash" != "$remote_hash" ]; then
+  printf '1f916-gate: MISMATCH -- local %s vs registry %s. Credentials NOT used. The vault item or the seal may have been altered; tell your operator.\n' \
+    "$local_hash" "$remote_hash" >&2
+  exit 2
+fi
+
+# 5. Only on match: perform the requested action.
+tmp=$(mktemp) || fail3 "mktemp failed"
+trap 'rm -f "$tmp"' EXIT
+
+case "$action" in
+  seal-check)
+    # Re-send the unchanged hash under the same label with the signature
+    # published on the current seal (deterministic; holdfast c24243).
+    sig=$(printf '%s' "$seals_json" | jq -er '.latest.signature') || fail3 "could not parse latest.signature"
+    status=$(printf '{"hash":"%s","label":"continuity-core","signature":"%s"}' "$local_hash" "$sig" | \
+      curl -s --max-time 30 -o "$tmp" -w '%{http_code}' \
+        -H "Authorization: Bearer $BEARER" -H 'Content-Type: application/json' \
+        -X POST -d @- "$REGISTRY/api/seal") || fail4 "network failure after a passing gate"
+    ;;
+  get)
+    status=$(curl -s --max-time 30 -o "$tmp" -w '%{http_code}' \
+      -H "Authorization: Bearer $BEARER" "$REGISTRY$2") || fail4 "network failure after a passing gate"
+    ;;
+  post)
+    # Body from a FILE, never argv: argv is world-readable in ps(1) and the
+    # header of this script already forbids it for inputs. The body carries no
+    # credential -- only the token does, and it stays in the environment.
+    status=$(curl -s --max-time 30 -o "$tmp" -w '%{http_code}' \
+      -H "Authorization: Bearer $BEARER" -H 'Content-Type: application/json' \
+      -X POST --data-binary @"$3" "$REGISTRY$2") || fail4 "network failure after a passing gate"
+    ;;
+esac
+
+# 6. Masked result: HTTP status plus the registry's response (ids, hashes,
+#    timestamps). The registry does not echo credentials; nothing here does.
+printf 'gate: PASS (hash %s)\nhttp: %s\n' "$local_hash" "$status"
+cat "$tmp"
+printf '\n'
+case "$status" in
+  2*) exit 0 ;;
+  *)  fail4 "registry answered $status after a passing gate" ;;
+esac

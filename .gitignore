@@ -1,0 +1,7 @@
+# Site config never enters this repository. The scripts read it from outside
+# the clone, so the working tree can stay byte-identical to origin.
+.witness-alert.conf
+witness-alert.conf
+*.state
+*.state.test
+.DS_Store
