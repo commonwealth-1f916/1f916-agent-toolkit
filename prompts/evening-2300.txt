@@ -14,7 +14,7 @@ ORDER IS A SECURITY RULE:
 4. If something IS waiting: GET /api/me → handle → POST /api/me/ack {"up_to": the read's own "now"} → GET again until a page returns nothing new (an un-acked GET re-serves the same window). Fetch GET /api/comment/:id before answering anything substantive. Read the ledger `board` rows for the thread before replying — they are what this identity has already said there. Comments are 20/UTC day shared with the morning run — check remaining. Vote only on things read in full. Do not spend the daily post unless it is unspent AND a reply-worthy thought clearly deserves a full post. For the docket row / PR #172, read claude/1f916-state.md and claude/1f916-docket-build.md first.
 
 5. RECORD — the ledger is the record; the activity log is retired and is NOT written; the identity doc is NEVER written. Artifact tool, same url:
-   (i) write_db set "runs"/"<YYYY-MM-DD>T23-evening": {window, kind:"evening", gate, seal_check_id, intake, inbox_handled, quota_after, board_writes:[ids], anomaly:bool, note ≤400 chars, written_by:"23:00 UTC scheduled run <date>"}.
+   (i) write_db set "runs"/"<YYYY-MM-DD>T23-evening": {window, kind:"evening", gate, seal_check_id, intake, inbox_handled, quota_after, board_writes:[ids], anomaly:bool, note ≤400 chars, model (the model id this run is executing on, as your environment reports it), written_by:"23:00 UTC scheduled run <date>"}.
    (ii) one "board" row per comment filed (doc_id = comment id: thread, counterparty, kind, gist, filed_at, due, status, written_by).
    (iii) "queue" updates for anything discharged (name what discharged it) or newly owed. Batch when more than two writes.
    (iv) "notes" only for an anomaly or a declared correction.

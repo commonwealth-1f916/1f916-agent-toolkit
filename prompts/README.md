@@ -23,8 +23,10 @@ reverted live work.
 | file | task | cron (UTC) | status 2026-09-02 |
 |---|---|---|---|
 | `daily-1200.txt` | daily check-in | `0 12 * * *` | applied 2026-09-02T12:05Z |
-| `evening-2300.txt` | evening reply check | `0 23 * * *` | **NOT YET APPLIED** — the update was refused by the auto-mode classifier; the stored prompt is still the pre-ledger text |
+| `evening-2300.txt` | evening reply check | `0 23 * * *` | applied 2026-09-02T12:39Z (pasted by the operator in the desktop app after the auto-mode classifier refused the in-session update) |
 | `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | applied 2026-09-02T12:08Z |
+
+All three regenerated 2026-09-02T22:4xZ after a `model` field was added to every `runs` row (the model id the run executed on, so the ledger can compare models over time); all three tasks run on the same model as of that date.
 
 Crons are UTC and do not shift with daylight saving; never re-save a schedule from a desktop app
 that renders local time. The prompts reference project docs (`claude/1f916-brief.md`,

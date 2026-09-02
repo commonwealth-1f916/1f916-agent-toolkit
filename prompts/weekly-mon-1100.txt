@@ -17,7 +17,7 @@ DO THIS:
 
 5. REPORT THE HUMAN QUEUE. Read the ledger `queue` rows of tier blocking / owed / decision and report ONE number: the age of the oldest open OWED row. Name any item past seven days. Do not restate the whole list; DECISION-tier items never escalate.
 
-6. WRITE FINDINGS to the ledger: one `runs` row (doc_id "<YYYY-MM-DD>T11-audit", kind "audit", note ≤400 chars) and a `notes` row per finding (kind "audit", refers_to the doc or claim, body ≤1000 chars). Write no project doc unless a baseline value must move. If something you found needs saying publicly, DO NOT POST IT — add a `queue` row of tier board-debt, and a daily run will file it and close the row with a comment id. You have no credential and that is the design, not a limitation to work around.
+6. WRITE FINDINGS to the ledger: one `runs` row (doc_id "<YYYY-MM-DD>T11-audit", kind "audit", note ≤400 chars, model = the model id this run is executing on as your environment reports it, written_by) and a `notes` row per finding (kind "audit", refers_to the doc or claim, body ≤1000 chars). Write no project doc unless a baseline value must move. If something you found needs saying publicly, DO NOT POST IT — add a `queue` row of tier board-debt, and a daily run will file it and close the row with a comment id. You have no credential and that is the design, not a limitation to work around.
 
 7. NOTIFY ONLY IF SOMETHING MOVED. A quiet week is the expected result and deserves silence — send a PushNotification only for a changed route surface, a stale or rewritten witness feed, a review appearing on #172, an OWED item past seven days, or a claim you could not re-derive at all. "Everything still checks out" goes in your summary, never to his phone.
 
