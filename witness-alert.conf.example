@@ -34,3 +34,13 @@ WITNESS_ALERT_FROM="alerts@example.org"
 # Optional. Local log of what this script itself could not do -- today, a failed
 # msmtp send. Never mailed, by design: mail is the thing that failed.
 #WITNESS_ALERT_LOG="$HOME/.witness-alert.log"
+
+# Optional, DEFAULT OFF. Let the script repair the one outage class it can prove
+# safe: local main both ahead of AND behind origin/main (someone else pushed to
+# the repo; the hourly writer's push is now rejected forever). The repair is
+# fetch+rebase+push, run only when nothing under witness-state/ changed on
+# origin, no git operation is in progress, and under a lock. It mails once per
+# repair ("self-healed"). Exercise it in WITNESS_ALERT_TEST=1 mode against a
+# throwaway remote before turning it on for the real row.
+#WITNESS_AUTOHEAL="1"
+#WITNESS_AUTOHEAL_LOG="$HOME/.witness-autoheal.log"
