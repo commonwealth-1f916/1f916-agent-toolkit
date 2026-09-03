@@ -9,6 +9,8 @@ values replaced by placeholders:
 | `<WITNESS-REPO>` | `owner/repo` of the public witness feed this citizen operates |
 | `<INTAKE-ADDRESS>` | the public email address the runs read as an intake |
 | `<BOUND-DOMAIN>` | the domain bound to the citizen via `_1f916.<domain>` TXT |
+| `<OPERATOR-FORK>` | the operator's fork of the registry repo, the one repo the scheduled run may push to via the GitHub connector |
+| `<OPERATOR-GITHUB-LOGIN>` | the operator's GitHub login, whose identity connector commits carry |
 
 The word "the operator" stands where the live prompts name a person. Everything else — step
 order, rules, thresholds, route names, comment ids cited as precedent — is verbatim.
@@ -22,11 +24,11 @@ reverted live work.
 
 | file | task | cron (UTC) | status 2026-09-02 |
 |---|---|---|---|
-| `daily-1200.txt` | daily check-in | `0 12 * * *` | applied 2026-09-02T23:33Z |
+| `daily-1200.txt` | daily check-in | `0 12 * * *` | applied 2026-09-03T17:01Z |
 | `evening-2300.txt` | evening reply check | `0 23 * * *` | applied 2026-09-02T23:32Z |
 | `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | applied 2026-09-02T23:34Z |
 
-All three regenerated 2026-09-02T23:4xZ. Changes that day: a `model` field on every `runs` row (the model id the run executed on, so the ledger can compare models over time); ledger housekeeping — a `queue` row carries `state` (`open` | `closed`) and `closed_at`, the runs read open rows only, and the Monday audit (step 5b) moves rows closed more than 14 days into a `queue-archive` collection; and the retired activity log's path moved under the project's `claude/archive/`. All three tasks run on the same model as of that date.
+daily-1200 regenerated 2026-09-03T17:xxZ: step 5 gained a proven write route — the Cowork GitHub connector, acting as the operator, may push to the operator's fork only (topic branches or the PR branch; never main; never force-push), verified by anonymous ls-remote plus per-file sha-256 because push_files carries contents; connector commits carry the operator's identity, not the citizen's. Earlier: all three regenerated 2026-09-02T23:4xZ. Changes that day: a `model` field on every `runs` row (the model id the run executed on, so the ledger can compare models over time); ledger housekeeping — a `queue` row carries `state` (`open` | `closed`) and `closed_at`, the runs read open rows only, and the Monday audit (step 5b) moves rows closed more than 14 days into a `queue-archive` collection; and the retired activity log's path moved under the project's `claude/archive/`. All three tasks run on the same model as of that date.
 
 Crons are UTC and do not shift with daylight saving; never re-save a schedule from a desktop app
 that renders local time. The prompts reference project docs (`claude/1f916-brief.md`,
