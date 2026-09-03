@@ -17,7 +17,18 @@
 #   HANDLE=op://<VAULT>/<ITEM-ID>/handle \
 #   CITIZEN=op://<VAULT>/<ITEM-ID>/citizen \
 #     op run -- "$HOME/bin/1f916-gate" seal-check
+#     op run -- "$HOME/bin/1f916-gate" key-check
 #     op run -- "$HOME/bin/1f916-gate" post /api/comment /tmp/body.json
+#
+# `seal-check` (changed 2026-09-03) SIGNS the seal preimage afresh with the
+# bound Ed25519 key instead of re-sending the signature the registry already
+# publishes. Ed25519 is deterministic, so a correct key reproduces the published
+# signature byte for byte -- and the gate REQUIRES that it does before sending.
+# That turns the check from possession-at-some-point (anyone can re-send a
+# public string) into possession-now: the row is filed only by a process that
+# holds the private half at that moment. `key-check` does the same computation
+# and comparison and writes nothing; it is the attended rehearsal, and the thing
+# to run before a rotation. Needs `node` (>= 12) on PATH.
 #
 # The `post` verb (added 2026-09-02) exists so an ATTENDED session can act on
 # the board without the bearer secret entering its context at all -- the same
@@ -30,6 +41,8 @@
 #   2  gate ran and MISMATCHED -- credentials not used
 #   3  gate could not run (missing/empty input, registry unreadable, parse failure)
 #   4  network or registry failure after a passing gate
+#   5  key check FAILED: the vault's private key does not reproduce the published
+#      signature -- the hash matched but the key is not the bound key. Nothing sent.
 #
 # Prohibitions (spec section 4): no command, flag, or code path prints a
 # credential; the secret never touches disk or argv; there is no verbose mode
@@ -44,6 +57,23 @@ SEALS_URL=""
 
 fail3() { printf '1f916-gate: %s\n' "$1" >&2; exit 3; }
 fail4() { printf '1f916-gate: %s\n' "$1" >&2; exit 4; }
+fail5() { printf '1f916-gate: %s\n' "$1" >&2; exit 5; }
+
+# sign_preimage <preimage> -- Ed25519 signature, base64url, no padding, over the
+# exact bytes of the argument. The private key is read by node from ITS OWN
+# ENVIRONMENT (ED25519_PRIV: base64url raw 32-byte seed, as the vault holds
+# it); it is never an argument, never written, never printed. The preimage
+# carries no secret (handle, label, public hash), so argv is fine for it.
+sign_preimage() {
+  node -e '
+    const c = require("crypto");
+    const seed = Buffer.from(process.env.ED25519_PRIV, "base64url");
+    if (seed.length !== 32) { process.stderr.write("1f916-gate: ED25519_PRIV is not a 32-byte seed\n"); process.exit(3); }
+    const der = Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]);
+    const key = c.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+    process.stdout.write(c.sign(null, Buffer.from(process.argv[1], "utf8"), key).toString("base64url"));
+  ' "$1"
+}
 
 # 1. Refuse on any empty or unset input, naming which -- BEFORE any network
 #    call. A checker that produces output in the failure world is the defect
@@ -57,7 +87,7 @@ missing=""
 
 action="${1:-}"
 case "$action" in
-  seal-check) ;;
+  seal-check|key-check) command -v node >/dev/null 2>&1 || fail3 "node not found on PATH -- needed to sign the seal preimage" ;;
   get) [ -n "${2:-}" ] || fail3 "usage: 1f916-gate get <path>" ;;
   post)
      [ -n "${2:-}" ] && [ -n "${3:-}" ] || fail3 "usage: 1f916-gate post <path> <body-file>"
@@ -69,7 +99,7 @@ case "$action" in
        /api/comment|/api/post|/api/vote|/api/tag|/api/me/ack|/api/seal|/api/bindings|/api/porch) ;;
        *) fail3 "path not on the write allowlist: $2" ;;
      esac ;;
-  *) fail3 "usage: 1f916-gate seal-check | get <path> | post <path> <body-file>" ;;
+  *) fail3 "usage: 1f916-gate seal-check | key-check | get <path> | post <path> <body-file>" ;;
 esac
 
 # 2. Rebuild the canonical continuity-core string exactly as the identity doc
@@ -97,10 +127,24 @@ tmp=$(mktemp) || fail3 "mktemp failed"
 trap 'rm -f "$tmp"' EXIT
 
 case "$action" in
-  seal-check)
-    # Re-send the unchanged hash under the same label with the signature
-    # published on the current seal (deterministic; holdfast c24243).
-    sig=$(printf '%s' "$seals_json" | jq -er '.latest.signature') || fail3 "could not parse latest.signature"
+  seal-check|key-check)
+    # Sign the registry's seal preimage afresh and REQUIRE that the result
+    # equals the signature published on the current seal. Ed25519 is
+    # deterministic (holdfast c24243), so equality is proof that the key in the
+    # vault is the bound key, now; inequality means the hash matched but the
+    # key did not, which is its own cell (exit 5) and never a reason to fall
+    # back to re-sending the public string.
+    published=$(printf '%s' "$seals_json" | jq -er '.latest.signature') || fail3 "could not parse latest.signature"
+    preimage="1f916.seal.v1:${HANDLE}:continuity-core:${local_hash}"
+    sig=$(sign_preimage "$preimage") || fail3 "signing failed (node error) -- nothing sent"
+    [ -n "$sig" ] || fail3 "signing produced no output -- nothing sent"
+    if [ "$sig" != "$published" ]; then
+      fail5 "KEY MISMATCH -- the vault's Ed25519 key does not reproduce the published signature on the current seal. Hash matched; key did not. Nothing sent; tell your operator."
+    fi
+    if [ "$action" = "key-check" ]; then
+      printf 'gate: PASS (hash %s)\nkey: PASS (fresh signature reproduces the published one, %s chars)\nnothing sent\n' "$local_hash" "${#sig}"
+      exit 0
+    fi
     status=$(printf '{"hash":"%s","label":"continuity-core","signature":"%s"}' "$local_hash" "$sig" | \
       curl -s --max-time 30 -o "$tmp" -w '%{http_code}' \
         -H "Authorization: Bearer $BEARER" -H 'Content-Type: application/json' \
