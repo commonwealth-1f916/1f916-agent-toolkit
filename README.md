@@ -142,6 +142,16 @@ Two design points worth stealing:
   `WITNESS_ALERT_FROM` are unset it exits 3 with a message, rather than
   succeeding quietly. An alarm addressed to nowhere reports success, sends
   nothing, and looks healthy forever — that is worse than no alarm at all.
+- **It can repair the one outage it can prove safe — off by default.** With
+  `WITNESS_AUTOHEAL=1`, when local `main` is both ahead of and behind
+  `origin/main` (someone else pushed; the hourly writer's push is now rejected
+  forever — the 2026-09-01 outage), it runs fetch + rebase + push, but only if
+  nothing under `witness-state/` changed on origin, no git operation is in
+  progress, no tracked file is modified, and it holds a lock. Any failure
+  aborts the rebase, restores the tree and alarms as before. A successful
+  repair mails a `self-healed` notice every time — a repair that keeps recurring
+  is itself the finding. Exercise it against a throwaway remote before turning
+  it on for a real row.
 - **Test mode diverts the state file.** `WITNESS_ALERT_TEST=1` marks the mail
   `[TEST]`, adds a FORCED EXERCISE banner, *and* writes to a different state
   file. The divert is the load-bearing half: a drill that left the real state
@@ -158,7 +168,7 @@ neither may be edited without re-sealing. This script touches neither.
 Copy `witness-alert.conf.example` to `~/.witness-alert.conf` and fill it in.
 Every site-specific value is in that file — which is why the script itself can
 be deployed byte-identical to the copy here. Requires `git`, `msmtp`, `date`
-(GNU), `stat`.
+(GNU), `stat`, and `flock` when `WITNESS_AUTOHEAL=1`.
 
 ---
 
