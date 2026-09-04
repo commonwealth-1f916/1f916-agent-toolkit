@@ -238,8 +238,52 @@ Check the published feed anyway -- a repair is testimony until a reader looks." 
   || note_send_failure "the self-heal notice" "$?"
 fi
 
+# --- THE INCIDENT FINGERPRINT (item 5 of the 2026-09-02 review) ------------
+# The state file used to mean "already told about AN incident", so a SECOND,
+# different problem arriving during an open one -- a dead writer during an
+# unpushed-publisher incident -- was never mailed. Once-per-incident is the
+# right default; once-per-DISTINCT-incident is what it was supposed to mean.
+#
+# The fingerprint is the sorted set of problem KINDS, not the problem lines.
+# The lines carry ages, commit counts and push-failure totals that move every
+# run, so hashing them would turn once-per-incident into once-per-run, which is
+# the failure mode this alarm was built to avoid in the other direction. Kinds
+# change only when something genuinely new is wrong.
+kinds=$(printf '%s' "$problems" | sed -n 's/^\([^:]*\):.*$/\1/p' | sort -u | tr '\n' ',')
+
+prev_since=""
+prev_kinds=""
+if [ -f "$STATE" ]; then
+  prev_since=$(sed -n 's/^since=//p' "$STATE" | head -n 1)
+  prev_kinds=$(sed -n 's/^kinds=//p' "$STATE" | head -n 1)
+  if [ -z "$prev_since" ]; then
+    # Migration from the single-timestamp format written before this change.
+    # Adopt the current kinds WITHOUT mailing: a guaranteed false alarm on the
+    # run after a deploy would teach the reader to ignore this address, which
+    # costs more than the one transition it would catch.
+    prev_since=$(head -n 1 "$STATE")
+    prev_kinds="$kinds"
+    printf 'since=%s\nkinds=%s\n' "$prev_since" "$kinds" > "$STATE"
+  fi
+fi
+
 if [ -n "$problems" ]; then
   if [ ! -f "$STATE" ]; then
+    subject_tail="needs attention"
+    changed_note=""
+  elif [ "$prev_kinds" != "$kinds" ]; then
+    subject_tail="changed"
+    changed_note="What changed: this incident opened at ${prev_since} with [${prev_kinds%,}] and now reads [${kinds%,}].
+A new kind of problem appeared during an open incident, which is exactly the
+case the old once-per-incident rule stayed silent through.
+
+"
+  else
+    subject_tail=""
+    changed_note=""
+  fi
+
+  if [ -n "$subject_tail" ]; then
     if [ "$in_repo" = "1" ]; then
       gitstatus=$(git status -b --porcelain 2>&1)
       loglines=$(tail -n 5 witness.log 2>&1)
@@ -247,8 +291,8 @@ if [ -n "$problems" ]; then
       gitstatus="(no checkout)"
       loglines="(no checkout)"
     fi
-    if send "${WLABEL} needs attention on ${HOST}" \
-"$problems
+    if send "${WLABEL} ${subject_tail} on ${HOST}" \
+"${changed_note}$problems
 --- git status ---
 $gitstatus
 
@@ -260,9 +304,12 @@ Repair for the UNPUSHED/DIVERGED case:
 Rebase, not merge: the log's linearity is a published property of this row.
 Nothing public is rewritten — unpushed commits have never left this machine.
 
-This alert is sent once per incident and once on recovery."
+This alert is sent once per DISTINCT incident -- again if the set of problem
+kinds changes -- and once on recovery."
     then
-      date -u +%FT%TZ > "$STATE"
+      # Keep the ORIGINAL opening time across a "changed" mail: the incident did
+      # not restart, it grew, and "down since" should say when it began.
+      printf 'since=%s\nkinds=%s\n' "${prev_since:-$(date -u +%FT%TZ)}" "$kinds" > "$STATE"
     else
       note_send_failure "the incident alert" "$?"
     fi
@@ -272,7 +319,8 @@ else
     if send "${WLABEL} recovered on ${HOST}" \
 "Publishing again. Nothing outstanding.
 
-Down since: $(cat "$STATE")
+Down since: ${prev_since:-unknown}
+Was:        [${prev_kinds%,}]
 Now:        $(date -u +%FT%TZ)
 origin/main $(git rev-parse --short origin/main 2>&1)
 newest      ${newest:-unknown}"
