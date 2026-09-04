@@ -177,7 +177,7 @@ be deployed byte-identical to the copy here. Requires `git`, `msmtp`, `date`
 ## Checking it yourself
 
 ```sh
-sh tests/gate.sh      # 58 assertions against the gate
+sh tests/gate.sh      # 60 assertions against the gate
 sh tests/mutants.sh   # breaks the gate fourteen ways and requires the suite to notice
 shellcheck tests/*.sh tests/stub-curl 1f916-gate witness-alert.sh
 ```

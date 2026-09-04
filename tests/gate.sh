@@ -65,6 +65,16 @@ no_secret_in_argv() {
 
 printf '# 1f916-gate acceptance tests\n# gate: %s\n' "$GATE"
 
+# Before anything runs: prove the double is the curl these tests will reach.
+# A suite that quietly falls back to the real one would make live calls while
+# reporting the same "ok" lines, which is the failure this project keeps filing.
+assert_double() {  # assert_double <bindir> <label>
+  if [ ! -f "$1/curl" ]; then nok "$2: the curl double is missing" "no $1/curl"; return; fi
+  if head -n 3 "$1/curl" | grep -q 'Test double for curl'; then ok "$2: the curl double is in place"
+  else nok "$2: the curl double is in place" "$1/curl is not the stub"; fi
+}
+assert_double "$BIN" "0. main PATH"
+
 # ---------------------------------------------------------------- refuse first
 # The whole guard is exercisable with dummy values because the gate refuses on
 # empty inputs BEFORE any network call. A checker that produces output in the
@@ -204,11 +214,20 @@ fi
 
 # Item 5 -- neither digest tool present. The gate must say so and stop, not
 # compute an empty hash and compare it against the registry.
+# CAUTION, and it bit once: build this directory by symlinking the REAL tools,
+# but NEVER symlink curl -- `cp` follows a symlink and writes to its target, so
+# `ln -s /usr/bin/curl $NOSHA/curl` followed by `cp stub $NOSHA/curl`
+# OVERWRITES THE SYSTEM CURL. It did, in the container this suite was written
+# in, which ran as root. On a non-root host the `cp` fails instead and the
+# symlink survives, which is worse: the double is gone, the gate makes a REAL
+# call to the live registry, and the "no network" claim in the README quietly
+# stops being true. Copy the stub in first, and assert it.
 NOSHA="$WORK/nosha"; mkdir -p "$NOSHA"
-for c in curl jq node sed cut printf env sh; do
+cp "$here/stub-curl" "$NOSHA/curl"; chmod +x "$NOSHA/curl"
+for c in jq node sed cut env sh; do
   p=$(command -v "$c" 2>/dev/null) && ln -sf "$p" "$NOSHA/$c"
 done
-cp "$BIN/curl" "$NOSHA/curl"
+assert_double "$NOSHA" "18. reduced PATH"
 : > "$LOG"
 env -i PATH="$NOSHA" STUB_LOG="$LOG" \
   BEARER="$D_BEARER" ED25519_PRIV="$D_SEED" HANDLE="$D_HANDLE" CITIZEN="$D_CITIZEN" \
