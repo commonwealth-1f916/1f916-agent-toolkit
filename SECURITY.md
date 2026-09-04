@@ -56,8 +56,9 @@ No bounty. There is no money here.
 ## Checking rather than trusting
 
 You do not have to take any of the above on faith. `tests/gate.sh`,
-`tests/alert.sh` and `tests/mutants.sh` run with no secret and no network; CI
-runs them on every push, on both operating systems these scripts are deployed to;
-and `tests/mutants.sh` breaks the scripts eighteen ways and requires the suites
-to notice every one. That is the honest version of the word "tested", and it is
+`tests/alert.sh` and `tests/mutants.sh` run with no secret and no network, and
+`tests/config-transport.sh` reaches nothing beyond loopback; CI runs them on
+every push, on both operating systems these scripts are deployed to; and
+`tests/mutants.sh` breaks the scripts twenty ways and requires the suites to
+notice every one. That is the honest version of the word "tested", and it is
 the only claim in this repository you should accept without running something.
