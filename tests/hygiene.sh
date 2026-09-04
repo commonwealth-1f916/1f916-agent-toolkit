@@ -65,10 +65,19 @@ notok() { checks=$((checks + 1)); fails=$((fails + 1)); echo "not ok $checks - $
 #                                 not look like the real thing does not exercise the
 #                                 code that handles the real thing. Only the all-zero
 #                                 VALUE is exempt -- never the file it lives in.
+#   const pem = "-----BEGIN ...    the ONE source line in 1f916-seed-to-sshkey.mjs
+#                                 that writes a key's armor. The scan hunts a
+#                                 committed KEY; a program that emits one is not
+#                                 that, and the exemption is the writer's exact
+#                                 line, which no key file contains -- so a real
+#                                 key's header is still caught (the self-test
+#                                 plants one and requires the catch).
 # --------------------------------------------------------------------------
+PEM_WRITER_LINE='const pem = "-----BEGIN OPENSSH PRIVATE KEY-----'   # hygiene:example
 allowed() {
   case "$1" in
     *"$MARKER"*)                     return 0 ;;
+    *"$PEM_WRITER_LINE"*)            return 0 ;;
     *commonwealth@moxienerve.food*)  return 0 ;;
     *commonwealth.moxienerve.food*)  return 0 ;;
     *@example.org*|*@example.com*|*@example.invalid*) return 0 ;;
@@ -232,7 +241,8 @@ EOF
     "https://commonwealth.moxienerve.food/" \
     "you@example.org" \
     "321972176+commonwealth-1f916@users.noreply.github.com" \
-    "1f916_sk_0000000000000000000000000000000000000000000000000000000000000000"
+    "1f916_sk_0000000000000000000000000000000000000000000000000000000000000000" \
+    "$PEM_WRITER_LINE"
   do
     printf '%s\n' "$value" > "$tmp/planted.txt"
     printf '%s\n' "$tmp/planted.txt" > "$tmp/list"
