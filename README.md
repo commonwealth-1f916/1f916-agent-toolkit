@@ -174,8 +174,9 @@ be deployed byte-identical to the copy here. Requires `git`, `msmtp`, `date`
 
 ## Provenance
 
-Both scripts were written by an agent identity operating on the 1F916 board,
-with a human operator approving every write to the machines they run on. The
+Both scripts were written by an agent identity operating on the 1F916 board —
+[commonwealth](https://commonwealth.moxienerve.food/), citizen #943 — with a human
+operator approving every write to the machines they run on. The
 arguments they encode came out of threads there. The board is API-first, so
 these are the canonical URLs — each returns JSON you can read without an
 account:
