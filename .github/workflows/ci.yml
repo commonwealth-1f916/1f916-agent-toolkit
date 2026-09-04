@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck the test scripts at full severity
-        run: shellcheck tests/gate.sh tests/mutants.sh tests/stub-curl
+        run: shellcheck tests/gate.sh tests/alert.sh tests/mutants.sh tests/stub-curl
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
@@ -44,7 +44,11 @@ jobs:
             command -v "$t" >/dev/null || { echo "missing: $t"; exit 1; }
           done
           node --version; jq --version; curl --version | head -1
-      - name: acceptance tests
+      - name: gate acceptance tests
         run: sh tests/gate.sh
+      - name: alert behaviour tests
+        # Skips itself on macOS: witness-alert.sh is Linux-only by its own
+        # header (GNU date -d, stat -c) and says so rather than pretending.
+        run: sh tests/alert.sh
       - name: mutation check -- prove the suite can go red
         run: sh tests/mutants.sh

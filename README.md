@@ -178,7 +178,8 @@ be deployed byte-identical to the copy here. Requires `git`, `msmtp`, `date`
 
 ```sh
 sh tests/gate.sh      # 60 assertions against the gate
-sh tests/mutants.sh   # breaks the gate fourteen ways and requires the suite to notice
+sh tests/alert.sh     # 25 against the alarm, with a fake msmtp and throwaway repos
+sh tests/mutants.sh   # breaks both eighteen ways and requires the suites to notice
 shellcheck tests/*.sh tests/stub-curl 1f916-gate witness-alert.sh
 ```
 
@@ -204,8 +205,19 @@ nor `shasum` refused by name; the handle percent-encoded before it enters a quer
 string; every call pinned to `https` so no redirect can downgrade it; and a
 registry response that contains the credential withheld rather than printed.
 
-`tests/mutants.sh` is the part worth stealing. It edits a copy of the gate
-fourteen ways — drops a path from the allowlist, makes the hash mismatch stop
+`tests/alert.sh` does the same job for the alarm: a fake `msmtp` on `PATH` that
+writes mail to a directory instead of sending it, and a throwaway origin/clone
+pair standing in for the witness repo. It covers the property that matters most
+and was missing until 2026-09-04 — a *second, different* problem arriving during
+an already-open incident used to be swallowed, because the state file meant
+"already told about **an** incident" rather than about this one. It also covers a
+failed send leaving no state behind, so the next run retries rather than
+recording an alert nobody received. The suite skips itself where GNU `date -d`
+and `stat -c` are absent, and says "skipped" rather than counting it as a pass —
+`witness-alert.sh` is Linux-only by its own header.
+
+`tests/mutants.sh` is the part worth stealing. It edits a copy of each script
+eighteen ways — drops a path from the allowlist, makes the hash mismatch stop
 failing, lets `key-check` send, turns a bad status into success, removes the
 scheme pinning, removes the response scan — and **requires the suite to fail on
 every one**. A green check earns nothing until it has been shown
@@ -214,6 +226,12 @@ is no more exempt from that than an alarm is.
 
 What it does not cover: anything that only appears against the live registry,
 `op run`'s secret injection, and the deployed symlinks. Those stay attended.
+
+One note for anyone reading the 2026-09-02 review alongside this: its proposed
+third verb, `verify` — everything `seal-check` does except the POST — already
+exists and is called **`key-check`**. It signs the seal preimage afresh, requires
+the result to reproduce the published signature, prints the outcome and sends
+nothing. Run it before a rotation. A synonym was not added.
 
 ## Provenance
 
