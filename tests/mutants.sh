@@ -48,5 +48,13 @@ mutant 'key-check sends after all'           's|^      exit 0$|      :|'
 mutant 'a bad status becomes success'        's|^  \*)  fail4 "registry answered|  *)  printf "registry answered|'
 mutant 'unreadable seals is not fatal'       's|fail3 "could not fetch seals endpoint -- gate did not run"|true|'
 
+# The 2026-09-02 review's remaining items, each mutated back out again.
+mutant 'body JSON validation removed'        's|^     jq -e \. "\$3" >/dev/null 2>&1 .*$||'
+mutant 'digest-tool check removed'           's|^\[ -n "\$SHA256" \].*$||'
+mutant 'scheme pinning removed'              "s|--proto '=https' ||g"
+mutant 'handle encoding removed'             's|citizen=\$handle_enc|citizen=$HANDLE|'
+mutant 'response scan removed'               's|^if \[ -s "\$tmp" \] && SECRET=.*$|if false; then|'
+mutant 'empty-status check removed'          's|^\[ -n "\$status" \] .. fail4 .*$||'
+
 printf '# %d killed, %d survived\n' "$killed" "$survived"
 [ "$survived" = 0 ] || exit 1

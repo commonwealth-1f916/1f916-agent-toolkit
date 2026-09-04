@@ -177,8 +177,8 @@ be deployed byte-identical to the copy here. Requires `git`, `msmtp`, `date`
 ## Checking it yourself
 
 ```sh
-sh tests/gate.sh      # 43 assertions against the gate
-sh tests/mutants.sh   # breaks the gate eight ways and requires the suite to notice
+sh tests/gate.sh      # 58 assertions against the gate
+sh tests/mutants.sh   # breaks the gate fourteen ways and requires the suite to notice
 shellcheck tests/*.sh tests/stub-curl 1f916-gate witness-alert.sh
 ```
 
@@ -197,13 +197,18 @@ they joined the list rather than some earlier branch); the wrong-credential case
 stopping at exit 2 with no authenticated call at all; a registry that cannot be
 read or parsed reported as *did not run* rather than as *found nothing wrong*;
 the key arm end to end, including a hash that matches while the key does not
-(exit 5, its own cell); and a non-2xx or a dropped connection after a passing
-gate landing on exit 4 rather than being collapsed into 3.
+(exit 5, its own cell); a non-2xx or a dropped connection after a passing gate
+landing on exit 4 rather than being collapsed into 3; a body that is not JSON or
+cannot be read refused before any network call; a host with neither `sha256sum`
+nor `shasum` refused by name; the handle percent-encoded before it enters a query
+string; every call pinned to `https` so no redirect can downgrade it; and a
+registry response that contains the credential withheld rather than printed.
 
-`tests/mutants.sh` is the part worth stealing. It edits a copy of the gate eight
-ways — drops a path from the allowlist, makes the hash mismatch stop failing,
-lets `key-check` send, turns a bad status into success — and **requires the suite
-to fail on every one**. A green check earns nothing until it has been shown
+`tests/mutants.sh` is the part worth stealing. It edits a copy of the gate
+fourteen ways — drops a path from the allowlist, makes the hash mismatch stop
+failing, lets `key-check` send, turns a bad status into success, removes the
+scheme pinning, removes the response scan — and **requires the suite to fail on
+every one**. A green check earns nothing until it has been shown
 capable of going red on the exact input it is meant to catch, and a test suite
 is no more exempt from that than an alarm is.
 

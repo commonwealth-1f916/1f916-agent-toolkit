@@ -182,5 +182,78 @@ else
   unset STUB_NET_FAIL
 fi
 
+# ------------------------------------------- the 2026-09-02 review's remainder
+# Every assertion below was watched go red against the gate as it stood before
+# the change that added it; tests/mutants.sh keeps that true.
+
+# Item 4 -- a body the gate can see but cannot use.
+printf 'this is not json' > "$WORK/notjson.json"
+unset STUB_SEALS
+run 3 "16. a body file that is not JSON is refused before any network call" post /api/comment "$WORK/notjson.json"
+saw "not valid JSON" "16. and says so rather than letting the registry say 400"
+no_calls "16. and no network call was made"
+
+if [ "$(id -u)" = "0" ]; then
+  printf '# running as root: skipping the unreadable-body test, since root ignores the mode\n'
+else
+  cp "$WORK/real-body.json" "$WORK/noread.json"; chmod 000 "$WORK/noread.json"
+  run 3 "17. an unreadable body file is refused" post /api/comment "$WORK/noread.json"
+  saw "not readable" "17. and distinguishes unreadable from absent"
+  chmod 644 "$WORK/noread.json"
+fi
+
+# Item 5 -- neither digest tool present. The gate must say so and stop, not
+# compute an empty hash and compare it against the registry.
+NOSHA="$WORK/nosha"; mkdir -p "$NOSHA"
+for c in curl jq node sed cut printf env sh; do
+  p=$(command -v "$c" 2>/dev/null) && ln -sf "$p" "$NOSHA/$c"
+done
+cp "$BIN/curl" "$NOSHA/curl"
+: > "$LOG"
+env -i PATH="$NOSHA" STUB_LOG="$LOG" \
+  BEARER="$D_BEARER" ED25519_PRIV="$D_SEED" HANDLE="$D_HANDLE" CITIZEN="$D_CITIZEN" \
+  sh "$GATE" seal-check > "$OUT" 2> "$ERR"
+got=$?
+if [ "$got" = 3 ]; then ok "18. no sha256sum and no shasum -> exit 3"
+else nok "18. no sha256sum and no shasum -> exit 3" "got $got"; fi
+saw "neither sha256sum nor shasum" "18. and names what is missing"
+no_calls "18. and made no network call"
+
+# Item 6 -- a redirect must never be able to downgrade the scheme that carries
+# the bearer, and the handle must not go into a query string raw.
+STUB_SEALS="$WORK/seals-wrong.json"; export STUB_SEALS
+run 2 "19. still stops at the compare (setup for the flag checks)" seal-check
+if grep -q -- "--proto" "$LOG"; then ok "19. curl was called with --proto"
+else nok "19. curl was called with --proto" "no --proto in: $(head -1 "$LOG")"; fi
+if grep -q -- "<=https>" "$LOG"; then ok "19. and the scheme is pinned to https"
+else nok "19. and the scheme is pinned to https" "$(head -1 "$LOG")"; fi
+
+: > "$LOG"
+PATH="$BIN:$PATH" STUB_LOG="$LOG" \
+  BEARER="$D_BEARER" ED25519_PRIV="$D_SEED" HANDLE='a b/c' CITIZEN="$D_CITIZEN" \
+  sh "$GATE" seal-check > "$OUT" 2> "$ERR"
+if grep -q 'citizen=a%20b%2Fc' "$LOG"; then ok "20. a handle with reserved characters is percent-encoded"
+else nok "20. a handle with reserved characters is percent-encoded" "$(head -1 "$LOG")"; fi
+
+# Item 3 -- the registry's response is scanned before it is printed. The old
+# comment justified printing it with a claim about what the far side does.
+if [ -n "$sig" ]; then
+  STUB_SEALS="$WORK/seals-good.json"; export STUB_SEALS
+  printf '{"ok":true,"echo":"%s"}' "$D_BEARER" > "$WORK/leaky.json"
+  STUB_BODY="$WORK/leaky.json"; export STUB_BODY
+  run 4 "21. a response containing the credential is withheld" seal-check
+  saw "response withheld" "21. and says why"
+  if grep -qF -- "$D_BEARER" "$OUT" "$ERR"
+  then nok "21. and the credential itself is not printed" "the gate printed it"
+  else ok "21. and the credential itself is not printed"; fi
+  unset STUB_BODY
+
+  # Item 8 -- curl succeeding while printing no status at all.
+  STUB_NO_STATUS=1; export STUB_NO_STATUS
+  run 4 "22. no HTTP status after a passing gate is named, not fallen through" seal-check
+  saw "no HTTP status" "22. and says which fact is missing"
+  unset STUB_NO_STATUS
+fi
+
 printf '# %d tests, %d passed, %d failed\n' "$n" "$pass" "$fail"
 [ "$fail" = 0 ] || exit 1

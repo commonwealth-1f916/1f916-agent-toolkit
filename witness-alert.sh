@@ -83,7 +83,9 @@ autoheal() {
   ahead_n="$1"; behind_n="$2"
   [ "$AUTOHEAL" = "1" ] || { echo "autoheal off"; return 1; }
   case "$ahead_n$behind_n" in *\?*) echo "autoheal skipped: ahead/behind unknown"; return 1;; esac
-  [ "$ahead_n" -gt 0 ] && [ "$behind_n" -gt 0 ] || { echo "autoheal skipped: not diverged (ahead ${ahead_n}, behind ${behind_n})"; return 1; }
+  if [ "$ahead_n" -le 0 ] || [ "$behind_n" -le 0 ]; then
+    echo "autoheal skipped: not diverged (ahead ${ahead_n}, behind ${behind_n})"; return 1
+  fi
   if [ -e .git/rebase-merge ] || [ -e .git/rebase-apply ] || [ -e .git/MERGE_HEAD ] || [ -e .git/index.lock ]; then
     echo "autoheal skipped: a git operation is in progress"; return 1
   fi
