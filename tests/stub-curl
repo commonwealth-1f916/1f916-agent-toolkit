@@ -12,6 +12,9 @@
 #   STUB_STATUS    http_code to print for an authenticated call (default 201)
 #   STUB_BODY      file whose contents become the response body written to -o
 #   STUB_NET_FAIL  non-empty -> exit 7 on an authenticated call (curl's connect failure)
+#   STUB_NO_STATUS non-empty -> succeed but print no http_code at all, which
+#                  real curl can do and which the gate used to treat as a
+#                  wildcard fall-through that happened to land on exit 4
 {
   printf 'CALL'
   for a in "$@"; do printf ' <%s>' "$a"; done
@@ -41,5 +44,6 @@ if [ -n "${STUB_BODY:-}" ] && [ -f "${STUB_BODY}" ]; then
 else
   printf '{"ok":true,"id":1}' > "$out"
 fi
+[ -n "${STUB_NO_STATUS:-}" ] && exit 0
 printf '%s' "${STUB_STATUS:-201}"
 exit 0

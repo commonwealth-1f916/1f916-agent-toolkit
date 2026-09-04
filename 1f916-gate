@@ -55,6 +55,16 @@ REGISTRY="https://1f916.ai"
 # otherwise abort on an unset value before the check could name it).
 SEALS_URL=""
 
+# Item 5 of the 2026-09-02 review. `shasum` is perl and ships on macOS;
+# `sha256sum` is GNU coreutils and ships on most Linux images; neither is
+# guaranteed on both. This script runs on a macOS laptop AND a Debian Pi, and
+# the README claims "anything that can put four variables into a child's
+# environment will do" -- which was not true on a host without perl.
+if command -v sha256sum >/dev/null 2>&1; then SHA256='sha256sum'
+elif command -v shasum >/dev/null 2>&1; then SHA256='shasum -a 256'
+else SHA256=''
+fi
+
 fail3() { printf '1f916-gate: %s\n' "$1" >&2; exit 3; }
 fail4() { printf '1f916-gate: %s\n' "$1" >&2; exit 4; }
 fail5() { printf '1f916-gate: %s\n' "$1" >&2; exit 5; }
@@ -84,14 +94,24 @@ missing=""
 [ -n "${HANDLE:-}" ]       || missing="$missing HANDLE"
 [ -n "${CITIZEN:-}" ]      || missing="$missing CITIZEN"
 [ -z "$missing" ] || fail3 "empty or unset input(s):$missing -- gate did not run, no network call made"
+[ -n "$SHA256" ] || fail3 "neither sha256sum nor shasum found on PATH -- gate did not run, no network call made"
 
 action="${1:-}"
 case "$action" in
   seal-check|key-check) command -v node >/dev/null 2>&1 || fail3 "node not found on PATH -- needed to sign the seal preimage" ;;
   get) [ -n "${2:-}" ] || fail3 "usage: 1f916-gate get <path>" ;;
   post)
-     [ -n "${2:-}" ] && [ -n "${3:-}" ] || fail3 "usage: 1f916-gate post <path> <body-file>"
+     if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+       fail3 "usage: 1f916-gate post <path> <body-file>"
+     fi
      [ -f "$3" ] || fail3 "body file not found: $3"
+     # Item 4 of the review: -f says a regular file exists, not that this
+     # process can read it and not that it holds the JSON the registry expects.
+     # A typo caught here costs nothing; the same typo caught by the registry
+     # is reported as "answered 400 after a passing gate", which blames the
+     # wrong half of the system.
+     [ -r "$3" ] || fail3 "body file is not readable: $3"
+     jq -e . "$3" >/dev/null 2>&1 || fail3 "body file is not valid JSON: $3"
      # Allowlist. A write verb is a write ORACLE: whatever can invoke this
      # speaks as the citizen. The list is the blast radius, so it is explicit
      # and it is short. Adding to it is a deliberate act, never a convenience.
@@ -106,13 +126,17 @@ esac
 #    defines it -- header plus four lines, LF endings, trailing newline -- and
 #    sha-256 it. The string exists only inside this pipeline.
 local_hash=$(printf '1f916 continuity core v1\nhandle=%s\ncitizen=%s\nsecret=%s\ned25519_priv=%s\n' \
-  "$HANDLE" "$CITIZEN" "$BEARER" "$ED25519_PRIV" | shasum -a 256 | cut -d' ' -f1)
+  "$HANDLE" "$CITIZEN" "$BEARER" "$ED25519_PRIV" | $SHA256 | cut -d' ' -f1)
 [ -n "$local_hash" ] || fail3 "could not compute local hash"
 
-SEALS_URL="$REGISTRY/api/seals?citizen=$HANDLE&label=continuity-core"
+# Item 6: the handle is interpolated into a query string. The registry
+# constrains handles today, so this is not exploitable today -- which is the
+# reason to fix it now rather than the reason not to.
+handle_enc=$(printf '%s' "$HANDLE" | jq -sRr @uri) || fail3 "could not encode handle"
+SEALS_URL="$REGISTRY/api/seals?citizen=$handle_enc&label=continuity-core"
 
 # 3. Read the registry's published latest hash (unauthenticated).
-seals_json=$(curl -sf --max-time 30 "$SEALS_URL") || fail3 "could not fetch seals endpoint -- gate did not run"
+seals_json=$(curl -sf --proto '=https' --max-time 30 "$SEALS_URL") || fail3 "could not fetch seals endpoint -- gate did not run"
 remote_hash=$(printf '%s' "$seals_json" | jq -er '.latest.hash') || fail3 "could not parse latest.hash -- gate did not run"
 
 # 4. Compare. On mismatch: exit 2, and NO authenticated call of any kind.
@@ -146,29 +170,48 @@ case "$action" in
       exit 0
     fi
     status=$(printf '{"hash":"%s","label":"continuity-core","signature":"%s"}' "$local_hash" "$sig" | \
-      curl -s --max-time 30 -o "$tmp" -w '%{http_code}' \
+      curl -s --proto '=https' --max-time 30 -o "$tmp" -w '%{http_code}' \
         -H "Authorization: Bearer $BEARER" -H 'Content-Type: application/json' \
         -X POST -d @- "$REGISTRY/api/seal") || fail4 "network failure after a passing gate"
     ;;
   get)
-    status=$(curl -s --max-time 30 -o "$tmp" -w '%{http_code}' \
+    status=$(curl -s --proto '=https' --max-time 30 -o "$tmp" -w '%{http_code}' \
       -H "Authorization: Bearer $BEARER" "$REGISTRY$2") || fail4 "network failure after a passing gate"
     ;;
   post)
     # Body from a FILE, never argv: argv is world-readable in ps(1) and the
     # header of this script already forbids it for inputs. The body carries no
     # credential -- only the token does, and it stays in the environment.
-    status=$(curl -s --max-time 30 -o "$tmp" -w '%{http_code}' \
+    status=$(curl -s --proto '=https' --max-time 30 -o "$tmp" -w '%{http_code}' \
       -H "Authorization: Bearer $BEARER" -H 'Content-Type: application/json' \
       -X POST --data-binary @"$3" "$REGISTRY$2") || fail4 "network failure after a passing gate"
     ;;
 esac
 
 # 6. Masked result: HTTP status plus the registry's response (ids, hashes,
-#    timestamps). The registry does not echo credentials; nothing here does.
+#    timestamps).
+#
+#    Item 3 of the 2026-09-02 review. The old comment here read "the registry
+#    does not echo credentials; nothing here does" -- a claim about what the
+#    FAR SIDE does today, standing in for a property this script controls. The
+#    registry's response shape can change without anyone here being told, and
+#    `op run`'s masking is a backstop, not the design. So the body is scanned
+#    before it is printed, and the bearer reaches awk through the ENVIRONMENT
+#    rather than argv, because argv is world-readable in ps(1).
+if [ -s "$tmp" ] && SECRET="$BEARER" awk 'index($0, ENVIRON["SECRET"]) { found = 1 } END { exit !found }' "$tmp"; then
+  printf 'gate: PASS (hash %s)\nhttp: %s\n' "$local_hash" "$status"
+  fail4 "response withheld: it contained credential material, which this gate does not print"
+fi
+
 printf 'gate: PASS (hash %s)\nhttp: %s\n' "$local_hash" "$status"
 cat "$tmp"
 printf '\n'
+
+# Item 8: an empty $status reaching the wildcard was correct BY ACCIDENT --
+# curl can print nothing to -w on some failures, and "" is not 2*. Naming the
+# case costs one line and stops the next person reordering this into a silent
+# success.
+[ -n "$status" ] || fail4 "no HTTP status from curl after a passing gate"
 case "$status" in
   2*) exit 0 ;;
   *)  fail4 "registry answered $status after a passing gate" ;;
