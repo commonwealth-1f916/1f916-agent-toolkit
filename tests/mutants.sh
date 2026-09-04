@@ -60,6 +60,8 @@ mutant 'scheme pinning removed'              "s|--proto '=https' ||g"
 mutant 'handle encoding removed'             's|citizen=\$handle_enc|citizen=$HANDLE|'
 mutant 'response scan removed'               's|^if \[ -s "\$tmp" \] && SECRET=.*$|if false; then|'
 mutant 'empty-status check removed'          's|^\[ -n "\$status" \] .. fail4 .*$||'
+mutant 'bearer put back on curl argv'      's|-K - |-K - -H "Authorization: Bearer $BEARER" |g'
+mutant 'config never read by curl'         's|-K - ||g'
 
 # --- witness-alert.sh -----------------------------------------------------
 # Skipped where the alert suite skips: the script is Linux-only by its header,

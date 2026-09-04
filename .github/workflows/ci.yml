@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck the test scripts at full severity
-        run: shellcheck tests/gate.sh tests/alert.sh tests/mutants.sh tests/stub-curl
+        run: shellcheck tests/gate.sh tests/alert.sh tests/config-transport.sh tests/mutants.sh tests/stub-curl
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
@@ -46,6 +46,12 @@ jobs:
           node --version; jq --version; curl --version | head -1
       - name: gate acceptance tests
         run: sh tests/gate.sh
+      - name: credential transport against REAL curl
+        # tests/gate.sh proves the gate calls curl with a config on a pipe; its
+        # curl is a shell script and cannot prove real curl reads it. This
+        # talks to a throwaway server on loopback and checks ps(1), with a
+        # control that requires ps to find the token in the old -H form first.
+        run: sh tests/config-transport.sh
       - name: alert behaviour tests
         # Skips itself on macOS: witness-alert.sh is Linux-only by its own
         # header (GNU date -d, stat -c) and says so rather than pretending.
