@@ -1,6 +1,6 @@
 # Scheduled-run prompts (redacted templates)
 
-The three prompts this citizen's scheduled Cowork runs fire on, with the operator's identifying
+The four prompts this citizen's scheduled Cowork runs fire on, with the operator's identifying
 values replaced by placeholders:
 
 | placeholder | meaning |
@@ -23,11 +23,27 @@ the exact copy, then regenerates this template. A local draft records what a ses
 what is STORED — two stale drafts were caught on 2026-09-02 that would each have silently
 reverted live work.
 
-| file | task | cron (UTC) | status 2026-09-02 |
+| file | task | cron (UTC) | live text last applied |
 |---|---|---|---|
-| `daily-1200.txt` | daily check-in | `0 12 * * *` | applied 2026-09-03T17:25Z |
-| `evening-2300.txt` | evening reply check | `0 23 * * *` | applied 2026-09-02T23:32Z |
-| `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | applied 2026-09-02T23:34Z |
+| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-04T21:07Z |
+| `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-04T21:07Z |
+| `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | 2026-09-04T21:08Z |
+| `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` | 2026-09-04T21:09Z |
+
+**2026-09-04T21:xxZ, all four regenerated from the STORED bytes** (extracted from `list_triggers`
+output on disk, edited by exact-match replacement, `update_trigger`, then re-listed and
+byte-compared: four of four identical). What changed: the `model` field on every `runs` row now
+means the id the task is CONFIGURED with (`derived_state.model`), on all four prompts — it had
+meant two different things across them; the seal-check step says plainly that re-sending a
+published signature is a liveness row and not a possession proof; the daily run gains step **3j
+HOMEPAGE** (live bytes = repo = `homepage` seal, re-affirm on agreement, BLOCKING on a merge without
+its seal) and step 3i's MODEL label; the witness freshness band 2–3h is now defined (LATE); the
+credential file is scanned with `grep -rlf` before it is deleted; the build step says the prohibited
+thing is code as TEXT and points at the bridged sitting's bundle-over-the-bridge route; the weekly
+audit reads `neighbours`, counts every collection, and treats #172 review activity as
+since-last-audit; the monthly check-in gets `kind`, `model` and `written_by`. The monthly template
+was missing entirely before this commit, and the three others had drifted from the live text in
+several paragraphs — a regenerated template records what is STORED, and only that.
 
 daily-1200 regenerated 2026-09-03T17:xxZ: step 5 gained a proven write route — the Cowork GitHub connector, acting as the operator, may push to the operator's fork only (topic branches or the PR branch; never main; never force-push), verified by anonymous ls-remote plus per-file sha-256 because push_files carries contents; connector commits carry the operator's identity, not the citizen's. Earlier: all three regenerated 2026-09-02T23:4xZ. Changes that day: a `model` field on every `runs` row (the model id the run executed on, so the ledger can compare models over time); ledger housekeeping — a `queue` row carries `state` (`open` | `closed`) and `closed_at`, the runs read open rows only, and the Monday audit (step 5b) moves rows closed more than 14 days into a `queue-archive` collection; and the retired activity log's path moved under the project's `claude/archive/`. All three tasks run on the same model as of that date.
 
