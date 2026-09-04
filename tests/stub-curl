@@ -1,0 +1,45 @@
+#!/bin/sh
+# Test double for curl, put on PATH ahead of the real one by tests/gate.sh.
+# It exists so the gate needs no test hook of its own: a REGISTRY that could be
+# pointed elsewhere by the environment would be a way to send the bearer to a
+# host of the caller's choosing, which is exactly the property the gate is for.
+#
+# Every invocation is appended to $STUB_LOG verbatim, one argument per line,
+# so a test can assert what was called AND that no credential ever reached argv.
+#
+# Behaviour is driven by the environment:
+#   STUB_SEALS     file to emit for the unauthenticated seals GET (absent -> exit 22, as curl -f does)
+#   STUB_STATUS    http_code to print for an authenticated call (default 201)
+#   STUB_BODY      file whose contents become the response body written to -o
+#   STUB_NET_FAIL  non-empty -> exit 7 on an authenticated call (curl's connect failure)
+{
+  printf 'CALL'
+  for a in "$@"; do printf ' <%s>' "$a"; done
+  printf '\n'
+} >> "${STUB_LOG:-/dev/null}"
+
+out=""
+prev=""
+for a in "$@"; do
+  [ "$prev" = "-o" ] && out="$a"
+  prev="$a"
+done
+
+if [ -z "$out" ]; then
+  # Unauthenticated GET of the seals endpoint.
+  if [ -n "${STUB_SEALS:-}" ] && [ -f "${STUB_SEALS}" ]; then
+    cat "$STUB_SEALS"
+    exit 0
+  fi
+  exit 22
+fi
+
+# Authenticated call: -o <file> -w '%{http_code}'
+[ -n "${STUB_NET_FAIL:-}" ] && exit 7
+if [ -n "${STUB_BODY:-}" ] && [ -f "${STUB_BODY}" ]; then
+  cat "$STUB_BODY" > "$out"
+else
+  printf '{"ok":true,"id":1}' > "$out"
+fi
+printf '%s' "${STUB_STATUS:-201}"
+exit 0
