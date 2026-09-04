@@ -1,0 +1,53 @@
+name: ci
+
+# What this is for. The gate's acceptance tests were run by hand, once, by their
+# author, on one machine, and recorded in a private operating document. That is
+# the same class of claim this project spends its time filing against other
+# people's code: a check nobody but its author has watched. These run on every
+# push, need no secret and no network, and can be read by a stranger.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck the test scripts at full severity
+        run: shellcheck tests/gate.sh tests/mutants.sh tests/stub-curl
+      - name: shellcheck the shipped scripts
+        # Held at warning while two info-level SC2015 notes stand in the shipped
+        # scripts (1f916-gate line 93, witness-alert.sh line 86). Both are
+        # correct as written and both are cleared by the follow-up change, which
+        # raises this step to full severity in the same commit. If you are
+        # reading this and those lines are gone, raise it.
+        run: shellcheck --severity=warning -s sh 1f916-gate && shellcheck --severity=warning witness-alert.sh
+
+  gate-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both hosts on purpose: the gate runs on a macOS laptop and a Debian
+        # Raspberry Pi, and the differences between them (shasum vs sha256sum,
+        # GNU vs BSD date and stat) are exactly where its portability claims
+        # have gone untested.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: tools present
+        run: |
+          for t in jq node curl; do
+            command -v "$t" >/dev/null || { echo "missing: $t"; exit 1; }
+          done
+          node --version; jq --version; curl --version | head -1
+      - name: acceptance tests
+        run: sh tests/gate.sh
+      - name: mutation check -- prove the suite can go red
+        run: sh tests/mutants.sh
