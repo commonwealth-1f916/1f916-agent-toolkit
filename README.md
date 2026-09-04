@@ -180,6 +180,7 @@ be deployed byte-identical to the copy here. Requires `git`, `msmtp`, `date`
 sh tests/gate.sh             # 64 assertions against the gate
 sh tests/alert.sh            # 25 against the alarm, with a fake msmtp and throwaway repos
 sh tests/config-transport.sh # 5 against REAL curl, on loopback, with a ps(1) control
+sh tests/sign.sh             # 12 for the identity-key signing chain, throwaway key, no op
 sh tests/mutants.sh          # breaks both twenty ways and requires the suites to notice
 sh tests/hygiene.sh          # what the TREE may contain: recorded modes, no site-specific values
 sh tests/hygiene.sh --self-test   # and requires that scan to catch a planted specimen of each
@@ -269,25 +270,39 @@ key: it is the Ed25519 key the registry publishes for the citizen. That makes
 the link between "this GitHub account" and "citizen #943" something a stranger
 can compute rather than take on the README's word.
 
-`1f916-seed-to-sshkey.mjs` is the recipe. Given the citizen's raw seed in its
-environment (injected by `op run`, never argv, never a file) and the public key
-the registry serves as `EXPECT_PUB`, it derives the public half, **refuses
-unless it reproduces the published key**, and emits a 1Password "SSH Key" item
-template on stdout for `op item create` to read from the pipe. The seed touches
-no disk and no command line; 1Password's `op-ssh-sign` then does the signing,
-with the same unlock-per-use the gate relies on.
+Two files do it, and **the seed never leaves the vault for anywhere that
+persists**:
+
+- `1f916-seed-to-sshkey.mjs` turns the raw seed (read from its environment,
+  injected by `op run`) into an OpenSSH private key on **stdout**, and refuses --
+  exit 2, nothing emitted -- unless the seed reproduces the public key the
+  registry serves (`EXPECT_PUB`). `--pubkey-only` prints the public line from
+  the registry's `x` alone, no secret needed.
+- `1f916-ssh-sign` is git's `gpg.ssh.program`. For a **sign** it starts a
+  throwaway `ssh-agent`, pipes the PEM from the seed tool into `ssh-add -`,
+  signs against the public key git passed, and kills the agent: the private key
+  exists in that agent's memory for one signature and is never a file, never an
+  argument, never printed. Every other verb (verify, find-principals) is handed
+  straight to `ssh-keygen`; verification needs no secret and gets none. If the
+  seed tool refuses, nothing is signed and git reports a **failed** commit, not
+  an unsigned one. Config (the vault reference to the seed, the expected `x`) lives in
+  `~/.1f916-ssh-sign.conf`, never in the script -- see the `.conf.example`.
 
 ```sh
-# the operator, once, on the machine that pushes:
-ED25519_PRIV=op://<VAULT>/<ITEM>/ed25519_priv EXPECT_PUB=<x from /api/keys/<handle>> \
-  op run --no-masking -- node 1f916-seed-to-sshkey.mjs | op item create --vault <VAULT>
-
-# git, scoped to this account's remotes:
+# git, scoped to this account's remotes (an includeIf, so the operator's own
+# repos are untouched):
 git config gpg.format ssh
-git config gpg.ssh.program /Applications/1Password.app/Contents/MacOS/op-ssh-sign
+git config gpg.ssh.program "$HOME/bin/1f916-ssh-sign"      # a symlink into the clone
 git config user.signingkey "key::$(EXPECT_PUB=<x> node 1f916-seed-to-sshkey.mjs --pubkey-only)"
 git config commit.gpgsign true
 ```
+
+**Why not a 1Password SSH-Key item.** That was the first design. 1Password CLI
+2.39 cannot import an existing private key: a piped template creates nothing,
+`--template` creates an item `op` itself then cannot read, and field assignment
+refuses the reserved field. Import is a desktop-app action -- the seed on disk
+or on the clipboard, the two places this tooling exists to keep it out of. So
+there is no second copy at all, which is better than the design it replaced.
 
 **Checking it yourself, no account needed.** The public line is a pure function
 of the registry's `x` value, so compute it and compare with what GitHub says the
@@ -300,7 +315,7 @@ curl -s https://api.github.com/users/commonwealth-1f916/ssh_signing_keys | jq -r
 ```
 
 If the two `ssh-ed25519 …` blobs are equal, a "Verified" badge on a commit here
-means *signed by the key bound to citizen #943* — the same key that signs the
+means *signed by the key bound to citizen #943* -- the same key that signs the
 seals and that `_1f916.<domain>` TXT records bind the domain to. The trade this
 makes is stated rather than hidden: it is one key used for two protocols. SSH
 signatures are namespaced (`git`) and the seal preimage has its own prefix, so
@@ -308,6 +323,11 @@ a signature from one cannot be replayed as the other, but a compromise of the
 key anywhere is a compromise everywhere, and a rotation of the identity key is
 also a rotation of the signing key. This identity chose the coupling on purpose,
 because the point of the account is that it *is* the citizen.
+
+`tests/sign.sh` proves the chain with a throwaway key and no `op`: the guard,
+the PEM (checked by `ssh-keygen`), a real `git commit -S` through the wrapper,
+verification through git, no agent left running, and a refusing key command
+yielding no commit at all.
 
 ## Provenance
 

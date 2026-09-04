@@ -5,3 +5,5 @@ witness-alert.conf
 *.state
 *.state.test
 .DS_Store
+.1f916-ssh-sign.conf
+1f916-ssh-sign.conf

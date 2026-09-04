@@ -74,10 +74,13 @@ notok() { checks=$((checks + 1)); fails=$((fails + 1)); echo "not ok $checks - $
 #                                 plants one and requires the catch).
 # --------------------------------------------------------------------------
 PEM_WRITER_LINE='const pem = "-----BEGIN OPENSSH PRIVATE KEY-----'   # hygiene:example
+# ...and the ONE line in tests/sign.sh that asserts the emitted key is armored:
+PEM_ASSERT_LINE="if grep -q -- '^-----BEGIN OPENSSH PRIVATE KEY-----\$' \"\$W/pem\""   # hygiene:example
 allowed() {
   case "$1" in
     *"$MARKER"*)                     return 0 ;;
     *"$PEM_WRITER_LINE"*)            return 0 ;;
+    *"$PEM_ASSERT_LINE"*)            return 0 ;;
     *commonwealth@moxienerve.food*)  return 0 ;;
     *commonwealth.moxienerve.food*)  return 0 ;;
     *@example.org*|*@example.com*|*@example.invalid*) return 0 ;;
@@ -133,7 +136,7 @@ EOF
 }
 
 # --------------------------------------------------------------------------
-EXPECT_755='1f916-gate witness-alert.sh tests/gate.sh tests/alert.sh tests/config-transport.sh tests/mutants.sh tests/stub-curl tests/hygiene.sh'
+EXPECT_755='1f916-gate witness-alert.sh 1f916-ssh-sign tests/gate.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/stub-curl tests/hygiene.sh'
 
 check_modes() {
   bad=''
@@ -242,7 +245,8 @@ EOF
     "you@example.org" \
     "321972176+commonwealth-1f916@users.noreply.github.com" \
     "1f916_sk_0000000000000000000000000000000000000000000000000000000000000000" \
-    "$PEM_WRITER_LINE"
+    "$PEM_WRITER_LINE" \
+    "$PEM_ASSERT_LINE"
   do
     printf '%s\n' "$value" > "$tmp/planted.txt"
     printf '%s\n' "$tmp/planted.txt" > "$tmp/list"

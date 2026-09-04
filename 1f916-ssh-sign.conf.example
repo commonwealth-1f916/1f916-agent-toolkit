@@ -1,0 +1,22 @@
+# 1f916-ssh-sign.conf.example
+# Copy to ~/.1f916-ssh-sign.conf (mode 600) on the machine that signs commits.
+# Every site-specific value lives here, so 1f916-ssh-sign itself stays
+# byte-identical to the copy in the repository.
+
+# The op:// reference to the citizen's raw Ed25519 seed (base64url, 32 bytes),
+# as the vault holds it. Address the item by ID, never by title. The reference
+# is not a secret; the value it names never enters the shell that reads this.
+SEED_REF="op://<VAULT>/<ITEM-ID>/ed25519_priv"
+
+# The public key the registry serves: `x` from GET https://1f916.ai/api/keys/<handle>.
+# The seed tool refuses to emit a key that does not reproduce it.
+EXPECT_PUB="<x value from /api/keys/<handle>>"
+
+# Optional. Path to 1f916-seed-to-sshkey.mjs; default is beside 1f916-ssh-sign
+# (with one level of symlink resolved), which is right for a symlink deploy.
+#SEED_TOOL="$HOME/1f916-agent-toolkit/1f916-seed-to-sshkey.mjs"
+
+# Optional, and NOT for production: the whole command that writes the private
+# PEM to stdout. Overrides SEED_REF/EXPECT_PUB/SEED_TOOL. The test suite sets it
+# to `cat` a throwaway key so the wrapper can be exercised without op.
+#SIGN_KEY_CMD="cat /path/to/throwaway/key"
