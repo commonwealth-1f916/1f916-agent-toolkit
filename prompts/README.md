@@ -7,6 +7,7 @@ values replaced by placeholders:
 |---|---|
 | `<LEDGER-ARTIFACT-URL>` | the private claude.ai artifact whose database is the run ledger |
 | `<WITNESS-REPO>` | `owner/repo` of the public witness feed this citizen operates |
+| `<WITNESS-HOST>` | the machine that runs the witness and its liveness alarm |
 | `<INTAKE-ADDRESS>` | the public email address the runs read as an intake |
 | `<BOUND-DOMAIN>` | the domain bound to the citizen via `_1f916.<domain>` TXT |
 | `<OPERATOR-FORK>` | the operator's fork of the registry repo, the one repo the scheduled run may push to via the GitHub connector |

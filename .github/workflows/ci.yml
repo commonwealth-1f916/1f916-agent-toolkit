@@ -10,6 +10,15 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  # Weekly, because the thing most likely to break these scripts is no longer
+  # the scripts. They have stopped changing; the runners have not. The gate's
+  # portability claims are about curl, node, jq, GNU vs BSD date and stat, and
+  # bash 3.2 on macOS -- all of which move underneath a quiet repository. On
+  # push alone, a green badge on a repo nobody has touched in a month is a
+  # reading from a month ago. (GitHub disables scheduled workflows after 60
+  # days without repository activity; if this stops firing, that is why.)
+  schedule:
+    - cron: '17 6 * * 1'
 
 permissions:
   contents: read
@@ -20,11 +29,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck the test scripts at full severity
-        run: shellcheck tests/gate.sh tests/alert.sh tests/mutants.sh tests/stub-curl
+        run: shellcheck tests/gate.sh tests/alert.sh tests/mutants.sh tests/hygiene.sh tests/stub-curl
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
         run: shellcheck -s sh 1f916-gate && shellcheck witness-alert.sh
+
+  hygiene:
+    # Properties of the TREE rather than of the programs: the shipped scripts
+    # are recorded executable, and no site-specific value is tracked. Both were
+    # load-bearing claims that nothing enforced -- the first cost a deploy an
+    # exit 126 on 2026-09-02, and the second is the entire reason the config was
+    # externalised.
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both hosts, and not for the tree's sake -- the verdict is the same on
+        # either. It is this script's own portability that needs the second
+        # runner: its first draft used an empty `case` branch, which POSIX
+        # allows and shellcheck accepts and bash 3.2 on macOS rejects outright.
+        # Linux was green while the script would not parse on one of the two
+        # machines it guards.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: the scan can go red -- prove it before trusting it green
+        # FIRST, deliberately. A scanner that has been broken into always
+        # passing is indistinguishable from a clean tree, and the green tick
+        # would be the only evidence either way. This plants one specimen of
+        # every shape it claims to catch and requires a catch on all of them,
+        # then requires the deliberately-published values NOT to trip it.
+        run: sh tests/hygiene.sh --self-test
+      - name: recorded modes and no site-specific values
+        run: sh tests/hygiene.sh
 
   gate-tests:
     strategy:

@@ -180,6 +180,8 @@ be deployed byte-identical to the copy here. Requires `git`, `msmtp`, `date`
 sh tests/gate.sh      # 60 assertions against the gate
 sh tests/alert.sh     # 25 against the alarm, with a fake msmtp and throwaway repos
 sh tests/mutants.sh   # breaks both eighteen ways and requires the suites to notice
+sh tests/hygiene.sh   # what the TREE may contain: recorded modes, no site-specific values
+sh tests/hygiene.sh --self-test   # and requires that scan to catch a planted specimen of each
 shellcheck tests/*.sh tests/stub-curl 1f916-gate witness-alert.sh
 ```
 
@@ -224,8 +226,24 @@ every one**. A green check earns nothing until it has been shown
 capable of going red on the exact input it is meant to catch, and a test suite
 is no more exempt from that than an alarm is.
 
+`tests/hygiene.sh` checks the repository rather than the programs, because two
+of the claims above are properties of the tree. That the shipped scripts are
+recorded `100755` — a file authored at `0644` over a `0755` original changes
+git's recorded mode silently, and the deploy then refuses with exit 126, which
+is not a hypothetical. And that no site-specific value is tracked, which is the
+whole reason the config was externalised. It carries the same requirement as
+the rest: `--self-test` plants a specimen of every shape it hunts and demands a
+catch on each, then demands that the values this project publishes on purpose —
+the reporting address, the home page, the suite's all-zero dummy — do **not**
+trip it. An exemption is per-line, marked in the source, and confined to that
+one file by a check, so `grep -rn` lists every exemption there is.
+
 What it does not cover: anything that only appears against the live registry,
 `op run`'s secret injection, and the deployed symlinks. Those stay attended.
+Nor can the hygiene scan catch a bare hostname: credentials, keys, addresses
+and home paths have shapes, and a machine name is just a word. Two of those
+were found in the prompt templates by reading them, not by the scan, and are
+now placeholders. Redaction still needs a human.
 
 One note for anyone reading the 2026-09-02 review alongside this: its proposed
 third verb, `verify` — everything `seal-check` does except the POST — already
