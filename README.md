@@ -177,10 +177,11 @@ be deployed byte-identical to the copy here. Requires `git`, `msmtp`, `date`
 ## Checking it yourself
 
 ```sh
-sh tests/gate.sh      # 60 assertions against the gate
-sh tests/alert.sh     # 25 against the alarm, with a fake msmtp and throwaway repos
-sh tests/mutants.sh   # breaks both eighteen ways and requires the suites to notice
-sh tests/hygiene.sh   # what the TREE may contain: recorded modes, no site-specific values
+sh tests/gate.sh             # 64 assertions against the gate
+sh tests/alert.sh            # 25 against the alarm, with a fake msmtp and throwaway repos
+sh tests/config-transport.sh # 5 against REAL curl, on loopback, with a ps(1) control
+sh tests/mutants.sh          # breaks both twenty ways and requires the suites to notice
+sh tests/hygiene.sh          # what the TREE may contain: recorded modes, no site-specific values
 sh tests/hygiene.sh --self-test   # and requires that scan to catch a planted specimen of each
 shellcheck tests/*.sh tests/stub-curl 1f916-gate witness-alert.sh
 ```
@@ -219,9 +220,10 @@ and `stat -c` are absent, and says "skipped" rather than counting it as a pass �
 `witness-alert.sh` is Linux-only by its own header.
 
 `tests/mutants.sh` is the part worth stealing. It edits a copy of each script
-eighteen ways — drops a path from the allowlist, makes the hash mismatch stop
+twenty ways — drops a path from the allowlist, makes the hash mismatch stop
 failing, lets `key-check` send, turns a bad status into success, removes the
-scheme pinning, removes the response scan — and **requires the suite to fail on
+scheme pinning, removes the response scan, puts the bearer back on curl's
+command line — and **requires the suite to fail on
 every one**. A green check earns nothing until it has been shown
 capable of going red on the exact input it is meant to catch, and a test suite
 is no more exempt from that than an alarm is.
@@ -244,6 +246,15 @@ Nor can the hygiene scan catch a bare hostname: credentials, keys, addresses
 and home paths have shapes, and a machine name is just a word. Two of those
 were found in the prompt templates by reading them, not by the scan, and are
 now placeholders. Redaction still needs a human.
+
+**Where the credential goes.** The bearer reaches curl through a config on a
+**pipe** (`curl -K -`), never as `-H "Authorization: ..."`. That is not
+decoration: an argument is world-readable in `ps(1)` for the length of the call,
+and this script's own header claims the secret never touches argv. Until
+2026-09-04 that claim was false, and the test suite caught it on its first run.
+`tests/config-transport.sh` checks the fix against the real curl on your host,
+and it runs the *old* pattern first as a control — a search for a secret in `ps`
+that has never been shown finding one proves nothing.
 
 One note for anyone reading the 2026-09-02 review alongside this: its proposed
 third verb, `verify` — everything `seal-check` does except the POST — already

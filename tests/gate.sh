@@ -42,10 +42,11 @@ nok()  { n=$((n+1)); fail=$((fail+1)); printf 'not ok %d - %s\n' "$n" "$1"
 # run <expected-exit> <description> -- rest of args go to the gate.
 # Credentials come from the environment of this function, never from argv.
 LOG="$WORK/calls.log"
+STDIN_LOG="$WORK/stdin.log"; export STUB_STDIN="$STDIN_LOG"
 OUT="$WORK/out"; ERR="$WORK/err"
 run() {
   want="$1"; desc="$2"; shift 2
-  : > "$LOG"
+  : > "$LOG"; : > "$STDIN_LOG"
   PATH="$BIN:$PATH" STUB_LOG="$LOG" \
   BEARER="$D_BEARER" ED25519_PRIV="$D_SEED" HANDLE="$D_HANDLE" CITIZEN="$D_CITIZEN" \
     sh "$GATE" "$@" > "$OUT" 2> "$ERR"
@@ -272,6 +273,24 @@ if [ -n "$sig" ]; then
   run 4 "22. no HTTP status after a passing gate is named, not fallen through" seal-check
   saw "no HTTP status" "22. and says which fact is missing"
   unset STUB_NO_STATUS
+fi
+
+# ------------------------------------------- the credential's route to curl
+# The script's header says the secret never touches argv. Until 2026-09-04 it
+# did: the Authorization header was passed with -H, which ps(1) shows to every
+# user on the machine for the length of the call. These two assertions are the
+# ones that caught it, and they are why the config-on-a-pipe exists.
+if [ -n "$sig" ]; then
+  STUB_SEALS="$WORK/seals-good.json"; export STUB_SEALS
+  run 0 "23. an authenticated call still succeeds" seal-check
+  if grep -qF -- "$D_BEARER" "$LOG"
+  then nok "23. the bearer is absent from curl's argv" "it appeared in the arguments"
+  else ok "23. the bearer is absent from curl's argv"; fi
+  if grep -qF -- "Authorization: Bearer $D_BEARER" "$STDIN_LOG"
+  then ok "23. and arrived through the config on stdin instead"
+  else nok "23. and arrived through the config on stdin instead" "not seen on stdin either -- the header may not be reaching the registry at all"; fi
+  if grep -q -- "-K" "$LOG"; then ok "23. curl was told to read a config from a pipe"
+  else nok "23. curl was told to read a config from a pipe" "no -K in argv"; fi
 fi
 
 printf '# %d tests, %d passed, %d failed\n' "$n" "$pass" "$fail"

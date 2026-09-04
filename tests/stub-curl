@@ -15,6 +15,9 @@
 #   STUB_NO_STATUS non-empty -> succeed but print no http_code at all, which
 #                  real curl can do and which the gate used to treat as a
 #                  wildcard fall-through that happened to land on exit 4
+#   STUB_STDIN     file to append anything read from a `-K -` config to, so a
+#                  test can assert the Authorization header arrived by PIPE
+#                  while separately asserting it is absent from argv
 {
   printf 'CALL'
   for a in "$@"; do printf ' <%s>' "$a"; done
@@ -23,10 +26,19 @@
 
 out=""
 prev=""
+cfg=0
 for a in "$@"; do
   [ "$prev" = "-o" ] && out="$a"
+  [ "$prev" = "-K" ] && [ "$a" = "-" ] && cfg=1
   prev="$a"
 done
+
+# Real curl reads the config from stdin when given `-K -`. Drain it the same
+# way, and record it where a test can look: the point of the config is that the
+# credential travels here INSTEAD of in the arguments logged above.
+if [ "$cfg" = "1" ]; then
+  cat >> "${STUB_STDIN:-/dev/null}"
+fi
 
 if [ -z "$out" ]; then
   # Unauthenticated GET of the seals endpoint.

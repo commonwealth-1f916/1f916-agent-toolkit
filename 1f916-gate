@@ -47,6 +47,13 @@
 # Prohibitions (spec section 4): no command, flag, or code path prints a
 # credential; the secret never touches disk or argv; there is no verbose mode
 # on purpose. `op run`'s output masking is a backstop, not the design.
+#
+# The argv half of that was FALSE until 2026-09-04: the Authorization header was
+# passed to curl with -H, which ps(1) shows to every user on the machine. The
+# bearer now reaches curl through a config on a PIPE (see auth_config), so it is
+# an argument to no process and is written to no file. tests/gate.sh asserts it
+# against curl's recorded argv, and tests/config-transport.sh proves the same
+# pattern against the REAL curl on the host rather than against a double.
 
 set -u
 
@@ -83,6 +90,29 @@ sign_preimage() {
     const key = c.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
     process.stdout.write(c.sign(null, Buffer.from(process.argv[1], "utf8"), key).toString("base64url"));
   ' "$1"
+}
+
+# auth_config -- emit a curl config carrying ONLY the Authorization header, for
+# `curl -K -` to read from a PIPE. The bearer is taken from awk's ENVIRONMENT,
+# so it is an argument to nothing: not to awk, not to curl, not to any child.
+#
+# This exists because the header of this script says the secret never touches
+# argv, and until 2026-09-04 it did -- `-H "Authorization: Bearer $BEARER"` puts
+# it on curl's command line, where ps(1) shows it to every user on the box for
+# the duration of the call. A stated property the code did not have. The test
+# suite caught it on its first run.
+#
+# A pipe rather than a file, because "never on disk" is the other half of the
+# same sentence. The value is escaped for the config's quoted-string syntax so
+# a future credential format containing a quote or a backslash cannot break out
+# of it -- today's bearers are hex, which is exactly when to write the escape.
+auth_config() {
+  BEARER="$BEARER" awk 'BEGIN {
+    s = ENVIRON["BEARER"]
+    gsub(/\\/, "\\\\", s)
+    gsub(/"/, "\\\"", s)
+    printf "header = \"Authorization: Bearer %s\"\n", s
+  }'
 }
 
 # 1. Refuse on any empty or unset input, naming which -- BEFORE any network
@@ -148,7 +178,8 @@ fi
 
 # 5. Only on match: perform the requested action.
 tmp=$(mktemp) || fail3 "mktemp failed"
-trap 'rm -f "$tmp"' EXIT
+body=$(mktemp) || fail3 "mktemp failed"
+trap 'rm -f "$tmp" "$body"' EXIT
 
 case "$action" in
   seal-check|key-check)
@@ -169,21 +200,24 @@ case "$action" in
       printf 'gate: PASS (hash %s)\nkey: PASS (fresh signature reproduces the published one, %s chars)\nnothing sent\n' "$local_hash" "${#sig}"
       exit 0
     fi
-    status=$(printf '{"hash":"%s","label":"continuity-core","signature":"%s"}' "$local_hash" "$sig" | \
-      curl -s --proto '=https' --max-time 30 -o "$tmp" -w '%{http_code}' \
-        -H "Authorization: Bearer $BEARER" -H 'Content-Type: application/json' \
-        -X POST -d @- "$REGISTRY/api/seal") || fail4 "network failure after a passing gate"
+    # The body goes to a file because stdin now carries the header config. Its
+    # contents are public -- a hash, a label and a signature the registry
+    # already serves -- so this is not the secret touching disk.
+    printf '{"hash":"%s","label":"continuity-core","signature":"%s"}' "$local_hash" "$sig" > "$body"
+    status=$(auth_config | curl -s --proto '=https' --max-time 30 -K - \
+        -o "$tmp" -w '%{http_code}' -H 'Content-Type: application/json' \
+        -X POST --data-binary @"$body" "$REGISTRY/api/seal") || fail4 "network failure after a passing gate"
     ;;
   get)
-    status=$(curl -s --proto '=https' --max-time 30 -o "$tmp" -w '%{http_code}' \
-      -H "Authorization: Bearer $BEARER" "$REGISTRY$2") || fail4 "network failure after a passing gate"
+    status=$(auth_config | curl -s --proto '=https' --max-time 30 -K - \
+      -o "$tmp" -w '%{http_code}' "$REGISTRY$2") || fail4 "network failure after a passing gate"
     ;;
   post)
     # Body from a FILE, never argv: argv is world-readable in ps(1) and the
     # header of this script already forbids it for inputs. The body carries no
     # credential -- only the token does, and it stays in the environment.
-    status=$(curl -s --proto '=https' --max-time 30 -o "$tmp" -w '%{http_code}' \
-      -H "Authorization: Bearer $BEARER" -H 'Content-Type: application/json' \
+    status=$(auth_config | curl -s --proto '=https' --max-time 30 -K - \
+      -o "$tmp" -w '%{http_code}' -H 'Content-Type: application/json' \
       -X POST --data-binary @"$3" "$REGISTRY$2") || fail4 "network failure after a passing gate"
     ;;
 esac
