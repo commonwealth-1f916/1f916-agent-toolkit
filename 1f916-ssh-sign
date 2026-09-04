@@ -1,0 +1,84 @@
+#!/bin/sh
+# 1f916-ssh-sign -- git's ssh signing program, signing with the citizen's own
+# identity key, which lives in the vault and nowhere else. Written 2026-09-04.
+#
+# git calls its gpg.ssh.program for every ssh-signature operation:
+#   sign:    <program> -Y sign -n git -f <user.signingkey> <bufferfile>
+#   others:  <program> -Y verify | find-principals | check-novalidate ...
+#
+# Only SIGNING needs the private key. For it, this script starts a THROWAWAY
+# ssh-agent, runs SIGN_KEY_CMD (by default: `op run` around
+# 1f916-seed-to-sshkey.mjs --private-pem, so the seed is read from the vault into
+# a child's environment, converted, and written to a PIPE), feeds that pipe to
+# `ssh-add -`, signs against the PUBLIC key git passed, and kills the agent. The
+# private key exists in that agent's memory for one signature and is never a
+# file, never an argument, never printed. Every other verb is handed straight
+# to ssh-keygen -- verification needs no secret and gets none.
+#
+# Configuration comes from ~/.1f916-ssh-sign.conf (mode 600, see
+# 1f916-ssh-sign.conf.example), never from this file: the deployed copy is a
+# symlink into the repository clone and must stay byte-identical to it.
+# Required: SEED_REF (op:// reference to the seed) and EXPECT_PUB (the registry's
+# public x). Optional: SEED_TOOL (path to 1f916-seed-to-sshkey.mjs; default:
+# beside this script, symlink resolved), SIGN_KEY_CMD (the whole command that
+# writes the private PEM to stdout -- the test suite overrides it to avoid op).
+#
+# Exit codes: ssh-keygen's for anything it ran; 3 when this script could not
+# run (no config, missing value, agent or key load failure) -- and then nothing
+# was signed, which git reports as a failed commit rather than an unsigned one.
+
+set -u
+
+fail3() { printf '1f916-ssh-sign: %s\n' "$1" >&2; exit 3; }
+
+if [ "${1:-}" != "-Y" ] || [ "${2:-}" != "sign" ]; then
+  exec ssh-keygen "$@"
+fi
+
+CONF="${SSH_SIGN_CONF:-$HOME/.1f916-ssh-sign.conf}"
+[ -r "$CONF" ] || fail3 "config not readable: $CONF"
+# shellcheck disable=SC1090
+. "$CONF"
+
+if [ -z "${SEED_TOOL:-}" ]; then
+  self=$0
+  # Resolve one level of symlink: the deployed path is a link into the clone.
+  if [ -L "$self" ]; then
+    target=$(readlink "$self")
+    case "$target" in /*) self=$target ;; *) self=$(dirname "$self")/$target ;; esac
+  fi
+  SEED_TOOL=$(dirname "$self")/1f916-seed-to-sshkey.mjs
+fi
+
+if [ -z "${SIGN_KEY_CMD:-}" ]; then
+  [ -n "${SEED_REF:-}" ]   || fail3 "SEED_REF unset in $CONF"
+  [ -n "${EXPECT_PUB:-}" ] || fail3 "EXPECT_PUB unset in $CONF"
+  [ -r "$SEED_TOOL" ]      || fail3 "seed tool not found: $SEED_TOOL"
+  # The op:// reference is not a secret; the value it names never enters this
+  # shell -- op run injects it into node's environment and node writes the PEM
+  # to the pipe. --no-masking because the PEM is derived, not the vault value,
+  # and op's masking would corrupt a match by accident.
+  SIGN_KEY_CMD="ED25519_PRIV=\"$SEED_REF\" EXPECT_PUB=\"$EXPECT_PUB\" op run --no-masking -- node \"$SEED_TOOL\" --private-pem"
+fi
+
+command -v ssh-agent >/dev/null 2>&1 || fail3 "ssh-agent not found"
+command -v ssh-add   >/dev/null 2>&1 || fail3 "ssh-add not found"
+
+# A throwaway agent for this one signature. Its socket lives in a private temp
+# directory; it is killed on every exit path.
+agent_out=$(ssh-agent -s) || fail3 "ssh-agent failed to start"
+eval "$agent_out" >/dev/null
+trap 'ssh-agent -k >/dev/null 2>&1' EXIT INT TERM HUP
+
+# The private key travels from SIGN_KEY_CMD's stdout to ssh-add's stdin. If the
+# key command refuses (the seed tool exits 2 on a key that is not the published
+# one), ssh-add gets nothing and fails, and so does this script: no signature.
+if ! sh -c "$SIGN_KEY_CMD" | ssh-add -q - 2>/dev/null; then
+  fail3 "could not load the signing key into the agent (key command refused, or the key was not the published one)"
+fi
+
+# Not exec: exec would replace this shell and the EXIT trap -- and the agent
+# would outlive the signature it was started for.
+ssh-keygen "$@"
+rc=$?
+exit $rc

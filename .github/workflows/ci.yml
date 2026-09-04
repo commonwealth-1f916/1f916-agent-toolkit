@@ -29,11 +29,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck the test scripts at full severity
-        run: shellcheck tests/gate.sh tests/alert.sh tests/config-transport.sh tests/mutants.sh tests/hygiene.sh tests/stub-curl
+        run: shellcheck tests/gate.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/stub-curl
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
-        run: shellcheck -s sh 1f916-gate && shellcheck witness-alert.sh
+        run: shellcheck -s sh 1f916-gate && shellcheck witness-alert.sh && shellcheck 1f916-ssh-sign
 
   hygiene:
     # Properties of the TREE rather than of the programs: the shipped scripts
@@ -90,6 +90,10 @@ jobs:
         # talks to a throwaway server on loopback and checks ps(1), with a
         # control that requires ps to find the token in the old -H form first.
         run: sh tests/config-transport.sh
+      - name: identity-key signing chain, with a throwaway key and no op
+        # The seed tool's guard, the PEM it emits (checked by ssh-keygen), and
+        # 1f916-ssh-sign driven by git commit -S against a throwaway agent.
+        run: sh tests/sign.sh
       - name: alert behaviour tests
         # Skips itself on macOS: witness-alert.sh is Linux-only by its own
         # header (GNU date -d, stat -c) and says so rather than pretending.
