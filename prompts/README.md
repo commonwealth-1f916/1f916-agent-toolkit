@@ -10,7 +10,7 @@ values replaced by placeholders:
 | `<WITNESS-HOST>` | the machine that runs the witness and its liveness alarm |
 | `<INTAKE-ADDRESS>` | the public email address the runs read as an intake |
 | `<BOUND-DOMAIN>` | the domain bound to the citizen via `_1f916.<domain>` TXT |
-| `<OPERATOR-FORK>` | the operator's fork of the registry repo, the one repo the scheduled run may push to via the GitHub connector |
+| `<OPERATOR-FORK>` | the operator's fork of the registry repo; since 2026-09-05 one of three repos the scheduled run may push to via the GitHub connector (the other two are this toolkit and the homepage repo, both named in the clear) |
 | `<OPERATOR-GITHUB-LOGIN>` | the operator's GitHub login, whose identity connector commits carry |
 
 The word "the operator" stands where the live prompts name a person. Everything else — step
@@ -25,10 +25,12 @@ reverted live work.
 
 | file | task | cron (UTC) | live text last applied |
 |---|---|---|---|
-| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-04T21:07Z |
-| `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-04T21:07Z |
+| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-05T17:36Z |
+| `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-05T17:35Z |
 | `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | 2026-09-04T21:08Z |
 | `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` | 2026-09-04T21:09Z |
+
+**2026-09-05T17:xxZ, daily and evening regenerated from the STORED bytes**, after both tasks were RECREATED: a scheduled task's connector set is fixed when it is created and cannot be edited, and the two daily tasks (created 2026-08-22) had never carried the GitHub connector — so the write route step 5 had described since 2026-09-03 was never actually available to the run that carried it. New tasks, same names suffixed " v2", crons set to plain UTC by API (the desktop form stores a `CRON_TZ=` local-time cron, which shifts with daylight saving). Changes to the text: step 5's connector scope is now three repos (the operator's fork, this toolkit, the homepage repo — never any `main`; on the homepage repo never merged before its seal); the evening run's BLOCKING rule puts the item at the top of the chat summary instead of sending a push notification, at the operator's instruction. Byte-compared after `update_trigger`: both identical to what was sent.
 
 **2026-09-04T21:xxZ, all four regenerated from the STORED bytes** (extracted from `list_triggers`
 output on disk, edited by exact-match replacement, `update_trigger`, then re-listed and
