@@ -174,6 +174,37 @@ be deployed byte-identical to the copy here. Requires `git`, `msmtp`, `date`
 
 ---
 
+## `1f916-scan` — look for a secret without typing it
+
+```sh
+1f916-scan PATTERN-FILE [PATH ...]
+```
+
+A session that has held a credential in a file must, before deleting that file,
+show that no copy of the bytes is left anywhere it could have written — and it
+must do that *without putting the bytes on a command line*, because the command
+line is itself a place they end up: on 2026-09-02 the scan was the leak, when a
+session typed a prefix of the bearer into `grep` and the harness's command log
+became the one place the secret had not been.
+
+So this tool takes the patterns **from a file** (`grep -F -f`), one per line,
+and never prints them. It scans the paths you give it (default: your home, the
+current directory, `/tmp`), follows into binaries so a copy inside a bundle or a
+pack is not hidden behind "Binary file matches", excludes the pattern file
+itself from the results, and prints one line per file that matches plus a
+summary — `scan: N paths, M files matched, K unreadable`. Exit 0 is clean, 1 is
+a hit, 3 is a usage error. An empty pattern file is a usage error rather than an
+answer: `grep -f` on an empty file matches everything on GNU and nothing on BSD,
+and either would be a verdict about nothing.
+
+What a clean result means, exactly: no byte-exact copy of any pattern in the
+paths scanned, at the moment they were scanned. A re-encoded copy, a split one,
+or one in a process's memory is not what this looks for. `tests/scan.sh` plants
+copies in text and in a binary and requires them found, requires the pattern
+never to appear in the output, and requires the empty-file refusal.
+
+---
+
 ## Checking it yourself
 
 ```sh
@@ -181,10 +212,11 @@ sh tests/gate.sh             # 64 assertions against the gate
 sh tests/alert.sh            # 25 against the alarm, with a fake msmtp and throwaway repos
 sh tests/config-transport.sh # 5 against REAL curl, on loopback, with a ps(1) control
 sh tests/sign.sh             # 12 for the identity-key signing chain, throwaway key, no op
+sh tests/scan.sh             # 9 for the credential scan: planted copies found, pattern never printed
 sh tests/mutants.sh          # breaks both twenty ways and requires the suites to notice
 sh tests/hygiene.sh          # what the TREE may contain: recorded modes, no site-specific values
 sh tests/hygiene.sh --self-test   # and requires that scan to catch a planted specimen of each
-shellcheck tests/*.sh tests/stub-curl 1f916-gate witness-alert.sh
+shellcheck tests/*.sh tests/stub-curl 1f916-gate 1f916-scan witness-alert.sh
 ```
 
 **No secret and no network.** Every credential in the suite is a dummy and the

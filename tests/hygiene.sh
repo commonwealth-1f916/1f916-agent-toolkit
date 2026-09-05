@@ -136,7 +136,7 @@ EOF
 }
 
 # --------------------------------------------------------------------------
-EXPECT_755='1f916-gate witness-alert.sh 1f916-ssh-sign tests/gate.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/stub-curl tests/hygiene.sh'
+EXPECT_755='1f916-gate witness-alert.sh 1f916-ssh-sign 1f916-scan tests/gate.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/stub-curl tests/hygiene.sh tests/scan.sh'
 
 check_modes() {
   bad=''

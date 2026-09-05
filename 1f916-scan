@@ -1,0 +1,79 @@
+#!/bin/sh
+# 1f916-scan -- find copies of a credential without ever typing it.
+#
+# The rule this enforces (this project's brief, rule 2): before a file that
+# held a secret is deleted, scan for its bytes everywhere a session could have
+# left them -- and take the pattern FROM that file, never from a command line.
+# On 2026-09-02 the scan itself was the leak: a session typed a prefix of the
+# bearer into a grep, and the harness's command log became the one place the
+# secret had not been. A pattern that is read from a file is never in argv,
+# never in a shell history, never in a transcript.
+#
+# Usage:
+#   1f916-scan PATTERN-FILE [PATH ...]
+#
+#   PATTERN-FILE  one pattern per line, exactly the bytes to look for (grep -F).
+#                 Blank lines are ignored. The file itself is excluded from the
+#                 results, and its contents are never printed.
+#   PATH ...      directories or files to scan. Default: the caller's home, the
+#                 current directory, and /tmp. Unreadable paths are skipped and
+#                 counted.
+#
+# Output: one line per file that contains any pattern, then a summary line:
+#   scan: N paths, M files matched, K unreadable
+# Exit 0 when nothing matched, 1 when something did, 3 on usage error.
+#
+# What this does NOT do, so nobody reads more into a clean result than it holds:
+# it finds byte-exact copies. A secret that was re-encoded, split, or lives in
+# a process's memory is invisible to it. And a clean scan is a claim about the
+# paths scanned at the time of scanning, nothing more.
+
+set -u
+
+usage() {
+  printf 'usage: 1f916-scan PATTERN-FILE [PATH ...]\n' >&2
+  exit 3
+}
+
+[ $# -ge 1 ] || usage
+pat=$1; shift
+[ -r "$pat" ] || { printf '1f916-scan: pattern file not readable: %s\n' "$pat" >&2; exit 3; }
+# A pattern file with no non-blank line would make grep -f match everything
+# (GNU) or nothing (BSD) -- either is a wrong answer dressed as a verdict.
+if ! grep -q '[^[:space:]]' "$pat"; then
+  printf '1f916-scan: pattern file has no pattern in it: %s\n' "$pat" >&2
+  exit 3
+fi
+patabs=$(CDPATH='' cd -- "$(dirname -- "$pat")" && pwd)/$(basename -- "$pat")
+
+if [ $# -eq 0 ]; then
+  set -- "$HOME" "$PWD" /tmp
+fi
+
+# grep -F: the patterns are bytes, not regexes -- a secret containing '.' or
+# '+' must not become a wildcard. -r follows into directories; -l names files
+# once; -a treats binaries as text so a secret inside a bundle is not reported
+# as "Binary file matches" and then miscounted. Errors (permission denied,
+# vanished files) are counted, not hidden.
+n=0; matched=0; unreadable=0
+tmp_err=$(mktemp) || exit 3
+tmp_hits=$(mktemp) || { rm -f "$tmp_err"; exit 3; }
+trap 'rm -f "$tmp_err" "$tmp_hits"' EXIT
+
+for p in "$@"; do
+  n=$((n+1))
+  if [ ! -e "$p" ]; then
+    unreadable=$((unreadable+1)); continue
+  fi
+  grep -rlaF -f "$pat" -- "$p" 2>>"$tmp_err" | grep -Fxv -- "$patabs" >>"$tmp_hits" || true
+done
+
+if [ -s "$tmp_err" ]; then
+  unreadable=$((unreadable + $(wc -l <"$tmp_err")))
+fi
+if [ -s "$tmp_hits" ]; then
+  sort -u "$tmp_hits"
+  matched=$(sort -u "$tmp_hits" | wc -l | tr -d ' ')
+fi
+printf 'scan: %d paths, %d files matched, %d unreadable\n' "$n" "$matched" "$unreadable"
+[ "$matched" -eq 0 ]
