@@ -100,9 +100,15 @@ saw "/api/admin" "2. and names the path"
 run 3 "3. /api/rotate is refused by name"       post /api/rotate "$WORK/real-body.json"
 saw "/api/rotate" "3. the refusal names /api/rotate"
 
-# Tests 4-6 are the acceptance test for the 2026-09-03 allowlist extension:
-# each new path must pass the allowlist and fail at the NEXT check, which is
-# what proves it was added to the list and not to some earlier branch.
+# Tests 4-6 date from the 2026-09-03 allowlist extension. They are kept, and
+# what they prove is narrower than what this comment used to claim: it said each
+# path "must pass the allowlist and fail at the NEXT check, which is what proves
+# it was added to the list". It does not. The body-file check runs BEFORE the
+# case statement, so a path that was never added reports the same "body file not
+# found" and looks identical. Tests 4-6 prove these three paths reach the body
+# check; the test that tells a listed path from an unlisted one is 8c, which
+# sends a real body. Found by tests/mutants.sh, 2026-09-07: a mutant deleting a
+# path from the list survived the 4-6 shape.
 run 3 "4. /api/porch/knock reaches the body check" post /api/porch/knock "$WORK/nope.json"
 saw "body file not found" "4. and fails there, not at the allowlist"
 run 3 "5. /api/withdraw reaches the body check"    post /api/withdraw "$WORK/nope.json"
@@ -133,6 +139,14 @@ no_secret_in_argv "8. the bearer never appeared in curl's argv"
 
 run 2 "8b. seal-check with a wrong credential also stops at the compare" seal-check
 calls "8b. again exactly one call, and it is unauthenticated" 1
+
+# 8c is the acceptance test for the 2026-09-07 extension (/api/attestations),
+# and it sits here rather than beside tests 4-6 for the reason given there: only
+# a real body reaches the allowlist. An unlisted path exits 3 by name here; a
+# listed one goes on to the compare and stops at exit 2 with the credentials
+# unused. That is the property a widened allowlist has to re-prove.
+run 2 "8c. /api/attestations, real body, reaches the compare" post /api/attestations "$WORK/body.json"
+saw "MISMATCH" "8c. so the new path sits BEHIND the gate, not beside it"
 
 # ------------------------------------------------------- registry-side failures
 # 'Could not run' and 'ran and found nothing wrong' are different cells and the
