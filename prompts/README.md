@@ -26,10 +26,12 @@ reverted live work.
 
 | file | task | cron (UTC) | live text last applied |
 |---|---|---|---|
-| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-07T02:15Z |
-| `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-07T02:13Z |
-| `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | 2026-09-04T21:08Z |
+| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-07T21:21Z |
+| `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-07T21:22Z |
+| `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | 2026-09-07T21:19Z |
 | `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` | 2026-09-04T21:09Z |
+
+**2026-09-07T21:xxZ, three regenerated from the STORED bytes** (weekly, daily, evening). The moving baselines and the front map left the project docs for a ledger `state` collection, so the daily's reads and writes and the weekly's compares point there; every run may file a `notes` row of kind `lesson` (observation and observable only) and the weekly gathers them, with a hygiene grep and the archive test, into one decision row for the operator — runs propose, only an attended sitting applies. The weekly no longer reads four history docs each week and carries no dated annotations; the change log is this repository's history and the ledger's `doc-change` rows. Byte-compared after `update_trigger`: all three identical to what was sent (11,838 / 25,616 / 9,186 bytes).
 
 **2026-09-07T02:xxZ, daily and evening regenerated from the STORED bytes** after both were rewritten to use `1f916-run` (merged as PR #18, `fa2626b7`). What changed: step 1 fetches `1f916-gate`, `1f916-run` and `1f916-scan` pinned at that sha and checks their hashes before any credential is touched; the gate file and the scan-pattern file are written with the Write tool; the whole read phase (seal-check, pulse, inbox in id mode) is ONE `1f916-run … wake` call and every authenticated write is a step in a manifest run by `1f916-run … act`; the exit codes are the verdicts (2 mismatch, 3 not run, 4 registry failure, 5 key mismatch); a classifier refusal is retried once unchanged and then escalated, never reshaped; the continuity-core seal-check becomes the fresh-signature (possession-now) form; a scan-then-delete step (`5b` evening, `8a` daily) precedes RECORD with the exact expected result, rehearsed the same night. The old `sed`/`grep -rlf` fallback text is gone. Byte-compared after `update_trigger`: both identical to what was sent (24,808 and 8,821 bytes). New placeholder `<RUN-HOME>`.
 
@@ -54,7 +56,7 @@ daily-1200 regenerated 2026-09-03T17:xxZ: step 5 gained a proven write route —
 
 Crons are UTC and do not shift with daylight saving; never re-save a schedule from a desktop app
 that renders local time. The prompts reference project docs (`claude/1f916-brief.md`,
-`-witness.md`, `-registry-api.md`, `-intake-rules.md`, `-baselines.md`, `-identity.md`) and the
-ledger's collections (`runs`, `board`, `queue`, `notes`, `queue-archive`); none of those are in this
-repository, and the security ordering they enforce (identity doc → seal compare → load → act) is
+`-witness.md`, `-registry-api.md`, `-intake-rules.md`, `-doc-editing.md`, `-identity.md`) and the
+ledger's collections (`runs`, `board`, `queue`, `notes`, `queue-archive`, `state`, `prompts`); none of
+those are in this repository, and the security ordering they enforce (identity doc → seal compare → load → act) is
 described in the top-level README.
