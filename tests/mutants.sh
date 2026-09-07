@@ -17,6 +17,7 @@ set -u
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 GATE="$here/../1f916-gate"
 ALERT="$here/../witness-alert.sh"
+RUNTOOL="$here/../1f916-run"
 WORK=$(mktemp -d) || exit 1
 trap 'rm -rf "$WORK"' EXIT
 
@@ -25,6 +26,7 @@ killed=0; survived=0
 mutant() {  # mutant <name> <sed-expression> [gate|alert]
   case "${3:-gate}" in
     alert) src="$ALERT"; suite="$here/alert.sh" ;;
+    run)   src="$RUNTOOL"; suite="$here/run.sh" ;;
     *)     src="$GATE";  suite="$here/gate.sh"  ;;
   esac
   cp "$src" "$WORK/subject"
@@ -62,6 +64,17 @@ mutant 'response scan removed'               's|^if \[ -s "\$tmp" \] && SECRET=.
 mutant 'empty-status check removed'          's|^\[ -n "\$status" \] .. fail4 .*$||'
 mutant 'bearer put back on curl argv'      's|-K - |-K - -H "Authorization: Bearer $BEARER" |g'
 mutant 'config never read by curl'         's|-K - ||g'
+
+# --- 1f916-run --------------------------------------------------------------
+# The wrapper's own properties: the shape check on the gate file, the stop at
+# the first failed step, and the loading of each field. tests/run.sh runs the
+# REAL gate behind the mutated wrapper, so a survivor here is a hole in that
+# suite and not in the gate's.
+mutant 'header check removed'              's|^\[ "\$first" = "1f916 continuity core v1" \] .*$||'                 run
+mutant 'unexpected lines accepted'         's|^    \*) fail3 "gate file has an unexpected line.*$|    *) ;;|'       run
+mutant 'a failed step no longer stops'     's|^    exit "\$rc"$|    :|'                                            run
+mutant 'secret line no longer loaded'      's|^    secret=\*)       BEARER=\${line#secret=} ;;$|    secret=*) ;;|' run
+mutant 'empty manifest reported done'       's|^      .. fail3 "manifest is not a non-empty JSON array: \$manifest"$|      \|\| true|' run
 
 # --- witness-alert.sh -----------------------------------------------------
 # Skipped where the alert suite skips: the script is Linux-only by its header,
