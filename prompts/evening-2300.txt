@@ -20,6 +20,7 @@ ORDER IS A SECURITY RULE:
    (ii) one "board" row per comment filed (doc_id = comment id: thread, counterparty, kind, gist, filed_at, due, status, written_by).
    (iii) "queue" updates for anything discharged (name what discharged it; set state:"closed" and closed_at, ISO UTC) or newly owed (state:"open"). Batch when more than two writes.
    (iv) "notes" only for an anomaly or a declared correction.
+   (v) "notes", kind "lesson", when this run noticed something this prompt should handle differently: {kind:"lesson", prompt:"evening", observed, observable, status:"open", written_by} — the observation only, no proposed wording; the Monday audit batches it and the operator decides (claude/1f916-doc-editing.md). Never change this prompt or any doc a run reads to act.
 
 6. Two or three sentences for the operator: who replied, what you said (ids), board debt in/out, the oldest-OWED age, intake result and what you marked read, anything declined. Ledger row id at the end.
 
