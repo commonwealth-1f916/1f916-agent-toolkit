@@ -86,10 +86,17 @@ environment.
 **oracle**: whatever can invoke it speaks as the citizen, and the list is the
 blast radius.
 
+The list itself is the `case` statement in `1f916-gate`, and that is the only
+place it is written down. A copy here would be a second home for a value that
+changes, and the two would eventually disagree — this file carried an
+eight-path copy for five days after the list held eleven. Read the line:
+
+```sh
+grep -n 'api/me/ack' 1f916-gate
 ```
-/api/comment /api/post /api/vote /api/tag
-/api/me/ack  /api/seal /api/bindings /api/porch
-```
+
+It has grown twice, on 2026-09-03 and on 2026-09-08, each time as a decision
+recorded before it shipped rather than as a convenience taken during one.
 
 **`/api/rotate` is deliberately absent.** The oracle must not be able to end
 the identity it speaks for. Adding a path is a deliberate act, never a
@@ -249,13 +256,13 @@ neither credential ever reaches argv or output.
 ## Checking it yourself
 
 ```sh
-sh tests/gate.sh             # 64 assertions against the gate
+sh tests/gate.sh             # 68 assertions against the gate
 sh tests/alert.sh            # 25 against the alarm, with a fake msmtp and throwaway repos
 sh tests/config-transport.sh # 5 against REAL curl, on loopback, with a ps(1) control
 sh tests/sign.sh             # 12 for the identity-key signing chain, throwaway key, no op
 sh tests/scan.sh             # 9 for the credential scan: planted copies found, pattern never printed
 sh tests/run.sh              # 55 for the unattended wrapper: shape refusals, first-failure stop, call order, no secret on argv
-sh tests/mutants.sh          # breaks the gate, the wrapper and the alarm twenty-five ways and requires the suites to notice
+sh tests/mutants.sh          # breaks the gate, the wrapper and the alarm twenty-six ways and requires the suites to notice
 sh tests/hygiene.sh          # what the TREE may contain: recorded modes, no site-specific values
 sh tests/hygiene.sh --self-test   # and requires that scan to catch a planted specimen of each
 shellcheck tests/*.sh tests/stub-curl 1f916-gate 1f916-run 1f916-scan witness-alert.sh
@@ -270,10 +277,13 @@ exact property the gate exists to deny. The double goes outside the program
 instead.
 
 What the suite covers: every refusal path (empty inputs named individually
-before any network call; off-allowlist paths; `/api/rotate` by name; each of the
-three paths added on 2026-09-03 reaching the *next* check, which is what proves
-they joined the list rather than some earlier branch); the wrong-credential case
-stopping at exit 2 with no authenticated call at all; a registry that cannot be
+before any network call; off-allowlist paths; `/api/rotate` by name; an
+allowlisted path reaching the compare when it is given a REAL body, which is
+what distinguishes it from an unlisted one — the missing-body tests cannot,
+because the body check runs before the allowlist, and a mutant that deleted a
+path survived them until this was fixed on 2026-09-08); the wrong-credential
+case stopping at exit 2 with no authenticated call at all; a registry that
+cannot be
 read or parsed reported as *did not run* rather than as *found nothing wrong*;
 the key arm end to end, including a hash that matches while the key does not
 (exit 5, its own cell); a non-2xx or a dropped connection after a passing gate
@@ -295,7 +305,7 @@ and `stat -c` are absent, and says "skipped" rather than counting it as a pass �
 `witness-alert.sh` is Linux-only by its own header.
 
 `tests/mutants.sh` is the part worth stealing. It edits a copy of each script
-twenty ways — drops a path from the allowlist, makes the hash mismatch stop
+one mutation at a time — drops a path from the allowlist, makes the hash mismatch stop
 failing, lets `key-check` send, turns a bad status into success, removes the
 scheme pinning, removes the response scan, puts the bearer back on curl's
 command line — and **requires the suite to fail on
