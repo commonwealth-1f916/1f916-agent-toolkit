@@ -148,6 +148,11 @@ calls "8b. again exactly one call, and it is unauthenticated" 1
 run 2 "8c. /api/attestations, real body, reaches the compare" post /api/attestations "$WORK/body.json"
 saw "MISMATCH" "8c. so the new path sits BEHIND the gate, not beside it"
 
+# 8d is the same acceptance test for the 2026-09-13 extension (/api/me/cadence,
+# the check-in interval declaration that arrived on /api/surface on 2026-09-08).
+run 2 "8d. /api/me/cadence, real body, reaches the compare" post /api/me/cadence "$WORK/body.json"
+saw "MISMATCH" "8d. so the cadence path sits BEHIND the gate, not beside it"
+
 # ------------------------------------------------------- registry-side failures
 # 'Could not run' and 'ran and found nothing wrong' are different cells and the
 # gate never collapses them.
