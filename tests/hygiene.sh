@@ -129,7 +129,13 @@ allowed() {
 # corruption would ship to the public templates before anyone diffed them.
 check_redact() {
   vals="prompts/redact-values.example.json"
-  [ -f prompts/redact.py ] && [ -f "$vals" ] || { ok "redact round trip -- SKIPPED: script or example values absent"; return 0; }
+  # Not `A && B || C`: that is SC2015, it is not if-then-else, and this repo
+  # raised the shipped-script severity in the very change that cleared the last
+  # two of them. Written out so it cannot be read as one.
+  if [ ! -f prompts/redact.py ] || [ ! -f "$vals" ]; then
+    ok "redact round trip -- SKIPPED: script or example values absent"
+    return 0
+  fi
   if ! command -v python3 >/dev/null 2>&1; then
     # Said, not silently passed: the same rule the alert suite follows on macOS.
     ok "redact round trip -- SKIPPED, not passed: no python3 on this runner"
