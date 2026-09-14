@@ -1,17 +1,12 @@
-# THIS FILE BELONGS AT .github/workflows/pin.yml AND IS NOT ACTIVE HERE.
+# pin -- name the merges that change code the scheduled runs execute.
 #
-# It ships at this path because the GitHub connector the sessions push through
-# cannot write under .github/workflows/ -- that needs a `workflow` scope it does
-# not carry, and the attempt returns 403 "Resource not accessible by
-# integration". Rather than paste YAML out of a pull-request body and retype it,
-# which is the class of handoff this project has been burned by, it is committed
-# verbatim here for the operator to move on the Mac:
-#
-#     git mv tests/pin.workflow.yml .github/workflows/pin.yml
-#     git commit -m 'pin: activate the workflow' && git push
-#
-# Nothing runs until that move. Until then tests/pin.sh is a script anyone can
-# run by hand and CI does not call.
+# This file spent one pull request at tests/pin.workflow.yml. The GitHub
+# connector the sessions push through cannot write under .github/workflows/:
+# that needs a `workflow` scope it does not carry, and the attempt returns 403
+# "Resource not accessible by integration". Committing it verbatim at a
+# non-workflow path was the alternative to pasting YAML out of a pull-request
+# body and retyping it, which is the class of handoff this project has been
+# burned by. Moved here from the Mac, where that scope is not needed.
 #
 name: pin
 
