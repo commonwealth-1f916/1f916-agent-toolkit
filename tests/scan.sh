@@ -81,6 +81,26 @@ if [ "$rc" -eq 0 ] && [ "$out" = 'scan: 2 paths, 0 files matched, 1 unreadable' 
   ok "a missing path is counted, and the verdict stays honest about it"
 else nok "missing path" "rc=$rc out=$out"; fi
 
+# 9. a path that EXISTS but cannot be read is counted too. Test 7 covers the
+#    other branch -- a path that is not there at all -- and until 2026-09-14
+#    nothing covered this one: the tool counts grep's stderr lines into the
+#    same total, and a mutant that stopped doing so survived the whole suite.
+#    Root can read anything, so under root this SKIPS AND SAYS SO rather than
+#    passing on a condition it never created (same rule as the alert suite on
+#    macOS). CI runs unprivileged on both runners, where it executes for real.
+if [ "$(id -u)" = "0" ]; then
+  printf '# running as root: the unreadable-path test was SKIPPED, not passed\n'
+else
+  mkdir -p "$WORK/locked/inner"
+  printf '%s\n' "$DUMMY" >"$WORK/locked/inner/hidden"
+  chmod 000 "$WORK/locked"
+  out=$(sh "$SCAN" "$WORK/pat.txt" "$WORK/clean" "$WORK/locked" 2>&1); rc=$?
+  chmod 755 "$WORK/locked"
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q 'scan: 2 paths, 0 files matched, [1-9]'; then
+    ok "an unreadable path is counted as unreadable, not silently skipped"
+  else nok "unreadable path" "rc=$rc out=$out"; fi
+fi
+
 # 8. patterns are bytes, not regexes: a '.' in the pattern must not match anything else
 printf 'a.c\n' >"$WORK/pat3.txt"
 printf 'abc\n' >"$WORK/clean/abc.txt"
