@@ -18,6 +18,7 @@ here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 GATE="$here/../1f916-gate"
 ALERT="$here/../witness-alert.sh"
 RUNTOOL="$here/../1f916-run"
+SCANTOOL="$here/../1f916-scan"
 WORK=$(mktemp -d) || exit 1
 trap 'rm -rf "$WORK"' EXIT
 
@@ -27,6 +28,7 @@ mutant() {  # mutant <name> <sed-expression> [gate|alert]
   case "${3:-gate}" in
     alert) src="$ALERT"; suite="$here/alert.sh" ;;
     run)   src="$RUNTOOL"; suite="$here/run.sh" ;;
+    scan)  src="$SCANTOOL"; suite="$here/scan.sh" ;;
     *)     src="$GATE";  suite="$here/gate.sh"  ;;
   esac
   cp "$src" "$WORK/subject"
@@ -77,6 +79,29 @@ mutant 'unexpected lines accepted'         's|^    \*) fail3 "gate file has an u
 mutant 'a failed step no longer stops'     's|^    exit "\$rc"$|    :|'                                            run
 mutant 'secret line no longer loaded'      's|^    secret=\*)       BEARER=\${line#secret=} ;;$|    secret=*) ;;|' run
 mutant 'empty manifest reported done'       's|^      .. fail3 "manifest is not a non-empty JSON array: \$manifest"$|      \|\| true|' run
+
+# --- 1f916-scan ------------------------------------------------------------
+# Until 2026-09-14 this tool had no mutants at all, while tests/scan.sh ran on
+# every push. That is the shape this file exists to refuse: the scanner's green
+# summary line is the ONLY evidence that a bearer is not still on disk -- every
+# run records it, and the brief's rule 2 says never to trust a sentence saying
+# a secret was deleted. A scanner broken into always-passing prints exactly the
+# line a clean tree prints. On 2026-09-02 the scan was itself the leak; this is
+# the cheaper half of not repeating that.
+mutant 'the verdict is always clean'      's|^\[ "\$matched" -eq 0 \]$|true|'                            scan
+mutant 'the pattern file counts as a hit' 's# | grep -Fxv -- "\$patabs"##'                               scan
+mutant 'patterns become regexes'          's|grep -rlaF -f|grep -rla -f|'                                scan
+mutant 'an empty pattern file is answered' 's|^if ! grep -q .\[^\[:space:\]\]. "\$pat"; then$|if false; then|' scan
+mutant 'a missing path is not counted'    's|^    unreadable=\$((unreadable+1)); continue$|    continue|' scan
+# The last one needs a path that EXISTS and cannot be read, which root does not
+# have. Skipped and said so under root rather than reported as a survivor -- a
+# mutant that "survives" because its test never ran is the same lie the alert
+# block below refuses. CI runs unprivileged on both runners.
+if [ "$(id -u)" != "0" ]; then
+  mutant 'stderr no longer counts as unreadable' 's|^  unreadable=\$((unreadable + \$(wc -l <"\$tmp_err")))$|  :|' scan
+else
+  printf '# running as root: the unreadable-path mutant was SKIPPED, not passed\n'
+fi
 
 # --- witness-alert.sh -----------------------------------------------------
 # Skipped where the alert suite skips: the script is Linux-only by its header,

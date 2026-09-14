@@ -65,6 +65,23 @@ notok() { checks=$((checks + 1)); fails=$((fails + 1)); echo "not ok $checks - $
 #                                 not look like the real thing does not exercise the
 #                                 code that handles the real thing. Only the all-zero
 #                                 VALUE is exempt -- never the file it lives in.
+#   github.com/commonwealth-1f916  our own org, and 1f916-ai is the upstream this
+#   github.com/1f916-ai            project files pull requests against -- both
+#   api.github.com/users/...       public by design (hygiene:example). It names EVERY
+#                                  GitHub owner on purpose and lets these three
+#                                  through here, because the thing it is hunting
+#                                  is a DIFFERENT owner appearing in a published
+#                                  file: the operator's login and their fork are
+#                                  two of the values prompts/redact.py replaces,
+#                                  and neither has a shape a scanner can spot.
+#   artifact/0000-...-0000         the all-zero ledger URL in the example values
+#                                  file, exempt for exactly the reason the
+#                                  all-zero credential below is: a placeholder
+#                                  that does not look like the real thing does
+#                                  not exercise what handles the real thing.
+#   EXAMPLEUSER, /home/example     the rest of prompts/redact-values.example.json,
+#                                  fake by construction and shaped like the real
+#                                  values so the round-trip test below is real.
 #   const pem = "-----BEGIN ...    the ONE source line in 1f916-seed-to-sshkey.mjs
 #                                 that writes a key's armor. The scan hunts a
 #                                 committed KEY; a program that emits one is not
@@ -85,9 +102,84 @@ allowed() {
     *commonwealth.moxienerve.food*)  return 0 ;;
     *@example.org*|*@example.com*|*@example.invalid*) return 0 ;;
     *noreply.github.com*)            return 0 ;;
+    *github.com/commonwealth-1f916*|*githubusercontent.com/commonwealth-1f916*) return 0 ;;
+    *github.com/1f916-ai*)           return 0 ;;
+    *api.github.com/users/commonwealth-1f916*) return 0 ;;
+    *claude.ai/code/artifact/00000000-0000-0000-0000-000000000000*) return 0 ;;
+    *EXAMPLEUSER*|*/home/example*)   return 0 ;;
     *1f916_sk_0000000000000000000000000000000000000000000000000000000000000000*) return 0 ;;
   esac
   return 1
+}
+
+# check_redact -- the published templates are FIXED POINTS of prompts/redact.py.
+#
+# Two properties, neither of which needs a real value. (1) IDEMPOTENCE: running
+# the script over an already-redacted template must change nothing. (2) ROUND
+# TRIP: substitute each placeholder back to a fake value, redact, and the
+# template must come back byte-for-byte -- which exercises the ordering the
+# script's own docstring calls load-bearing, since the witness repo contains
+# the fork which contains the login, and the intake address contains the bound
+# domain. prompts/redact-values.example.json nests them the same way on purpose.
+#
+# Why this is worth a check: the guarantee that a regenerated template is
+# faithful currently rests on somebody having compared the previous ones by
+# hand. A change to redact.py that began mangling already-substituted text
+# would pass every other test here and corrupt the NEXT regeneration, and the
+# corruption would ship to the public templates before anyone diffed them.
+check_redact() {
+  vals="prompts/redact-values.example.json"
+  # Not `A && B || C`: that is SC2015, it is not if-then-else, and this repo
+  # raised the shipped-script severity in the very change that cleared the last
+  # two of them. Written out so it cannot be read as one.
+  if [ ! -f prompts/redact.py ] || [ ! -f "$vals" ]; then
+    ok "redact round trip -- SKIPPED: script or example values absent"
+    return 0
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    # Said, not silently passed: the same rule the alert suite follows on macOS.
+    ok "redact round trip -- SKIPPED, not passed: no python3 on this runner"
+    return 0
+  fi
+  bad=""
+  for f in prompts/*.txt; do
+    [ -f "$f" ] || continue
+    if ! python3 - "$f" "$vals" <<'PY'
+import json, subprocess, sys
+tmpl, valsfile = sys.argv[1], sys.argv[2]
+original = open(tmpl, encoding="utf-8").read()
+vals = json.load(open(valsfile, encoding="utf-8"))
+
+def redact(text):
+    p = subprocess.run([sys.executable, "prompts/redact.py", "/dev/stdin", valsfile],
+                       input=text, capture_output=True, text=True)
+    if p.returncode != 0:
+        sys.exit("redact.py failed: " + p.stderr.strip())
+    return p.stdout
+
+# (1) already redacted -> unchanged
+if redact(original) != original:
+    sys.exit("not idempotent: redacting the published template changed it")
+
+# (2) put the fake values in, take them back out, land on the same bytes
+seeded = original
+for ph, v in vals.items():
+    if ph.startswith("<"):
+        seeded = seeded.replace(ph, v)
+if seeded == original:
+    sys.exit("no placeholder was substituted -- the round trip proved nothing")
+if redact(seeded) != original:
+    sys.exit("round trip did not return the template (check PLACEHOLDER_ORDER)")
+PY
+    then
+      bad="$bad $f"
+    fi
+  done
+  if [ -n "$bad" ]; then
+    notok "redact round trip --$bad"
+  else
+    ok "every published template is a fixed point of prompts/redact.py"
+  fi
 }
 
 # scan_list <file-with-one-path-per-line> <label>
@@ -107,6 +199,8 @@ mDNS hostname	[A-Za-z0-9-]+\.local[^A-Za-z0-9-]	hygiene:example
 private IPv4	(192\.168\.[0-9]{1,3}|10\.[0-9]{1,3}\.[0-9]{1,3}|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3})\.[0-9]{1,3}	hygiene:example
 absolute home path	/(home|Users)/[a-z][a-z0-9_-]+	hygiene:example
 mail address	[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}	hygiene:example
+a GitHub owner that is not ours	github(usercontent)?\.com/[A-Za-z0-9][A-Za-z0-9-]*	hygiene:example
+a ledger artifact URL	claude\.ai/code/artifact/[0-9a-fA-F]	hygiene:example
 PATTERNS
 )
 
@@ -216,6 +310,9 @@ cgnat	100.64.0.1	hygiene:example
 homepath	/home/someuser/1f916-witness	hygiene:example
 macpath	/Users/someuser/Projects	hygiene:example
 mail	alerts@some-real-domain.net	hygiene:example
+ghowner	https://github.com/some-other-person/their-fork	hygiene:example
+ghraw	https://raw.githubusercontent.com/some-other-person/repo/main/x	hygiene:example
+ledger	https://claude.ai/code/artifact/76a83c2a-825d-45df-92aa-000000000000	hygiene:example
 SPECIMENS
 )
 
@@ -245,6 +342,13 @@ EOF
     "you@example.org" \
     "321972176+commonwealth-1f916@users.noreply.github.com" \
     "1f916_sk_0000000000000000000000000000000000000000000000000000000000000000" \
+    "https://github.com/commonwealth-1f916/1f916-agent-toolkit" \
+    "https://github.com/1f916-ai/1f916/pull/172" \
+    "https://raw.githubusercontent.com/commonwealth-1f916/1f916-agent-toolkit/main/1f916-gate" \
+    "curl -s https://api.github.com/users/commonwealth-1f916/ssh_signing_keys" \
+    "https://claude.ai/code/artifact/00000000-0000-0000-0000-000000000000" \
+    "EXAMPLEUSER/1f916-witness" \
+    "/home/example" \
     "$PEM_WRITER_LINE" \
     "$PEM_ASSERT_LINE"
   do
@@ -278,6 +382,7 @@ case "${1:-}" in
     trap 'rm -f "$tmpl"' EXIT INT TERM
     git ls-files > "$tmpl"
     scan_list "$tmpl" "no site-specific values in tracked files"
+    check_redact
     ;;
   *)
     echo "usage: $0 [--self-test]" >&2
