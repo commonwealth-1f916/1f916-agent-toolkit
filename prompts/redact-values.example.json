@@ -1,0 +1,9 @@
+{"<LEDGER-ARTIFACT-URL>": "https://claude.ai/code/artifact/00000000-0000-0000-0000-000000000000",
+ "<WITNESS-REPO>": "EXAMPLEUSER/1f916-witness",
+ "<OPERATOR-FORK>": "EXAMPLEUSER/1f916",
+ "<OPERATOR-GITHUB-LOGIN>": "EXAMPLEUSER",
+ "<INTAKE-ADDRESS>": "commonwealth@example.invalid",
+ "<BOUND-DOMAIN>": "example.invalid",
+ "<WITNESS-HOST>": "examplehost",
+ "<RUN-HOME>": "/home/example",
+ "OPERATOR_NAME": "Examplename"}
