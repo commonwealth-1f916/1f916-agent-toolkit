@@ -1,0 +1,164 @@
+# THIS FILE BELONGS AT .github/workflows/pin.yml AND IS NOT ACTIVE HERE.
+#
+# It ships at this path because the GitHub connector the sessions push through
+# cannot write under .github/workflows/ -- that needs a `workflow` scope it does
+# not carry, and the attempt returns 403 "Resource not accessible by
+# integration". Rather than paste YAML out of a pull-request body and retype it,
+# which is the class of handoff this project has been burned by, it is committed
+# verbatim here for the operator to move on the Mac:
+#
+#     git mv tests/pin.workflow.yml .github/workflows/pin.yml
+#     git commit -m 'pin: activate the workflow' && git push
+#
+# Nothing runs until that move. Until then tests/pin.sh is a script anyone can
+# run by hand and CI does not call.
+#
+name: pin
+
+# The pin is a control; this is not. Say that first, because the difference is
+# the reason the control is shaped the way it is.
+#
+# Two files in the operator's private prompts pin a commit in this repository
+# and check three sha-256s before the scheduled runs execute anything. That is
+# what stops a run changing the code the next run will execute. It also means a
+# merge here deploys NOTHING: until a person moves the pin, the runs keep
+# fetching the old commit, and in September that silence lasted 28 commits on
+# one pin and 36 on another. The weekly audit reconciles them now, but weekly is
+# the cadence, and the person who could act was at the keyboard on merge day.
+#
+# So this fires there. It cannot be a boundary: this file lives in the
+# repository it guards, so a pull request that edits it turns it off, and a
+# direct push to main runs only the second job. It exists to make forgetting
+# hard, and it is allowed to be bypassed on purpose -- with a label that says so
+# in public, which is the part a control gives you and a memory does not.
+
+on:
+  pull_request:
+    # labeled/unlabeled included so the acknowledgement re-runs the check
+    # rather than leaving a red tick next to a decision already made.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Does the check still work? Asked before it is believed, exactly as the
+  # hygiene job asks it of tests/hygiene.sh. A detector that has been broken
+  # into never firing is indistinguishable from a quiet week.
+  self-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: prove the pin check can go red
+        run: sh tests/pin.sh --self-test
+
+  owed:
+    needs: self-test
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: does this pull request touch code the runs execute?
+        id: check
+        # The event payload's two SHAs, not the synthetic merge commit actions
+        # /checkout leaves at HEAD -- the merge commit's diff against base also
+        # carries whatever main gained meanwhile, which would fire this on
+        # someone else's change.
+        run: |
+          set +e
+          sh tests/pin.sh \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" | tee /tmp/pin.out
+          echo "code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+        shell: bash
+      - name: acknowledged, or owed
+        env:
+          # Read from the payload rather than interpolated into the script, so a
+          # label containing shell metacharacters is data and not code.
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -e
+          if [ "${{ steps.check.outputs.code }}" = "0" ]; then
+            echo "No tool file changed; the pin is unaffected."
+            exit 0
+          fi
+          if printf '%s' "$LABELS" | grep -q '"pin-deferred"'; then
+            echo "::notice::A tool file changed and the pin move is DEFERRED by label."
+            echo "The deferral is now on the public record. The pin still owes a move"
+            echo "before the runs see this change, and the weekly audit will keep"
+            echo "reporting the gap until it happens."
+            exit 0
+          fi
+          echo "::error::This changes code the scheduled runs execute. Move the pin and cut a signed tag in the same sitting, or label this pull request pin-deferred."
+          exit 1
+
+  # The merge is the moment a person can act on; this is what remains if they
+  # did not, and it is the only half that covers a direct push to main -- which
+  # has happened once (535cf76) and runs no pull-request check at all.
+  record:
+    needs: self-test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: open a pin-owed issue if a tool file moved
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -e
+          # A new branch or a force-push gives an all-zero or unreachable
+          # BEFORE. Say so and stop rather than diffing against nothing and
+          # reporting a quiet result that was never computed.
+          if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "::notice::no reachable previous commit ($BEFORE) -- nothing compared"
+            exit 0
+          fi
+          set +e
+          sh tests/pin.sh "$BEFORE" "$AFTER" | tee /tmp/pin.out
+          code=${PIPESTATUS[0]}
+          set -e
+          # An `&&` list whose left side fails is itself a failure, and this
+          # script runs under `set -e`: written as `[ ... ] && { ...; }` the
+          # job would die exactly when a tool file HAD changed, which is the
+          # only case it exists for. Caught by reading it, not by running it.
+          if [ "$code" = "0" ]; then
+            echo "No tool file changed."
+            exit 0
+          fi
+
+          title="toolkit pin owed: ${AFTER:0:12}"
+          # Same title, same issue: a re-run must not file a second one.
+          if gh issue list --state open --search "$title in:title" \
+               --json title --jq '.[].title' | grep -qxF "$title"; then
+            echo "already filed: $title"
+            exit 0
+          fi
+          {
+            echo "A push to \`main\` changed code the scheduled runs execute."
+            echo
+            echo "Merging did not deploy it. The runs fetch a PINNED commit and verify"
+            echo "three digests before executing anything, so they are still running the"
+            echo "previous code and will keep doing so until a person moves the pin."
+            echo
+            echo '```'
+            cat /tmp/pin.out
+            echo '```'
+            echo
+            echo "Close this issue when the pin has moved in all three places, the signed"
+            echo "tag is pushed, and the ledger row \`prompts/toolkit-pin\` records both."
+            echo "The weekly audit reads that row and will report the gap until then."
+          } > /tmp/body.md
+          gh issue create --title "$title" --body-file /tmp/body.md --label pin-owed \
+            || gh issue create --title "$title" --body-file /tmp/body.md
