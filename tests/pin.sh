@@ -54,6 +54,12 @@ print_digests() {
 
 changed_tools() {
   # Three dots: what this branch changed, not what main changed underneath it.
+  #
+  # $TOOLS is unquoted on purpose: it is three pathspecs, not one. Quoting it
+  # would ask git for a single path named "1f916-gate 1f916-run 1f916-scan",
+  # which matches nothing -- and a check that silently matches nothing is the
+  # failure mode this whole file exists to refuse.
+  # shellcheck disable=SC2086
   git diff --name-only "$1...$2" -- $TOOLS
 }
 
