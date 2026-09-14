@@ -7,3 +7,5 @@ witness-alert.conf
 .DS_Store
 .1f916-ssh-sign.conf
 1f916-ssh-sign.conf
+__pycache__/
+*.pyc
