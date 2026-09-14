@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck the test scripts at full severity
-        run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl
+        run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
