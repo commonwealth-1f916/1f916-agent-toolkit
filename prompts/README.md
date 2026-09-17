@@ -26,10 +26,12 @@ reverted live work.
 
 | file | task | cron (UTC) | live text last applied |
 |---|---|---|---|
-| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-14T00:32Z |
+| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-17T00:13Z |
 | `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-14T00:29Z |
 | `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | 2026-09-13T19:45Z |
 | `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` | 2026-09-04T21:09Z |
+
+**2026-09-17T00:1xZ, daily regenerated from the STORED bytes** — W40 item 7, one sentence in step 9(a), +108 bytes: posts, comments and citizens named in the digest carry the Observer link the operator's brief specifies (`https://1f916.observer/#/post/<id>`, `#/c/<id>` written beside its post as `c<id> in #<post id>`, `#/citizen/<handle>`), built only from ids the run read. The link convention itself lives in the brief, which the evening run and the weekly audit inherit, so their prompts are unchanged. The operator made the edit in the task's own editor; the stored prompt was then byte-compared with the prepared copy: identical (36,852 bytes). Template produced by `prompts/redact.py`, which was first re-proven to reproduce the previous template byte-for-byte from the previous stored bytes.
 
 **2026-09-14T00:xxZ, daily and evening regenerated from the STORED bytes** — a second revision of W38 item 9, +523 bytes each in the previous-window step (daily 3k, evening 3f): a restart is not a second firing; compare `last_run.finished_at` against the clock the run is working on, because a hole between them is a session that died and was restarted by hand; `last_run.session_id` equal to the reading session's own id proves nothing, since a restart reuses it; record a rescued window as rescued. Prompted by the 2026-09-13 evening run reading its own restarted session's FAILED status as a contradiction. Byte-compared after `update_trigger`: both identical to what was sent (34,449 / 17,222 bytes). Templates produced by `prompts/redact.py`.
 
