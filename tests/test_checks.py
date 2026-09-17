@@ -103,8 +103,10 @@ class Base(unittest.TestCase):
         cmd = [sys.executable, SCRIPT] + list(args)
         if kw.get("offline", True):
             cmd += ["--offline-dir", self.offline]
+        env = git_env()
+        env.update(kw.get("env_extra", {}))
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                           env=git_env(), input=kw.get("stdin"))
+                           env=env, input=kw.get("stdin"))
         self.assertEqual(p.returncode, want, "exit %d, stderr: %s stdout: %s" % (
             p.returncode, p.stderr.decode()[:500], p.stdout.decode()[:500]))
         if want == 64:
@@ -271,6 +273,7 @@ class Witness(Base):
         self.assertEqual(out["new_pair"], {"n": 300, "prefix_hash": sha(self.body)})
         self.assertEqual(out["refused_lines"], 0)
         self.assertEqual(out["refused_new"], 0)
+        self.assertEqual(out["refused_new_scope"], "since_prior_n")
 
     def test_modified_early_line_flips_prefix_match(self):
         tampered = list(self.lines)
@@ -320,6 +323,28 @@ class Witness(Base):
         self.assertEqual(len(out["refused_examples"]), 2)
         self.assertEqual(out["refused_examples"][0]["status"], "refused-inconsistent")
         self.assertTrue(out["prefix_match"])
+
+    def test_refused_new_without_a_usable_n_counts_the_whole_file(self):
+        # A prior row without an integer n used to leave refused_new null while
+        # refused_lines counted the file, and the daily reads refused_new 0 as
+        # the pass. Now the count is over the whole file and the scope says so.
+        o = json.loads(self.lines[5])
+        o["status"] = "refused-inconsistent"
+        body = b"".join(self.lines[:5]) + (json.dumps(o) + "\n").encode() + b"".join(self.lines[6:])
+        self.serve(WITNESS_URL, body)
+        for prior_data, missing in (({"prefix_hash": "0" * 64}, ["n"]),
+                                    ({"n": "250", "prefix_hash": "0" * 64}, ["n"]),
+                                    (None, ["prior"])):
+            args = ["witness", "--url", WITNESS_URL]
+            if prior_data is not None:
+                args += ["--prior", self.write("pair.json", prior_data)]
+            out = self.run_checks(*args)
+            self.assertEqual(out["baseline_missing"], missing)
+            self.assertEqual(out["refused_new"], 1)
+            self.assertEqual(out["refused_new_scope"], "whole_file")
+            self.assertEqual(out["refused_examples"][0]["status"], "refused-inconsistent")
+            self.assertIsNone(out["appended"])
+            self.assertIsNone(out["prefix_match"])
 
     def test_no_trailing_newline_pairs_complete_lines_only(self):
         body = self.body[:-1]
@@ -629,6 +654,98 @@ class WitnessGaps(GitBase):
         out = self.run_checks("witness-gaps", "--repo", self.url(repo), "--gap-minutes", "100000")
         self.assertEqual(out["commits"], 5)
         self.assertEqual(out["gaps_over"], [])
+
+    def hourly(self, repo, stamps):
+        path = "witness-state/countersignatures.jsonl"
+        body = ""
+        for i, when in enumerate(stamps):
+            body += "%d\n" % i
+            self.commit_file(repo, path, body, when=when)
+
+    def test_one_missed_tick_is_a_gap_on_the_boundary_and_below_it(self):
+        # plumbline (c65503 on #3427): one missed hourly tick lands at exactly
+        # 7200 s, and a strict > 120 let it through; an early next tick lands
+        # below 120 and needs the 1.5x-cadence default.
+        repo = self.new_repo("witness")
+        self.hourly(repo, ["2026-09-10T10:07:00Z", "2026-09-10T11:07:00Z",
+                           # 12:07 missed: exactly 120 minutes
+                           "2026-09-10T13:07:00Z", "2026-09-10T14:07:00Z",
+                           # 15:07 missed and 16:07 fired a minute early: 119 minutes
+                           "2026-09-10T16:06:00Z", "2026-09-10T17:07:00Z"])
+        out = self.run_checks("witness-gaps", "--repo", self.url(repo))
+        self.assertEqual(out["gap_minutes"], 90.0)
+        self.assertEqual([g["minutes"] for g in out["gaps_over"]], [120.0, 119.0])
+        self.assertEqual(out["max_gap_minutes"], 120.0)
+
+        # at 120 the boundary case is caught (>=) and the early tick is not
+        out = self.run_checks("witness-gaps", "--repo", self.url(repo), "--gap-minutes", "120")
+        self.assertEqual([g["minutes"] for g in out["gaps_over"]], [120.0])
+
+    def test_drop_one_tick_counterfactual(self):
+        repo = self.new_repo("witness")
+        # a clean hourly run with jitter: every tick 60 min apart except one
+        # that fired 2 min early and one 1 min late
+        self.hourly(repo, ["2026-09-10T10:07:00Z", "2026-09-10T11:07:00Z", "2026-09-10T12:05:00Z",
+                           "2026-09-10T13:07:00Z", "2026-09-10T14:08:00Z", "2026-09-10T15:07:00Z"])
+        out = self.run_checks("witness-gaps", "--repo", self.url(repo))
+        self.assertEqual(out["gaps_over"], [])
+        sens = out["sensitivity_at_unit_failure"]
+        self.assertEqual(sens["positions"], 4)
+        self.assertEqual(sens["detected"], 4)
+        self.assertEqual(sens["silent"], 0)
+        self.assertEqual(sens["rate"], 1.0)
+
+        # the old threshold is blind to most of the same drops: 120/118/121/120
+        # merged gaps against >= 120 miss exactly the 118-minute one
+        out = self.run_checks("witness-gaps", "--repo", self.url(repo), "--gap-minutes", "120")
+        sens = out["sensitivity_at_unit_failure"]
+        self.assertEqual((sens["detected"], sens["silent"]), (3, 1))
+        self.assertEqual(sens["silent_examples"][0]["merged_minutes"], 118.0)
+        self.assertEqual(sens["rate"], 0.75)
+
+        # fewer than three commits: nothing to drop, and no rate is invented
+        solo = self.new_repo("solo")
+        self.hourly(solo, ["2026-09-10T10:07:00Z", "2026-09-10T11:07:00Z"])
+        out = self.run_checks("witness-gaps", "--repo", self.url(solo))
+        self.assertEqual(out["sensitivity_at_unit_failure"]["positions"], 0)
+        self.assertIsNone(out["sensitivity_at_unit_failure"]["rate"])
+
+
+class GitEnvironment(GitBase):
+    def test_askpass_variables_never_reach_git(self):
+        # GIT_ASKPASS and SSH_ASKPASS outrank the core.askPass= the program
+        # passes, so they are removed from the child environment. Proved two
+        # ways: an askpass that would fail loudly is never called, and a git
+        # shim on PATH records the environment it was actually handed.
+        repo = self.new_repo(os.path.join("commonwealth-1f916", "remote"))
+        self.commit_file(repo, "f", "x\n")
+        marker = os.path.join(self.tmp, "askpass-called")
+        askpass = self.write("askpass.sh", "#!/bin/sh\ntouch '%s'\necho nope\nexit 1\n" % marker)
+        os.chmod(askpass, 0o755)
+        real_git = shutil.which("git")
+        seen = os.path.join(self.tmp, "seen-env")
+        shim_dir = os.path.join(self.tmp, "shim")
+        os.mkdir(shim_dir)
+        shim = os.path.join(shim_dir, "git")
+        with open(shim, "w") as fh:
+            fh.write("#!/bin/sh\nenv > '%s'\nexec '%s' \"$@\"\n" % (seen, real_git))
+        os.chmod(shim, 0o755)
+        env_extra = {"GIT_ASKPASS": askpass, "SSH_ASKPASS": askpass,
+                     "GIT_CONFIG_PARAMETERS": "'credential.helper'='!%s'" % askpass,
+                     "PATH": shim_dir + os.pathsep + os.environ.get("PATH", "")}
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, stdout=subprocess.PIPE,
+                              env=git_env()).stdout.decode().strip()
+        self.serve("https://raw.githubusercontent.com/commonwealth-1f916/remote/%s/f" % head, b"x\n")
+        local = self.write("local-f", b"x\n")
+        out = self.run_checks("push-verify", "--repo", "commonwealth-1f916/remote", "--ref", "main", "--file", "f=" + local,
+                              "--git-base", "file://" + self.tmp, env_extra=env_extra, want=0)
+        self.assertEqual(out["sha"], head)
+        self.assertFalse(os.path.exists(marker))
+        with open(seen) as fh:
+            names = set(line.split("=", 1)[0] for line in fh.read().splitlines())
+        self.assertIn("GIT_TERMINAL_PROMPT", names)
+        for name in ("GIT_ASKPASS", "SSH_ASKPASS", "GIT_CONFIG_PARAMETERS"):
+            self.assertNotIn(name, names)
 
 
 # ---------------------------------------------------------------------------

@@ -276,6 +276,12 @@ class Ctx(object):
             raise CouldNotRun("git not found on PATH")
         env = dict(os.environ)
         env["GIT_TERMINAL_PROMPT"] = "0"
+        # core.askPass= on the command line does not reach these: GIT_ASKPASS
+        # and SSH_ASKPASS outrank core.askPass, and GIT_CONFIG_PARAMETERS
+        # carries -c values from a parent git. None has a use in an
+        # unauthenticated read, so none is inherited.
+        for name in ("GIT_ASKPASS", "SSH_ASKPASS", "GIT_CONFIG_PARAMETERS"):
+            env.pop(name, None)
         cmd = ["git", "-c", "credential.helper=", "-c", "core.askPass="] + args
         try:
             p = subprocess.run(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
@@ -477,6 +483,7 @@ def cmd_witness(ctx, args):
         "last_status": last.get("status"),
         "refused_lines": sum(1 for o in objs if refused(o)),
         "refused_new": None,
+        "refused_new_scope": None,
         "refused_examples": None,
         "full_sha256": full,
         "prior_n": None,
@@ -489,9 +496,18 @@ def cmd_witness(ctx, args):
         "new_pair": {"n": complete,
                      "prefix_hash": full if ends_nl else sha256_hex(all_prefix)},
     }
+    def count_refused(start, scope):
+        new = [o for o in objs[start:] if refused(o)]
+        out["refused_new"] = len(new)
+        out["refused_new_scope"] = scope
+        out["refused_examples"] = new[:3]
+
+    # With no usable prior n, "new" is counted over the whole file and the
+    # scope says so: a superset, so 0 still means no refused line was missed.
     prior = ctx.read_row(args.prior)
     if prior is None:
         out["baseline_missing"] = ["prior"]
+        count_refused(0, "whole_file")
         return out
     n = prior.get("n")
     ph = prior.get("prefix_hash")
@@ -502,10 +518,10 @@ def cmd_witness(ctx, args):
         out["baseline_missing"].append("prefix_hash")
     out["prior_n"] = n
     out["prior_prefix_hash"] = ph
-    if n is not None:
-        new = [o for o in objs[n:] if refused(o)]
-        out["refused_new"] = len(new)
-        out["refused_examples"] = new[:3]
+    if n is None:
+        count_refused(0, "whole_file")
+    else:
+        count_refused(n, "since_prior_n")
         out["appended"] = len(raw_lines) - n
         prefix = line_prefix(body, n)
         if prefix is None:
@@ -863,9 +879,25 @@ def cmd_witness_gaps(ctx, args):
         ma = round((b[2] - a[2]) / 60.0, 1)
         max_c = mc if max_c is None else max(max_c, mc)
         max_a = ma if max_a is None else max(max_a, ma)
-        if exact > gap:
+        if exact >= gap:
             gaps.append({"from_sha": a[0], "to_sha": b[0], "from": epoch_iso(a[1]),
                          "to": epoch_iso(b[1]), "minutes": mc})
+    # Drop-one-tick counterfactual: remove each interior commit in turn and ask
+    # whether the gap it leaves would be reported. This is the rule's recall
+    # for the failure it exists to catch, measured on the history in front of it.
+    silent = []
+    positions = max(len(commits) - 2, 0)
+    for i in range(1, len(commits) - 1):
+        merged = (commits[i + 1][1] - commits[i - 1][1]) / 60.0
+        if merged < gap:
+            silent.append({"dropped_sha": commits[i][0], "merged_minutes": round(merged, 1)})
+    sensitivity = {
+        "positions": positions,
+        "detected": positions - len(silent),
+        "silent": len(silent),
+        "rate": round((positions - len(silent)) / float(positions), 4) if positions else None,
+        "silent_examples": silent[:3],
+    }
     non_append = []
     for sha, ct, _at, parent in commits:
         stat = ctx.git(["diff", "--numstat", parent or EMPTY_TREE, sha, "--", args.path], cwd=clone)
@@ -877,11 +909,13 @@ def cmd_witness_gaps(ctx, args):
         "repo": args.repo, "path": args.path,
         "since": iso(since) if since else None,
         "gap_minutes": gap,
+        "gap_rule": "minutes >= gap_minutes, committer clock",
         "commits": len(commits),
         "first": epoch_iso(commits[0][1]) if commits else None,
         "last": epoch_iso(commits[-1][1]) if commits else None,
         "max_gap_minutes": max_c,
         "gaps_over": gaps,
+        "sensitivity_at_unit_failure": sensitivity,
         "non_append_commits": non_append,
         "author_clock_max_gap_minutes": max_a,
     }
@@ -1163,7 +1197,9 @@ def build_parser():
     s.add_argument("--repo", required=True, help="clone URL of the witness repo")
     s.add_argument("--path", default="witness-state/countersignatures.jsonl")
     s.add_argument("--since")
-    s.add_argument("--gap-minutes", type=float, default=120.0)
+    # 1.5x the hourly cadence: one missed tick is ~120 min, early ticks pull it
+    # below 120, and ordinary spacing is ~60.
+    s.add_argument("--gap-minutes", type=float, default=90.0)
 
     s = sub.add_parser("hygiene", parents=[common])
     s.add_argument("--doc", action="append")
