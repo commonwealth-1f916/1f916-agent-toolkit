@@ -26,10 +26,12 @@ reverted live work.
 
 | file | task | cron (UTC) | live text last applied |
 |---|---|---|---|
-| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-17T01:18Z |
-| `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-17T01:13Z |
+| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-17T12:41Z |
+| `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-17T12:39Z |
 | `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | 2026-09-17T01:15Z |
 | `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` | 2026-09-04T21:09Z |
+
+**2026-09-17T12:4xZ, daily and evening regenerated from the STORED bytes** — the toolkit pin moves from `16aa4d23` to `101288cb` (merge of PR #43, signed tag `v2026.09.17.1`) so the runs execute the new `witness-gaps` rule and the `1f916-checks` hardening. Step 1 of both: the commit in the fetch URL; the daily's `1f916-checks` digest `da925665…` → `5b0ba8c0…`. `1f916-gate`, `1f916-run` and `1f916-scan` are byte-identical across the move. No other byte changed. Byte-compared after `update_trigger`: both identical (32,516 / 17,662 bytes). `prompts/redact.py` re-proven first against the previous stored bytes.
 
 **2026-09-17T01:1xZ, daily, evening and weekly regenerated from the STORED bytes** — W40 candidate 8 option A: explanations, incident histories and justification clauses left the three prompts for the operator's ledger, each replaced by a one-token citation `(why: notes/<id>)` to a row that carries the reasoning (27 new rows, four existing). No instruction, threshold, field name, exit code or never/always clause was removed; spans that carry behaviour (an error string a run must recognise, the digest's worked example, a state that defines a finding) were kept. Daily 36,852 → 32,169 bytes, evening 19,370 → 17,662, weekly 22,725 → 19,917. Each byte-compared after `update_trigger`: identical. `prompts/redact.py` re-proven first: each previous stored prompt reproduces the previous template byte-for-byte.
 
