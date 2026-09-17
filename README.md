@@ -253,6 +253,49 @@ neither credential ever reaches argv or output.
 
 ---
 
+## `1f916-checks` — the arithmetic, pinned
+
+```sh
+python3 1f916-checks surface --prior route-surface.json --emit-baseline
+```
+
+Every scheduled run used to re-derive the same recipes from English: sort the
+route lines and hash them with one trailing newline, serialise the route objects
+with `ensure_ascii` left on, truncate the witness file to yesterday's line count
+*including* the newline that ends the last line, and hash that. Each re-derivation
+was a fresh chance to get one detail wrong and store the wrong baseline, and a
+wrong baseline does not fail -- it reports a change tomorrow that never happened.
+So the recipes live here once, with the stored values as test literals.
+
+Fifteen subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
+`hashes`, `seal`, `homepage`, `bindings`, `front`, `docket`, `push-verify`
+fetch public things and hash or diff them; `model`, `window`, `hygiene`,
+`tally` and `queue-age` read files the caller saved. Each prints ONE JSON object
+naming every URL it read, with its status, byte count and sha-256.
+
+What it refuses to do: **judge** (a changed hash is exit 0 with the change in the
+output -- what it means is the run's decision), **write** (ledger rows come in as
+files, and nothing is written outside `--workdir`), and **hold a credential**
+(there is no authenticated call in it; that is `1f916-run`'s job). Python 3.9+
+standard library only; `git` is the one external command.
+
+| code | meaning |
+|---|---|
+| 0 | the check ran -- whatever the values say |
+| 3 | **could not run** -- network, non-2xx, unparseable input, missing git; the JSON still prints, with a reason and no partial result |
+| 64 | usage error |
+
+No operator value is built in. `witness` and `witness-gaps` take the witness
+repository by `--url` / `--repo`, `docket` takes the fork by `--fork`, and
+`hygiene` takes the name its second pattern hunts by `--operator` -- all
+required, because this repository does not publish those names and a default
+would be the place it started to. `tests/checks.sh` runs with no network: live
+captures stand in for the registry, throwaway repos stand in for GitHub, and a
+red-path test breaks the canonical serialisation and requires the stored digests
+to reject it.
+
+---
+
 ## Checking it yourself
 
 ```sh
@@ -262,6 +305,7 @@ sh tests/config-transport.sh # 5 against REAL curl, on loopback, with a ps(1) co
 sh tests/sign.sh             # 12 for the identity-key signing chain, throwaway key, no op
 sh tests/scan.sh             # 9 for the credential scan: planted copies found, pattern never printed
 sh tests/run.sh              # 55 for the unattended wrapper: shape refusals, first-failure stop, call order, no secret on argv
+sh tests/checks.sh           # 37 for the pinned recipes: golden digests, prefix and freshness edges, local git repos
 sh tests/mutants.sh          # breaks the gate, the wrapper and the alarm twenty-six ways and requires the suites to notice
 sh tests/hygiene.sh          # what the TREE may contain: recorded modes, no site-specific values
 sh tests/hygiene.sh --self-test   # and requires that scan to catch a planted specimen of each
