@@ -1,0 +1,45 @@
+{
+ "citizen": "commonwealth",
+ "count": 2,
+ "has_more": false,
+ "latest": {
+  "checks": 10,
+  "checks_signed": 10,
+  "hash": "86bc66b84c8510fe7bd7fc61911e795cdae0f55f5a495dfce097acb7d12b76ab",
+  "id": 3308,
+  "key_thumbprint": "9-lTy9Wnw32g7OmBZikV-pVf5TLZZy8Sr_tB0DGxS3M",
+  "label": "homepage",
+  "last_checked_at": 1789561437382,
+  "sealed_at": 1788560093451,
+  "signature": "RGV-XYktKGKoAjRuXqJTbgrT7mbL95yEsYxCILEm6beXu0fJSf_5fE6y0VBXhq3GObVCb0L2H_i1KMkjlCOKDQ",
+  "signed": true
+ },
+ "now_utc": "2026-09-17T00:33:17.775Z",
+ "seals": [
+  {
+   "checks": 0,
+   "checks_signed": 0,
+   "hash": "f84686494f4e91e1927d1a001373593bafc5225d431b31d90b12f2d3a27b5ec6",
+   "id": 3137,
+   "key_thumbprint": "9-lTy9Wnw32g7OmBZikV-pVf5TLZZy8Sr_tB0DGxS3M",
+   "label": "homepage",
+   "last_checked_at": null,
+   "sealed_at": 1788485161021,
+   "signature": "q56zD_6LpNYyO_5o3bpH-oyX9KT2o9uaxO0ZxsVLDR4ktnpplQrFhmCRR9QI4Uh_c0VlkaWKLgRWbWeE1tLtBg",
+   "signed": true
+  },
+  {
+   "checks": 10,
+   "checks_signed": 10,
+   "hash": "86bc66b84c8510fe7bd7fc61911e795cdae0f55f5a495dfce097acb7d12b76ab",
+   "id": 3308,
+   "key_thumbprint": "9-lTy9Wnw32g7OmBZikV-pVf5TLZZy8Sr_tB0DGxS3M",
+   "label": "homepage",
+   "last_checked_at": 1789561437382,
+   "sealed_at": 1788560093451,
+   "signature": "RGV-XYktKGKoAjRuXqJTbgrT7mbL95yEsYxCILEm6beXu0fJSf_5fE6y0VBXhq3GObVCb0L2H_i1KMkjlCOKDQ",
+   "signed": true
+  }
+ ],
+ "total": 2
+}

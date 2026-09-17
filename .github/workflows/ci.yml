@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck the test scripts at full severity
-        run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh
+        run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh tests/checks.sh
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
@@ -63,6 +63,21 @@ jobs:
         run: sh tests/hygiene.sh --self-test
       - name: recorded modes and no site-specific values
         run: sh tests/hygiene.sh
+
+  checks:
+    # 1f916-checks is the arithmetic the scheduled runs used to re-derive from
+    # prose every morning. Both hosts, because it has to run in a Linux run
+    # container and on macOS alike, and a recipe that hashes differently on
+    # two machines is the exact failure it exists to remove.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: pinned recipes against live captures, no network
+        run: python3 --version && sh tests/checks.sh
 
   gate-tests:
     strategy:

@@ -1,7 +1,7 @@
 #!/bin/sh
 # tests/pin.sh -- does this change touch code the scheduled runs execute?
 #
-# Three files in this repository are fetched at a PINNED COMMIT by the two
+# Four files in this repository are fetched at a PINNED COMMIT by the two
 # scheduled runs and executed with the citizen's bearer token in play. Changing
 # one of them on main does not change what the runs do: they keep fetching the
 # pinned commit and checking its digests, so a merged improvement sits unused
@@ -23,14 +23,14 @@
 #
 # Usage:
 #   sh tests/pin.sh <base-ref> <head-ref>   names the tool files that changed
-#   sh tests/pin.sh --digests [<ref>]       the three digests, for pasting
+#   sh tests/pin.sh --digests [<ref>]       the four digests, for pasting
 #   sh tests/pin.sh --self-test             proves this script can go red
 #
 # Exit 0: no tool file changed.  Exit 1: at least one did, and the pin is owed.
 
 set -e
 
-TOOLS='1f916-gate 1f916-run 1f916-scan'
+TOOLS='1f916-gate 1f916-run 1f916-scan 1f916-checks'
 
 # macOS ships shasum, Debian ships sha256sum, and this script guards a program
 # that runs on both. Same reason tests/gate.sh carries the pair.
@@ -55,7 +55,7 @@ print_digests() {
 changed_tools() {
   # Three dots: what this branch changed, not what main changed underneath it.
   #
-  # $TOOLS is unquoted on purpose: it is three pathspecs, not one. Quoting it
+  # $TOOLS is unquoted on purpose: it is four pathspecs, not one. Quoting it
   # would ask git for a single path named "1f916-gate 1f916-run 1f916-scan",
   # which matches nothing -- and a check that silently matches nothing is the
   # failure mode this whole file exists to refuse.
@@ -127,7 +127,7 @@ print_digests "$2"
 echo
 cat <<'OWED'
 Merging this does NOT deploy it. The runs fetch a pinned commit and verify
-three digests before executing anything, so until the pin moves they keep
+four digests before executing anything, so until the pin moves they keep
 running the old code and nothing reports the gap for up to a week.
 
 What is owed, and it is one sitting:

@@ -1,0 +1,1235 @@
+#!/usr/bin/env python3
+"""1f916-checks -- the scheduled runs' mechanical checks, pinned and tested.
+
+Every morning and evening a scheduled run used to re-derive the same arithmetic
+from English: fetch the route surface and hash it, truncate the witness file to
+yesterday's line count and hash that, diff the front page against yesterday's
+map. Each re-derivation was a fresh chance to get a recipe subtly wrong and
+store the wrong baseline. This file is the recipes, once, with tests.
+
+What it does: fetch public, unauthenticated things; hash them; compare them with
+ledger rows the caller passes in as files; print ONE JSON object on stdout.
+
+What it refuses to do, by construction:
+  - hold or read a credential. There is no authenticated call in here, and the
+    only environment it relies on is the proxy/CA settings urllib and git honour
+    on their own. Anything credentialed belongs to 1f916-run.
+  - read or write the ledger. Rows come in as files; what is printed is what the
+    caller may store.
+  - judge. A changed hash is exit 0 with the change in the output. What the
+    change means is the caller's decision.
+  - write outside its --workdir (default: a fresh temp dir it deletes).
+
+Exit codes: 0 status ok (whatever the values say), 3 could_not_run (the JSON is
+still printed, with a reason, and no partial result), 64 usage error.
+
+Python 3.9+ standard library only. `git` is the only external command, and only
+docket, push-verify and witness-gaps use it.
+"""
+
+import argparse
+import datetime
+import hashlib
+import json
+import os
+import re
+import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+VERSION = 1
+USER_AGENT = "1f916-checks/1"
+REGISTRY = "https://1f916.ai"
+HOMEPAGE_LIVE = "https://commonwealth.moxienerve.food/"
+HOMEPAGE_REPO = ("https://raw.githubusercontent.com/commonwealth-1f916/"
+                 "commonwealth.moxienerve.food/main/index.html")
+UPSTREAM = "https://github.com/1f916-ai/1f916"
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+EXIT_OK = 0
+EXIT_NOT_RUN = 3
+EXIT_USAGE = 64
+
+
+class CouldNotRun(Exception):
+    """The check did not run. Never collapsed into a result."""
+
+
+# ---------------------------------------------------------------------------
+# canonical recipes -- the point of the file
+
+def sha256_hex(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def canonical_json(obj):
+    # ensure_ascii stays at its default (True). The route summaries contain
+    # non-ASCII, and the stored digests were computed with \\u escapes.
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"))
+
+
+def route_line(obj):
+    return "%s %s" % (obj["method"], obj["path"])
+
+
+def route_list_text(lines):
+    return "\n".join(sorted(lines)) + "\n"
+
+
+def route_sha256(routes):
+    return sha256_hex(route_list_text([route_line(o) for o in routes]).encode("utf-8"))
+
+
+def capability_sha256(routes):
+    ordered = sorted(routes, key=route_line)
+    return sha256_hex(canonical_json(ordered).encode("utf-8"))
+
+
+def route_digest(obj):
+    return sha256_hex(canonical_json(obj).encode("utf-8"))[:16]
+
+
+def line_prefix(body, n):
+    """The first n lines INCLUDING the newline ending line n, or None if the
+    body has fewer than n complete lines."""
+    if n <= 0:
+        return b""
+    pos = -1
+    for _ in range(n):
+        pos = body.find(b"\n", pos + 1)
+        if pos < 0:
+            return None
+    return body[:pos + 1]
+
+
+# ---------------------------------------------------------------------------
+# time
+
+_ISO = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?"
+    r"\s*(Z|[+-]\d{2}:?\d{2})?$")
+
+
+def parse_iso(text):
+    """ISO 8601 -> aware UTC datetime. Returns None when unparseable."""
+    if not isinstance(text, str):
+        return None
+    m = _ISO.match(text.strip())
+    if not m:
+        return None
+    y, mo, d, h, mi, s, frac, tz = m.groups()
+    try:
+        dt = datetime.datetime(int(y), int(mo), int(d), int(h or 0), int(mi or 0),
+                               int(s or 0), int((frac or "0")[:6].ljust(6, "0")),
+                               tzinfo=datetime.timezone.utc)
+    except ValueError:
+        return None
+    if tz and tz != "Z":
+        sign = 1 if tz[0] == "+" else -1
+        digits = tz[1:].replace(":", "")
+        dt -= sign * datetime.timedelta(hours=int(digits[:2]), minutes=int(digits[2:]))
+    return dt
+
+
+def iso(dt):
+    return dt.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def epoch_iso(seconds):
+    return iso(datetime.datetime.fromtimestamp(seconds, tz=datetime.timezone.utc))
+
+
+def ms_or_iso(value):
+    """Registry timestamps are epoch ms; tool timestamps are ISO strings."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return datetime.datetime.fromtimestamp(value / 1000.0, tz=datetime.timezone.utc)
+    return parse_iso(value)
+
+
+# ---------------------------------------------------------------------------
+# context: inputs record, network, files, git
+
+class Ctx(object):
+    def __init__(self, args):
+        self.offline_dir = getattr(args, "offline_dir", None)
+        self.timeout = getattr(args, "timeout", 30.0)
+        self.inputs = {"urls": [], "files": []}
+        now = getattr(args, "now", None)
+        if now:
+            parsed = parse_iso(now)
+            if parsed is None:
+                raise CouldNotRun("--now is not ISO 8601: %r" % now)
+            self.now = parsed
+        else:
+            self.now = datetime.datetime.now(datetime.timezone.utc)
+        self._workdir_arg = getattr(args, "workdir", None)
+        self._workdir = None
+        self._own_workdir = False
+
+    # -- network ------------------------------------------------------------
+    def fetch(self, url, cache_bust=False):
+        """GET url -> bytes. Records {url, status, bytes, sha256}."""
+        key_url = url
+        if cache_bust:
+            url = url + ("&" if "?" in url else "?") + "cb=" + secrets.token_hex(8)
+        rec = {"url": url, "status": None, "bytes": None, "sha256": None}
+        self.inputs["urls"].append(rec)
+        if self.offline_dir:
+            path = os.path.join(self.offline_dir, sha256_hex(key_url.encode("utf-8")))
+            try:
+                with open(path, "rb") as fh:
+                    body = fh.read()
+            except OSError:
+                raise CouldNotRun("fetch failed: %s (offline file absent)" % key_url)
+            rec.update(status=200, bytes=len(body), sha256=sha256_hex(body))
+            return body
+        last = None
+        for attempt in (1, 2):
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    body = resp.read()
+                    status = resp.status
+            except urllib.error.HTTPError as e:
+                rec["status"] = e.code
+                last = "HTTP %d from %s" % (e.code, url)
+                if e.code >= 500 and attempt == 1:
+                    time.sleep(2)
+                    continue
+                raise CouldNotRun("fetch failed: " + last)
+            except (urllib.error.URLError, OSError) as e:
+                last = "%s from %s" % (getattr(e, "reason", e), url)
+                if attempt == 1:
+                    time.sleep(2)
+                    continue
+                raise CouldNotRun("fetch failed: " + last)
+            rec.update(status=status, bytes=len(body), sha256=sha256_hex(body))
+            if not 200 <= status < 300:
+                raise CouldNotRun("fetch failed: HTTP %d from %s" % (status, url))
+            return body
+        raise CouldNotRun("fetch failed: " + str(last))
+
+    def fetch_json(self, url, cache_bust=False):
+        body = self.fetch(url, cache_bust=cache_bust)
+        try:
+            return json.loads(body.decode("utf-8"))
+        except ValueError as e:
+            raise CouldNotRun("unparseable JSON from %s: %s" % (url, e))
+
+    # -- files --------------------------------------------------------------
+    def read_file(self, path, role):
+        try:
+            if path == "-":
+                data = sys.stdin.buffer.read()
+            else:
+                with open(path, "rb") as fh:
+                    data = fh.read()
+        except OSError as e:
+            raise CouldNotRun("%s unreadable: %s (%s)" % (role, path, e.strerror))
+        self.inputs["files"].append({"role": role, "path": path, "bytes": len(data),
+                                     "sha256": sha256_hex(data)})
+        return data
+
+    def read_json(self, path, role):
+        data = self.read_file(path, role)
+        try:
+            return json.loads(data.decode("utf-8"))
+        except ValueError as e:
+            raise CouldNotRun("%s is not JSON: %s (%s)" % (role, path, e))
+
+    def read_row(self, path, role="prior"):
+        """A ledger row as read_db saves it: bare, or {id, data, version}."""
+        if path is None:
+            return None
+        row = self.read_json(path, role)
+        if isinstance(row, dict) and isinstance(row.get("data"), dict):
+            row = row["data"]
+        if not isinstance(row, dict):
+            raise CouldNotRun("%s is not a JSON object: %s" % (role, path))
+        return row
+
+    # -- git ----------------------------------------------------------------
+    def workdir(self):
+        if self._workdir is None:
+            if self._workdir_arg:
+                os.makedirs(self._workdir_arg, exist_ok=True)
+                self._workdir = self._workdir_arg
+            else:
+                self._workdir = tempfile.mkdtemp(prefix="1f916-checks-")
+                self._own_workdir = True
+        return self._workdir
+
+    def cleanup(self):
+        if self._own_workdir and self._workdir:
+            shutil.rmtree(self._workdir, ignore_errors=True)
+
+    def git(self, args, cwd=None):
+        if shutil.which("git") is None:
+            raise CouldNotRun("git not found on PATH")
+        env = dict(os.environ)
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        cmd = ["git", "-c", "credential.helper=", "-c", "core.askPass="] + args
+        try:
+            p = subprocess.run(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, timeout=600)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise CouldNotRun("git %s failed: %s" % (args[0], e))
+        if p.returncode != 0:
+            raise CouldNotRun("git %s failed (exit %d): %s" % (
+                args[0], p.returncode, p.stderr.decode("utf-8", "replace").strip()[:300]))
+        return p.stdout.decode("utf-8", "replace")
+
+    def ls_remote(self, url, ref):
+        out = self.git(["ls-remote", url, ref])
+        refs = {}
+        for line in out.splitlines():
+            parts = line.split("\t")
+            if len(parts) == 2:
+                refs[parts[1]] = parts[0]
+        for name in ("refs/heads/" + ref, ref, "refs/tags/" + ref + "^{}", "refs/tags/" + ref):
+            if name in refs:
+                return refs[name]
+        if len(refs) == 1:
+            return list(refs.values())[0]
+        if re.match(r"^[0-9a-f]{40}$", ref):
+            return ref
+        raise CouldNotRun("ref %s not found (or ambiguous: %d matches) at %s" % (ref, len(refs), url))
+
+
+def split_pair(text, flag):
+    if "=" not in text:
+        raise UsageError("%s wants NAME=VALUE, got %r" % (flag, text))
+    name, value = text.split("=", 1)
+    if not name:
+        raise UsageError("%s wants NAME=VALUE, got %r" % (flag, text))
+    return name, value
+
+
+class UsageError(Exception):
+    pass
+
+
+# ---------------------------------------------------------------------------
+# surface
+
+def prior_lines(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [l for l in value.split("\n") if l]
+    if isinstance(value, list):
+        return [str(l) for l in value]
+    return None
+
+
+def cmd_surface(ctx, args):
+    payload = ctx.fetch_json(REGISTRY + "/api/surface")
+    routes = payload.get("routes") if isinstance(payload, dict) else None
+    if not isinstance(routes, list):
+        raise CouldNotRun("surface payload has no routes[] list")
+    for o in routes:
+        if not isinstance(o, dict) or "method" not in o or "path" not in o:
+            raise CouldNotRun("a route object lacks method or path")
+    lines = sorted(route_line(o) for o in routes)
+    if len(set(lines)) != len(lines):
+        raise CouldNotRun("duplicate route lines in the served surface")
+    by_line = dict((route_line(o), o) for o in routes)
+    digest_map = dict((l, route_digest(by_line[l])) for l in lines)
+    out = {
+        "count": len(routes),
+        "route_sha256": route_sha256(routes),
+        "capability_sha256": capability_sha256(routes),
+        "catalogue_sha256": payload.get("catalogue_sha256"),
+        "digest_map": digest_map,
+    }
+    comparison = ("prior", "route_list_changed", "capability_changed", "added", "removed",
+                  "changed_routes", "localised_by")
+    for k in comparison:
+        out[k] = None
+    out["localisable"] = None
+    out["baseline_missing"] = []
+    prior = ctx.read_row(args.prior)
+    if prior is None:
+        out["baseline_missing"] = ["prior"]
+    else:
+        missing = []
+        p_count = prior.get("routes", prior.get("count"))
+        p_route = prior.get("sha256", prior.get("route_sha256"))
+        p_cap = prior.get("capability_sha256")
+        if isinstance(p_count, list):
+            p_count = len(p_count)
+        out["prior"] = {"count": p_count, "route_sha256": p_route, "capability_sha256": p_cap}
+        if p_count is None:
+            missing.append("routes")
+        if p_route is None:
+            missing.append("sha256")
+        if p_cap is None:
+            missing.append("capability_sha256")
+        p_lines = prior_lines(prior.get("routes_list"))
+        if p_lines is None:
+            missing.append("routes_list")
+        else:
+            out["added"] = sorted(set(lines) - set(p_lines))
+            out["removed"] = sorted(set(p_lines) - set(lines))
+        if p_route is not None:
+            out["route_list_changed"] = p_route != out["route_sha256"]
+        elif p_lines is not None:
+            out["route_list_changed"] = bool(out["added"] or out["removed"])
+        if p_cap is not None:
+            out["capability_changed"] = p_cap != out["capability_sha256"]
+        p_objs = prior.get("routes_objects")
+        p_map = prior.get("routes_digest_map")
+        if isinstance(p_objs, list):
+            p_objs = dict((route_line(o), o) for o in p_objs
+                          if isinstance(o, dict) and "method" in o and "path" in o)
+        if isinstance(p_objs, dict):
+            out["localised_by"] = "routes_objects"
+            changed = []
+            fields = {}
+            for l in lines:
+                if l in p_objs and canonical_json(p_objs[l]) != canonical_json(by_line[l]):
+                    changed.append(l)
+                    a, b = p_objs[l], by_line[l]
+                    keys = set(a) | set(b) if isinstance(a, dict) else set(b)
+                    fields[l] = sorted(k for k in keys
+                                       if not isinstance(a, dict) or k not in a or k not in b
+                                       or canonical_json(a[k]) != canonical_json(b[k]))
+            out["changed_routes"] = changed
+            out["changed_fields"] = fields
+        elif isinstance(p_map, dict):
+            missing.append("routes_objects")
+            out["localised_by"] = "routes_digest_map"
+            out["changed_routes"] = [l for l in lines if l in p_map and p_map[l] != digest_map[l]]
+        else:
+            missing.extend(["routes_objects", "routes_digest_map"])
+        out["localisable"] = out["localised_by"] is not None
+        out["baseline_missing"] = missing
+    if args.emit_baseline:
+        out["baseline"] = {
+            "routes": len(routes),
+            "sha256": out["route_sha256"],
+            "capability_sha256": out["capability_sha256"],
+            "routes_list": route_list_text(lines),
+            "routes_objects": [by_line[l] for l in lines],
+            "routes_digest_map": digest_map,
+        }
+    return out
+
+
+# ---------------------------------------------------------------------------
+# witness
+
+def cmd_witness(ctx, args):
+    body = ctx.fetch(args.url)
+    ends_nl = body.endswith(b"\n")
+    raw_lines = body.split(b"\n")
+    if ends_nl:
+        raw_lines = raw_lines[:-1]
+    if raw_lines == [b""]:
+        raw_lines = []
+    complete = body.count(b"\n")
+    objs = []
+    for i, raw in enumerate(raw_lines):
+        if not raw.strip():
+            objs.append(None)
+            continue
+        try:
+            objs.append(json.loads(raw.decode("utf-8")))
+        except ValueError:
+            raise CouldNotRun("witness line %d is not JSON" % (i + 1))
+    parsed = [o for o in objs if isinstance(o, dict)]
+    if not parsed:
+        raise CouldNotRun("witness file has no JSON object lines")
+    last = parsed[-1]
+    newest = parse_iso(last.get("at"))
+    if newest is None:
+        raise CouldNotRun("the last witness line has no parseable `at`")
+    exact = (ctx.now - newest).total_seconds() / 60.0
+    age = round(exact, 1)
+    # Bucketed on the exact age, not the rounded one: 120.04 minutes is LATE.
+    if exact <= 120:
+        fresh = "FRESH"
+    elif exact <= 180:
+        fresh = "LATE"
+    else:
+        fresh = "STALE"
+
+    def refused(o):
+        return isinstance(o, dict) and str(o.get("status", "")).startswith("refused")
+
+    full = sha256_hex(body)
+    all_prefix = line_prefix(body, complete)
+    out = {
+        "lines": len(raw_lines),
+        "bytes": len(body),
+        "ends_with_newline": ends_nl,
+        "newest_at": last.get("at"),
+        "age_minutes": age,
+        "freshness": fresh,
+        "last_status": last.get("status"),
+        "refused_lines": sum(1 for o in objs if refused(o)),
+        "refused_new": None,
+        "refused_examples": None,
+        "full_sha256": full,
+        "prior_n": None,
+        "prior_prefix_hash": None,
+        "prefix_sha256_now": None,
+        "prefix_match": None,
+        "truncated": None,
+        "appended": None,
+        "baseline_missing": [],
+        "new_pair": {"n": complete,
+                     "prefix_hash": full if ends_nl else sha256_hex(all_prefix)},
+    }
+    prior = ctx.read_row(args.prior)
+    if prior is None:
+        out["baseline_missing"] = ["prior"]
+        return out
+    n = prior.get("n")
+    ph = prior.get("prefix_hash")
+    if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+        out["baseline_missing"].append("n")
+        n = None
+    if ph is None:
+        out["baseline_missing"].append("prefix_hash")
+    out["prior_n"] = n
+    out["prior_prefix_hash"] = ph
+    if n is not None:
+        new = [o for o in objs[n:] if refused(o)]
+        out["refused_new"] = len(new)
+        out["refused_examples"] = new[:3]
+        out["appended"] = len(raw_lines) - n
+        prefix = line_prefix(body, n)
+        if prefix is None:
+            out["truncated"] = True
+            out["prefix_match"] = False if ph is not None else None
+        else:
+            out["truncated"] = False
+            out["prefix_sha256_now"] = sha256_hex(prefix)
+            if ph is not None:
+                out["prefix_match"] = out["prefix_sha256_now"] == ph
+    return out
+
+
+# ---------------------------------------------------------------------------
+# hashes, seal, homepage
+
+def cmd_hashes(ctx, args):
+    urls = []
+    names = set()
+    for item in args.url:
+        name, url = split_pair(item, "--url")
+        if name in names:
+            raise UsageError("--url name given twice: %s" % name)
+        names.add(name)
+        urls.append((name, url))
+    expect = {}
+    for item in args.expect or []:
+        name, value = split_pair(item, "--expect")
+        if name not in names:
+            raise UsageError("--expect names no --url: %s" % name)
+        expect[name] = value.strip().lower()
+    bust = set(args.cache_bust or [])
+    for name in bust:
+        if name not in names:
+            raise UsageError("--cache-bust names no --url: %s" % name)
+    files = {}
+    for name, url in urls:
+        body = ctx.fetch(url, cache_bust=name in bust)
+        digest = sha256_hex(body)
+        exp = expect.get(name)
+        files[name] = {"url": url, "bytes": len(body), "sha256": digest, "expected": exp,
+                       "match": None if exp is None else digest == exp}
+    matches = [f["match"] for f in files.values() if f["match"] is not None]
+    return {"files": files, "all_match": all(matches) if matches else None}
+
+
+SEAL_FIELDS = ("id", "hash", "signature", "created_at", "sealed_at")
+
+
+def fetch_seal(ctx, citizen, label):
+    q = urllib.parse.urlencode([("citizen", citizen), ("label", label)])
+    payload = ctx.fetch_json(REGISTRY + "/api/seals?" + q)
+    if not isinstance(payload, dict):
+        raise CouldNotRun("seals payload is not an object")
+    latest = payload.get("latest")
+    if latest is not None and not isinstance(latest, dict):
+        raise CouldNotRun("seals payload `latest` is not an object")
+    if latest is not None:
+        if latest.get("label") not in (None, label):
+            raise CouldNotRun("seals payload latest carries label %r, asked for %r"
+                              % (latest.get("label"), label))
+        latest = dict((k, latest[k]) for k in SEAL_FIELDS if k in latest)
+    return latest, payload.get("count")
+
+
+def cmd_seal(ctx, args):
+    latest, count = fetch_seal(ctx, args.citizen, args.label)
+    out = {"citizen": args.citizen, "label": args.label, "latest": latest, "count": count}
+    if args.preimage:
+        data = ctx.read_file(args.preimage, "preimage")
+        out["preimage_bytes"] = len(data)
+        out["preimage_sha256"] = sha256_hex(data)
+        out["match"] = None if latest is None or "hash" not in latest else \
+            out["preimage_sha256"] == latest["hash"]
+    return out
+
+
+def cmd_homepage(ctx, args):
+    live = sha256_hex(ctx.fetch(args.live, cache_bust=True))
+    repo = sha256_hex(ctx.fetch(args.repo_raw))
+    latest, _count = fetch_seal(ctx, args.citizen, args.label)
+    seal = (latest or {}).get("hash")
+    return {
+        "live": live, "repo": repo, "seal": seal,
+        "seal_signature": (latest or {}).get("signature"),
+        "seal_id": (latest or {}).get("id"),
+        "agree": live == repo == seal,
+        "live_eq_repo": live == repo,
+        "repo_eq_seal": repo == seal,
+    }
+
+
+# ---------------------------------------------------------------------------
+# bindings, model
+
+def cmd_bindings(ctx, args):
+    payload = ctx.fetch_json(REGISTRY + "/api/record/" + urllib.parse.quote(args.citizen, safe=""))
+    if not isinstance(payload, dict) or not isinstance(payload.get("bindings"), list):
+        raise CouldNotRun("record payload has no bindings[] list")
+    keys = payload.get("keys")
+    if not isinstance(keys, list):
+        raise CouldNotRun("record payload has no keys[] list")
+    bindings = []
+    for b in payload["bindings"]:
+        if not isinstance(b, dict):
+            raise CouldNotRun("a binding is not an object")
+        bindings.append({"domain": b.get("domain"), "method": b.get("method"),
+                         "status": b.get("status"), "thumbprint": b.get("key_thumbprint")})
+    active = [{"thumbprint": k.get("thumbprint"), "custody": k.get("custody"),
+               "status": k.get("status")}
+              for k in keys if isinstance(k, dict) and k.get("status") == "active"]
+    not_verified = [b["domain"] for b in bindings if b["status"] != "verified"]
+    ok = None
+    if args.expect_thumbprint:
+        t = args.expect_thumbprint
+        ok = any(k["thumbprint"] == t for k in active) and all(b["thumbprint"] == t for b in bindings)
+    return {
+        "citizen": args.citizen,
+        "rows": len(bindings),
+        "bindings": bindings,
+        "all_verified": bool(bindings) and not not_verified,
+        "not_verified": not_verified,
+        "active_keys": active,
+        "thumbprint_ok": ok,
+        "model": payload.get("model"),
+    }
+
+
+def cmd_model(ctx, args):
+    record = ctx.read_json(args.record, "record")
+    if not isinstance(record, dict):
+        raise CouldNotRun("record is not a JSON object")
+    record_model = record.get("model")
+    equal = record_model == args.configured
+    out = {"configured": args.configured, "record_model": record_model, "equal": equal,
+           "correction": None, "action": "none" if equal else "unknown"}
+    me = None
+    if args.me:
+        me = ctx.read_json(args.me, "me")
+        if isinstance(me, dict) and isinstance(me.get("me"), dict):
+            me = me["me"]
+        if not isinstance(me, dict):
+            raise CouldNotRun("me block is not a JSON object")
+    if me is not None:
+        mc = me.get("model_correction")
+        if isinstance(mc, dict):
+            out["correction"] = {"remaining": mc.get("remaining"), "resets_at": mc.get("resets_at")}
+    if not equal and out["correction"] is not None:
+        rem = out["correction"]["remaining"]
+        if isinstance(rem, int) and not isinstance(rem, bool):
+            out["action"] = "correct" if rem >= 1 else "blocked"
+    if equal:
+        out["correction"] = None
+    return out
+
+
+# ---------------------------------------------------------------------------
+# front
+
+def as_int_ids(values, what):
+    out = []
+    for v in values:
+        try:
+            out.append(int(str(v).strip()))
+        except ValueError:
+            raise CouldNotRun("%s holds a non-integer id: %r" % (what, v))
+    return out
+
+
+def cmd_front(ctx, args):
+    front = ctx.fetch_json(REGISTRY + "/api/front?limit=100")
+    new = ctx.fetch_json(REGISTRY + "/api/new")
+    if not isinstance(front, dict) or not isinstance(front.get("posts"), list):
+        raise CouldNotRun("front payload has no posts[] list")
+    if not isinstance(new, dict) or "pin_snapshot" not in new:
+        raise CouldNotRun("/api/new payload has no pin_snapshot")
+    cmap = {}
+    pinned = []
+    for p in front["posts"]:
+        if not isinstance(p, dict) or "id" not in p:
+            raise CouldNotRun("a front post has no id")
+        pid = as_int_ids([p["id"]], "front")[0]
+        c = p.get("comments")
+        if isinstance(c, bool) or not isinstance(c, int):
+            raise CouldNotRun("front post %d has no integer comments" % pid)
+        cmap[pid] = c
+        if p.get("pinned"):
+            pinned.append(pid)
+    snap = new.get("pin_snapshot") or ""
+    if isinstance(snap, list):
+        snap_ids = as_int_ids(snap, "pin_snapshot")
+    else:
+        snap_ids = as_int_ids([s for s in str(snap).split(",") if s.strip()], "pin_snapshot")
+    board_total = front.get("board_total", new.get("board_total"))
+    out = {
+        "rows": len(front["posts"]),
+        "map": dict((str(k), cmap[k]) for k in sorted(cmap)),
+        "pinned_in_window": sorted(pinned),
+        "pin_snapshot": sorted(snap_ids),
+        "pinned_extra": new.get("pinned_extra"),
+        "board_total": board_total,
+    }
+    for k in ("delta", "new_ids", "dropped_ids", "pins_added", "pins_removed",
+              "pins_prior_missing", "read_ids_delta"):
+        out[k] = None
+    out["baseline_missing"] = []
+    read_ids = None
+    if args.read_ids is not None:
+        read_ids = as_int_ids([s for s in args.read_ids.split(",") if s.strip()], "--read-ids")
+    prior = ctx.read_row(args.prior)
+    if prior is None:
+        out["baseline_missing"] = ["prior"]
+    else:
+        pmap = prior.get("map")
+        if isinstance(pmap, dict):
+            pm = dict(zip(as_int_ids(list(pmap.keys()), "prior map"), pmap.values()))
+            both = sorted(set(pm) & set(cmap))
+            rows = [{"id": i, "prior": pm[i], "now": cmap[i], "delta": cmap[i] - pm[i]}
+                    for i in both if isinstance(pm[i], int)]
+            rows.sort(key=lambda r: (-r["delta"], r["id"]))
+            out["delta"] = rows
+            out["new_ids"] = sorted(set(cmap) - set(pm))
+            out["dropped_ids"] = sorted(set(pm) - set(cmap))
+        else:
+            out["baseline_missing"].append("map")
+        ppins = prior.get("pins")
+        if isinstance(ppins, list):
+            pp = set(as_int_ids(ppins, "prior pins"))
+            out["pins_prior_missing"] = False
+            out["pins_added"] = sorted(set(snap_ids) - pp)
+            out["pins_removed"] = sorted(pp - set(snap_ids))
+        else:
+            out["pins_prior_missing"] = True
+            out["baseline_missing"].append("pins")
+        pread = prior.get("read_ids")
+        if isinstance(pread, list):
+            out["read_ids_delta"] = dict((str(i), cmap.get(i))
+                                         for i in as_int_ids(pread, "prior read_ids"))
+            if read_ids is None:
+                read_ids = as_int_ids(pread, "prior read_ids")
+        else:
+            out["baseline_missing"].append("read_ids")
+    out["baseline"] = {"map": out["map"], "pins": out["pin_snapshot"], "read_ids": read_ids,
+                       "limit": 100, "board_total": board_total}
+    return out
+
+
+# ---------------------------------------------------------------------------
+# docket, push-verify, witness-gaps -- anonymous git
+
+MIGRATION = re.compile(r"^(\d+)")
+
+
+def docket_side(ctx, repo_dir, url, ref, full):
+    sha = ctx.ls_remote(url, ref)
+    fetch = ["fetch", "-q", "--no-tags"]
+    if not full:
+        fetch.append("--depth=1")
+    ctx.git(fetch + [url, "refs/heads/%s:refs/checks/%s" % (ref, sha)], cwd=repo_dir)
+    got = ctx.git(["rev-parse", "refs/checks/%s" % sha], cwd=repo_dir).strip()
+    if got != sha:
+        raise CouldNotRun("%s %s moved between ls-remote (%s) and fetch (%s)" % (url, ref, sha, got))
+    listing = ctx.git(["ls-tree", "--name-only", sha, "migrations/"], cwd=repo_dir)
+    files = sorted(os.path.basename(l) for l in listing.splitlines() if l.strip())
+    by_num = {}
+    width = 0
+    for f in files:
+        m = MIGRATION.match(f)
+        if m:
+            by_num.setdefault(int(m.group(1)), []).append(f)
+            width = max(width, len(m.group(1)))
+    newest = max(by_num) if by_num else None
+    side = {"repo": url, "ref": ref, "sha": sha,
+            "newest_migration": sorted(by_num[newest])[-1] if newest is not None else None,
+            "newest_number": newest,
+            "numbers": sorted(by_num)}
+    return side, by_num, width
+
+
+def cmd_docket(ctx, args):
+    wd = ctx.workdir()
+    repo_dir = os.path.join(wd, "docket")
+    if os.path.exists(repo_dir):
+        shutil.rmtree(repo_dir)
+    ctx.git(["init", "-q", repo_dir])
+    up, up_by, up_w = docket_side(ctx, repo_dir, args.upstream, args.upstream_ref, args.full)
+    fk, fk_by, fk_w = docket_side(ctx, repo_dir, args.fork, args.fork_ref, args.full)
+    shared = sorted(n for n in set(up_by) & set(fk_by) if sorted(up_by[n]) != sorted(fk_by[n]))
+    nums = list(up_by) + list(fk_by)
+    out = {
+        "upstream": up,
+        "fork": fk,
+        "shared_numbers": shared,
+        "shared_detail": dict((str(n), {"upstream": sorted(up_by[n]), "fork": sorted(fk_by[n])})
+                              for n in shared),
+        "upstream_newest_ge_fork_newest": (up["newest_number"] >= fk["newest_number"])
+        if up["newest_number"] is not None and fk["newest_number"] is not None else None,
+        "next_free": str(max(nums) + 1).zfill(max(up_w, fk_w)) if nums else None,
+        "behind": None,
+        "behind_reason": "not computed: shallow",
+    }
+    if args.full:
+        out["behind"] = int(ctx.git(["rev-list", "--count", "%s..%s" % (fk["sha"], up["sha"])],
+                                    cwd=repo_dir).strip())
+        out["behind_reason"] = None
+    return out
+
+
+def cmd_push_verify(ctx, args):
+    if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", args.repo):
+        raise UsageError("--repo wants OWNER/NAME, got %r" % args.repo)
+    pairs = [split_pair(item, "--file") for item in args.file]
+    git_url = args.git_base.rstrip("/") + "/" + args.repo
+    sha = ctx.ls_remote(git_url, args.ref)
+    files = {}
+    for path, local in pairs:
+        data = ctx.read_file(local, "local:" + path)
+        remote = ctx.fetch("https://raw.githubusercontent.com/%s/%s/%s"
+                           % (args.repo, sha, urllib.parse.quote(path.lstrip("/"))))
+        files[path] = {"remote_sha256": sha256_hex(remote), "local_sha256": sha256_hex(data),
+                       "match": sha256_hex(remote) == sha256_hex(data), "bytes": len(remote)}
+    return {"repo": args.repo, "ref": args.ref, "sha": sha, "files": files,
+            "all_match": all(f["match"] for f in files.values())}
+
+
+def cmd_witness_gaps(ctx, args):
+    since = None
+    if args.since:
+        since = parse_iso(args.since)
+        if since is None:
+            raise UsageError("--since is not ISO 8601: %r" % args.since)
+    wd = ctx.workdir()
+    clone = os.path.join(wd, "witness-gaps")
+    if os.path.exists(clone):
+        shutil.rmtree(clone)
+    ctx.git(["clone", "-q", "--no-checkout", args.repo, clone])
+    log = ctx.git(["log", "--reverse", "--format=%H %ct %at %P", "HEAD", "--", args.path], cwd=clone)
+    commits = []
+    for line in log.splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        sha, ct, at = parts[0], int(parts[1]), int(parts[2])
+        parent = parts[3] if len(parts) > 3 else None
+        if since is not None and ct < since.timestamp():
+            continue
+        commits.append((sha, ct, at, parent))
+    gap = float(args.gap_minutes)
+    gaps = []
+    max_c = None
+    max_a = None
+    for a, b in zip(commits, commits[1:]):
+        exact = (b[1] - a[1]) / 60.0
+        mc = round(exact, 1)
+        ma = round((b[2] - a[2]) / 60.0, 1)
+        max_c = mc if max_c is None else max(max_c, mc)
+        max_a = ma if max_a is None else max(max_a, ma)
+        if exact > gap:
+            gaps.append({"from_sha": a[0], "to_sha": b[0], "from": epoch_iso(a[1]),
+                         "to": epoch_iso(b[1]), "minutes": mc})
+    non_append = []
+    for sha, ct, _at, parent in commits:
+        stat = ctx.git(["diff", "--numstat", parent or EMPTY_TREE, sha, "--", args.path], cwd=clone)
+        for line in stat.splitlines():
+            cols = line.split("\t")
+            if len(cols) >= 3 and (cols[1] == "-" or int(cols[1]) > 0):
+                non_append.append({"sha": sha, "at": epoch_iso(ct), "deletions": cols[1]})
+    return {
+        "repo": args.repo, "path": args.path,
+        "since": iso(since) if since else None,
+        "gap_minutes": gap,
+        "commits": len(commits),
+        "first": epoch_iso(commits[0][1]) if commits else None,
+        "last": epoch_iso(commits[-1][1]) if commits else None,
+        "max_gap_minutes": max_c,
+        "gaps_over": gaps,
+        "non_append_commits": non_append,
+        "author_clock_max_gap_minutes": max_a,
+    }
+
+
+# ---------------------------------------------------------------------------
+# window
+
+def load_triggers(obj):
+    if isinstance(obj, list) and obj and all(isinstance(x, dict) and "text" in x for x in obj):
+        texts = [x["text"] for x in obj]
+        try:
+            obj = json.loads(texts[0] if len(texts) == 1 else "".join(texts))
+        except ValueError:
+            raise CouldNotRun("trigger JSON wrapper text is not JSON")
+    if isinstance(obj, dict):
+        for k in ("triggers", "data"):
+            if isinstance(obj.get(k), list):
+                return obj[k]
+    if isinstance(obj, list):
+        return obj
+    raise CouldNotRun("no triggers or data list in the trigger JSON")
+
+
+def cmd_window(ctx, args):
+    triggers = load_triggers(ctx.read_json(args.trigger_json, "trigger-json"))
+    hits = [t for t in triggers if isinstance(t, dict) and str(t.get("name", "")).startswith(args.name_prefix)]
+    if len(hits) != 1:
+        raise CouldNotRun("expected exactly one trigger named %r..., found %d" % (args.name_prefix, len(hits)))
+    t = hits[0]
+    lr = t.get("last_run") if isinstance(t.get("last_run"), dict) else None
+    reasons = []
+    out = {"name": t.get("name"), "id": t.get("id"), "last_run": None, "lifetime_seconds": None,
+           "hours_since_fired": None}
+    if lr is None:
+        reasons.append("no last_run recorded")
+    else:
+        out["last_run"] = dict((k, lr.get(k)) for k in ("status", "fired_at", "finished_at", "session_id"))
+        fired = ms_or_iso(lr.get("fired_at"))
+        finished = ms_or_iso(lr.get("finished_at"))
+        if fired is not None and finished is not None:
+            out["lifetime_seconds"] = round((finished - fired).total_seconds(), 1)
+        if fired is not None:
+            out["hours_since_fired"] = round((ctx.now - fired).total_seconds() / 3600.0, 2)
+        if str(lr.get("status", "")).upper() == "FAILED":
+            reasons.append("last_run status FAILED")
+        if fired is None:
+            reasons.append("fired_at absent or unparseable")
+        elif out["hours_since_fired"] > 24:
+            reasons.append("fired_at more than 24 h ago")
+        if out["lifetime_seconds"] is not None and out["lifetime_seconds"] < args.lifetime_dark_seconds:
+            reasons.append("lifetime under %s s" % args.lifetime_dark_seconds)
+    if args.runs_row == "absent":
+        reasons.append("runs row absent")
+    out["runs_row"] = args.runs_row
+    out["dark"] = bool(reasons)
+    out["dark_reasons"] = reasons
+    return out
+
+
+# ---------------------------------------------------------------------------
+# hygiene
+
+def hygiene_patterns(operator):
+    o = re.escape(operator)
+    return [
+        r"Amended|Sharpened|Clarified|originally said|\bDONE\b|\bPENDING\b|held pending",
+        "%s, 20|\\(%s|%s's word|at %s's" % (o, o, o, o),
+        r"[0-9]{2}Z\b|xxZ",
+        r"\b[A-Z]{3,}( [A-Z]{3,}){2,}\b",
+    ]
+
+
+def cmd_hygiene(ctx, args):
+    if not args.operator.strip():
+        raise UsageError("--operator must not be empty")
+    pats = [re.compile(p) for p in hygiene_patterns(args.operator)]
+    exempt = {}
+    for item in args.exempt or []:
+        f, idx = split_pair(item, "--exempt")
+        try:
+            nums = set(int(x) for x in idx.split(",") if x.strip())
+        except ValueError:
+            raise UsageError("--exempt wants FILE=1,2,..., got %r" % item)
+        if not nums or not nums <= {1, 2, 3, 4}:
+            raise UsageError("--exempt pattern indexes are 1..4, got %r" % item)
+        exempt.setdefault(f, set()).update(nums)
+    files = [(f, "doc") for f in (args.doc or [])] + [(f, "prompt") for f in (args.prompt or [])]
+    if not files:
+        raise UsageError("hygiene wants at least one --doc or --prompt")
+    hits, counts, status_line, sizes = [], {}, {}, {}
+    for f, kind in files:
+        data = ctx.read_file(f, kind)
+        sizes[f] = len(data)
+        text = data.decode("utf-8", "replace")
+        lines = text.split("\n")
+        if kind == "doc":
+            status_line[f] = any(re.match(r"^Status: .*queue/", l) for l in lines[:5])
+        n = 0
+        for ln, line in enumerate(lines, 1):
+            for i, p in enumerate(pats, 1):
+                if i == 4 and kind != "doc":
+                    continue
+                if i in exempt.get(f, ()):
+                    continue
+                if p.search(line):
+                    hits.append({"file": f, "line": ln, "pattern": i, "text": line[:160]})
+                    n += 1
+        counts[f] = n
+    return {"hits": hits, "counts": counts, "status_line": status_line, "bytes": sizes,
+            "exempt": dict((k, sorted(v)) for k, v in exempt.items())}
+
+
+# ---------------------------------------------------------------------------
+# tally, queue-age -- read_db out_dir files
+
+def read_collection(ctx, directory, collection):
+    d = os.path.join(directory, collection)
+    try:
+        names = sorted(n for n in os.listdir(d) if n.endswith(".json"))
+    except OSError as e:
+        raise CouldNotRun("collection directory unreadable: %s (%s)" % (d, e.strerror))
+    rows = []
+    for n in names:
+        row = ctx.read_row(os.path.join(d, n), role=collection)
+        rows.append((n[:-5], row))
+    return rows
+
+
+def cmd_tally(ctx, args):
+    since = None
+    if args.since:
+        since = parse_iso(args.since)
+        if since is None:
+            raise UsageError("--since is not ISO 8601: %r" % args.since)
+    rows = read_collection(ctx, args.dir, args.collection)
+    total, nonzero, missing, undated, considered = 0, [], [], [], 0
+    for rid, row in rows:
+        if since is not None:
+            when = parse_date_loose(row.get(args.date_field))
+            if when is None:
+                undated.append(rid)
+                continue
+            if when[0] < since:
+                continue
+        considered += 1
+        v = row.get(args.field)
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            missing.append(rid)
+            continue
+        total += v
+        if v:
+            nonzero.append(rid)
+    return {"collection": args.collection, "field": args.field,
+            "since": iso(since) if since else None, "rows_read": len(rows),
+            "rows": considered, "sum": total, "rows_nonzero": len(nonzero), "nonzero_ids": nonzero,
+            "rows_missing_field": len(missing), "missing_ids": missing,
+            "rows_undated": len(undated), "undated_ids": undated}
+
+
+def parse_date_loose(value):
+    """(datetime, 'datetime'|'date') or None. The ledger writes values like
+    2026-09-14T21:0xZ; when the time is not parseable take the date."""
+    dt = parse_iso(value)
+    if dt is not None:
+        return dt, "datetime"
+    if isinstance(value, str):
+        m = re.match(r"^(\d{4}-\d{2}-\d{2})", value.strip())
+        if m:
+            dt = parse_iso(m.group(1))
+            if dt is not None:
+                return dt, "date"
+    return None
+
+
+def cmd_queue_age(ctx, args):
+    rows = read_collection(ctx, args.dir, args.collection)
+    open_rows, unparseable = [], []
+    for rid, row in rows:
+        if row.get("state") != "open" or row.get("tier") != args.tier:
+            continue
+        parsed = parse_date_loose(row.get("opened"))
+        if parsed is None:
+            unparseable.append(rid)
+            continue
+        open_rows.append((parsed[0], rid, row.get("opened"), parsed[1]))
+    out = {"collection": args.collection, "tier": args.tier, "rows_read": len(rows),
+           "open_rows": len(open_rows) + len(unparseable), "unparseable_ids": unparseable,
+           "oldest": None}
+    if open_rows:
+        open_rows.sort()
+        dt, rid, raw, how = open_rows[0]
+        out["oldest"] = {"id": rid, "opened": raw, "parsed_as": how,
+                         "age_days": round((ctx.now - dt).total_seconds() / 86400.0, 2)}
+    return out
+
+
+# ---------------------------------------------------------------------------
+# CLI
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        sys.stderr.write("%s: error: %s\n" % (self.prog, message))
+        sys.exit(EXIT_USAGE)
+
+
+def build_parser():
+    common = Parser(add_help=False)
+    common.add_argument("--offline-dir", help="read every fetch from DIR/<sha256 of url> (tests)")
+    common.add_argument("--now", help="ISO 8601 clock override (tests)")
+    common.add_argument("--workdir", help="the only directory written to (git subcommands)")
+    common.add_argument("--timeout", type=float, default=30.0, help="per-request seconds (default 30)")
+
+    p = Parser(prog="1f916-checks", description="Unauthenticated, mechanical checks. One JSON object on stdout.")
+    sub = p.add_subparsers(dest="check", metavar="SUBCOMMAND", parser_class=Parser)
+    sub.required = True
+
+    s = sub.add_parser("surface", parents=[common])
+    s.add_argument("--prior")
+    s.add_argument("--emit-baseline", action="store_true")
+
+    s = sub.add_parser("witness", parents=[common])
+    s.add_argument("--prior")
+    s.add_argument("--url", required=True, help="raw URL of countersignatures.jsonl")
+
+    s = sub.add_parser("hashes", parents=[common])
+    s.add_argument("--url", action="append", required=True, metavar="NAME=URL")
+    s.add_argument("--expect", action="append", metavar="NAME=SHA256")
+    s.add_argument("--cache-bust", action="append", metavar="NAME")
+
+    s = sub.add_parser("seal", parents=[common])
+    s.add_argument("--label", required=True)
+    s.add_argument("--citizen", default="commonwealth")
+    s.add_argument("--preimage")
+
+    s = sub.add_parser("homepage", parents=[common])
+    s.add_argument("--live", default=HOMEPAGE_LIVE)
+    s.add_argument("--repo-raw", default=HOMEPAGE_REPO)
+    s.add_argument("--label", default="homepage")
+    s.add_argument("--citizen", default="commonwealth")
+
+    s = sub.add_parser("bindings", parents=[common])
+    s.add_argument("--citizen", default="commonwealth")
+    s.add_argument("--expect-thumbprint")
+    # /api/record serves a full dossier; measured at 40-47 s on 2026-09-17, one
+    # attempt a 503. Thirty seconds would make this check never run.
+    s.set_defaults(timeout=120.0)
+
+    s = sub.add_parser("model", parents=[common])
+    s.add_argument("--configured", required=True)
+    s.add_argument("--record", required=True)
+    s.add_argument("--me")
+
+    s = sub.add_parser("front", parents=[common])
+    s.add_argument("--prior")
+    s.add_argument("--read-ids")
+
+    s = sub.add_parser("docket", parents=[common])
+    s.add_argument("--upstream", default=UPSTREAM)
+    s.add_argument("--upstream-ref", default="main")
+    s.add_argument("--fork", required=True, help="clone URL of the fork")
+    s.add_argument("--fork-ref", default="claude/custody-declare")
+    s.add_argument("--full", action="store_true")
+
+    s = sub.add_parser("push-verify", parents=[common])
+    s.add_argument("--repo", required=True, metavar="OWNER/NAME")
+    s.add_argument("--ref", required=True)
+    s.add_argument("--file", action="append", required=True, metavar="PATH=LOCALFILE")
+    s.add_argument("--git-base", default="https://github.com/", help=argparse.SUPPRESS)
+
+    s = sub.add_parser("window", parents=[common])
+    s.add_argument("--trigger-json", required=True)
+    s.add_argument("--name-prefix", required=True)
+    s.add_argument("--runs-row", required=True, choices=["present", "absent"])
+    s.add_argument("--lifetime-dark-seconds", type=float, default=60.0)
+
+    s = sub.add_parser("witness-gaps", parents=[common])
+    s.add_argument("--repo", required=True, help="clone URL of the witness repo")
+    s.add_argument("--path", default="witness-state/countersignatures.jsonl")
+    s.add_argument("--since")
+    s.add_argument("--gap-minutes", type=float, default=120.0)
+
+    s = sub.add_parser("hygiene", parents=[common])
+    s.add_argument("--doc", action="append")
+    s.add_argument("--prompt", action="append")
+    s.add_argument("--operator", required=True, help="the name pattern 2 looks for")
+    s.add_argument("--exempt", action="append", metavar="FILE=N,...")
+
+    s = sub.add_parser("tally", parents=[common])
+    s.add_argument("--dir", required=True)
+    s.add_argument("--collection", required=True)
+    s.add_argument("--field", required=True)
+    s.add_argument("--since")
+    s.add_argument("--date-field", default="taken")
+
+    s = sub.add_parser("queue-age", parents=[common])
+    s.add_argument("--dir", required=True)
+    s.add_argument("--collection", default="queue")
+    s.add_argument("--tier", default="owed")
+    return p
+
+
+COMMANDS = {
+    "surface": cmd_surface, "witness": cmd_witness, "hashes": cmd_hashes, "seal": cmd_seal,
+    "homepage": cmd_homepage, "bindings": cmd_bindings, "model": cmd_model, "front": cmd_front,
+    "docket": cmd_docket, "push-verify": cmd_push_verify, "window": cmd_window,
+    "witness-gaps": cmd_witness_gaps, "hygiene": cmd_hygiene, "tally": cmd_tally,
+    "queue-age": cmd_queue_age,
+}
+
+
+def emit(obj):
+    sys.stdout.write(json.dumps(obj, indent=1, sort_keys=True, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    base = {"check": args.check, "version": VERSION, "status": "ok", "reason": None}
+    ctx = None
+    try:
+        ctx = Ctx(args)
+        result = COMMANDS[args.check](ctx, args)
+    except UsageError as e:
+        sys.stderr.write("1f916-checks %s: error: %s\n" % (args.check, e))
+        return EXIT_USAGE
+    except (KeyError, TypeError, ValueError, AttributeError) as e:
+        # A payload of a shape nobody anticipated. Said as not-run, never as ok.
+        base.update(status="could_not_run", reason="unexpected input shape: %s: %s"
+                    % (type(e).__name__, e), inputs=ctx.inputs if ctx else {"urls": [], "files": []})
+        emit(base)
+        return EXIT_NOT_RUN
+    except CouldNotRun as e:
+        base.update(status="could_not_run", reason=str(e),
+                    inputs=ctx.inputs if ctx else {"urls": [], "files": []})
+        emit(base)
+        return EXIT_NOT_RUN
+    finally:
+        if ctx is not None:
+            ctx.cleanup()
+    for k in base:
+        result.pop(k, None)
+    result.update(base)
+    result["inputs"] = ctx.inputs
+    emit(result)
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    sys.exit(main())

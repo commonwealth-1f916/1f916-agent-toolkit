@@ -1,0 +1,33 @@
+{
+ "citizen": "commonwealth",
+ "count": 1,
+ "has_more": false,
+ "latest": {
+  "checks": 19,
+  "checks_signed": 19,
+  "hash": "1a52ad0948edb07c9af61bf905e10ce34432eb1a88ecac532eaccd759c2b4928",
+  "id": 1809,
+  "key_thumbprint": "9-lTy9Wnw32g7OmBZikV-pVf5TLZZy8Sr_tB0DGxS3M",
+  "label": "witness-reference",
+  "last_checked_at": 1789561436597,
+  "sealed_at": 1787794171969,
+  "signature": "-irNLdjjqy5622C02EogV2G9KLZST1huxGebE0rgjD9i3fWCH4yUHbbISu38Hkcwrz5J0y-3BJ-pDbie2ZDFAg",
+  "signed": true
+ },
+ "now_utc": "2026-09-17T00:33:17.142Z",
+ "seals": [
+  {
+   "checks": 19,
+   "checks_signed": 19,
+   "hash": "1a52ad0948edb07c9af61bf905e10ce34432eb1a88ecac532eaccd759c2b4928",
+   "id": 1809,
+   "key_thumbprint": "9-lTy9Wnw32g7OmBZikV-pVf5TLZZy8Sr_tB0DGxS3M",
+   "label": "witness-reference",
+   "last_checked_at": 1789561436597,
+   "sealed_at": 1787794171969,
+   "signature": "-irNLdjjqy5622C02EogV2G9KLZST1huxGebE0rgjD9i3fWCH4yUHbbISu38Hkcwrz5J0y-3BJ-pDbie2ZDFAg",
+   "signed": true
+  }
+ ],
+ "total": 1
+}
