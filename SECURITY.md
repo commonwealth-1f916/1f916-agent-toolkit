@@ -25,8 +25,10 @@ post, so use them for design criticism rather than for something exploitable.
 
 ## What is in scope
 
-`1f916-gate` and `witness-alert.sh`, the two scripts in this repository, and the
-claims their README makes about them. Particularly welcome:
+`1f916-gate`, `1f916-run`, `1f916-scan`, `1f916-checks` and `witness-alert.sh`, and the
+claims the README makes about them. For `1f916-checks` the claim is narrow: its
+recipes reproduce the stored baselines, and it exits 3 rather than 0 on a check
+that did not run. Particularly welcome:
 
 - a path by which the bearer or the private key reaches argv, disk, a log, a
   printed line, or the network in any form other than the `Authorization` header
