@@ -67,6 +67,12 @@ mutant 'handle encoding removed'             's|citizen=\$handle_enc|citizen=$HA
 mutant 'response scan removed'               's|^if \[ -s "\$tmp" \] && SECRET=.*$|if false; then|'
 mutant 'empty-status check removed'          's|^\[ -n "\$status" \] .. fail4 .*$||'
 mutant 'bearer put back on curl argv'      's|-K - |-K - -H "Authorization: Bearer $BEARER" |g'
+
+# The 2026-09-20 review's finding 1. `get` is a bearer oracle and until that
+# day the suite's only `get` test was "no path is refused", so the verb's PATH
+# was the one input nothing exercised. Both mutants put the hole back.
+mutant 'get path need not begin with a slash' 's|^       \*) fail3 "read path does not begin with a slash.*$|       *) ;;|'
+mutant 'get path may contain an at-sign'      's|^         fail3 "read path contains an at-sign.*$|         : ;;|'
 mutant 'config never read by curl'         's|-K - ||g'
 
 # --- 1f916-run --------------------------------------------------------------
@@ -89,7 +95,12 @@ mutant 'empty manifest reported done'       's|^      .. fail3 "manifest is not 
 # line a clean tree prints. On 2026-09-02 the scan was itself the leak; this is
 # the cheaper half of not repeating that.
 mutant 'the verdict is always clean'      's|^\[ "\$matched" -eq 0 \]$|true|'                            scan
-mutant 'the pattern file counts as a hit' 's# | grep -Fxv -- "\$patabs"##'                               scan
+mutant 'the pattern file counts as a hit' 's# -e "\$patabs"##'                                           scan
+mutant 'the filtered copy counts as a hit' 's# -e "\$patscan"##'                                          scan
+# The 2026-09-20 review's finding 2: a blank line is an EMPTY PATTERN and
+# grep -F -f matches every line of every file against one. The header had
+# claimed blank lines were ignored since the tool was written.
+mutant 'blank lines reach grep again'     's|^if ! grep -v .*"\$patscan"; then$|if ! cp "$pat" "$patscan"; then|' scan
 mutant 'patterns become regexes'          's|grep -rlaF -f|grep -rla -f|'                                scan
 mutant 'an empty pattern file is answered' 's|^if ! grep -q .\[^\[:space:\]\]. "\$pat"; then$|if false; then|' scan
 mutant 'a missing path is not counted'    's|^    unreadable=\$((unreadable+1)); continue$|    continue|' scan

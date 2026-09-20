@@ -65,11 +65,51 @@ if [ "$rc" -eq 1 ] && printf '%s\n' "$out" | grep -q 'other.log' && printf '%s\n
   ok "every pattern in the file is searched for"
 else nok "multiple patterns" "rc=$rc out=$out"; fi
 
-# 5. an empty or blank pattern file is refused (exit 3), not answered
+# 5. an empty or blank pattern file is refused (exit 3), not answered.
+#    The MESSAGE is asserted, not just the code: since 2026-09-20 the tool
+#    filters blank lines into a working copy, and a filter that emptied the
+#    copy would also exit 3 -- by a different route and for a different
+#    reason. Two refusals printing the same sentence are two refusals no test
+#    can tell apart, and tests/mutants.sh proved it: the mutant that deletes
+#    this guard survived the whole suite until the exit code stopped being the
+#    only thing checked.
 for f in empty.txt blank.txt; do
-  sh "$SCAN" "$WORK/$f" "$WORK/tree" >/dev/null 2>&1; rc=$?
-  if [ "$rc" -eq 3 ]; then ok "refuses $f with exit 3"; else nok "refuses $f" "rc=$rc"; fi
+  out=$(sh "$SCAN" "$WORK/$f" "$WORK/tree" 2>&1); rc=$?
+  if [ "$rc" -eq 3 ] && printf '%s\n' "$out" | grep -q 'no pattern in it'; then
+    ok "refuses $f with exit 3, naming the pattern file as the reason"
+  else nok "refuses $f" "rc=$rc out=$out"; fi
 done
+
+# 5b. A REAL PATTERN FOLLOWED BY A BLANK LINE. Test 5 covers a file with no
+#     pattern at all, which the tool has refused since it was written; this is
+#     the case the runs actually produce, and until 2026-09-20 it was the worst
+#     of the three. An empty line is an empty PATTERN and grep -F -f matches
+#     every line of every file against it, so the scan named every readable
+#     file under every path it was given -- while the header said blank lines
+#     were ignored. The daily prompts write this file fresh each day with the
+#     Write tool, two values one per line, and one newline too many was all it
+#     took. The test is exact rather than "at least one hit": the defect's
+#     signature is a file with NO copy in it being named.
+printf '%s\n\n' "$DUMMY" >"$WORK/pat-blank.txt"
+out=$(sh "$SCAN" "$WORK/pat-blank.txt" "$WORK/tree/a" 2>&1); rc=$?
+if [ "$rc" -eq 1 ] && printf '%s\n' "$out" | grep -q 'a/b/leak.env' \
+   && ! printf '%s\n' "$out" | grep -q 'plain.txt' \
+   && printf '%s\n' "$out" | grep -q 'scan: 1 paths, 1 files matched, 0 unreadable'; then
+  ok "a trailing blank line in the pattern file does not make every file a hit"
+else nok "blank line in the pattern file" "rc=$rc out=$out"; fi
+
+# 5c. and the filtered copy the tool makes of the pattern file is not itself
+#     reported as a hit -- it holds the secret, so it would match, and a scan
+#     that names its own scratch file is the pattern-file bug with a new name.
+#     TMPDIR is pointed at an empty directory and that same directory is
+#     scanned, so every temporary the tool makes lands inside the search path
+#     and a single match there is the failure. Scanning the real /tmp would
+#     have measured this suite's own fixtures instead.
+mkdir -p "$WORK/scratch"
+out=$(TMPDIR="$WORK/scratch" sh "$SCAN" "$WORK/pat-blank.txt" "$WORK/clean" "$WORK/scratch" 2>&1); rc=$?
+if [ "$rc" -eq 0 ] && [ "$out" = 'scan: 2 paths, 0 files matched, 0 unreadable' ]; then
+  ok "the tool's own filtered copy of the pattern file is never a hit"
+else nok "filtered copy excluded" "rc=$rc out=$out"; fi
 
 # 6. no pattern file at all: usage, exit 3
 sh "$SCAN" >/dev/null 2>&1; rc=$?

@@ -121,6 +121,36 @@ saw "usage" "7. and the usage line is printed"
 run 3 "7b. get with no path is refused"         get
 run 3 "7c. post with no body argument is refused" post /api/comment
 
+# 7d-7g are the acceptance tests for the 2026-09-20 review's finding 1. Until
+# that day `get` checked only that a path was non-empty and then handed
+# "$REGISTRY$2" to curl, which is string CONCATENATION: a path not beginning
+# with `/` goes on with the hostname and a path beginning with `@` turns the
+# registry into userinfo. Both were reproduced against curl's own
+# %{url_effective}:
+#
+#   get 'evil.example/x'  ->  https://1f916.aievil.example/x, host 1f916.aievil.example
+#   get '@evil.example/'  ->  the registry becomes userinfo and the host is
+#                             whatever follows the at-sign
+#
+# Either host is registrable by a stranger and the request carries the
+# Authorization header, so the test that matters is not only the exit code but
+# that NO CALL WAS MADE -- including the unauthenticated seals GET, since the
+# refusal belongs in the argument block ahead of it. The suite had one `get`
+# test before this ("no path is refused") and the read verb was therefore the
+# one verb whose path nothing exercised.
+run 3 "7d. a get path that continues the hostname is refused" get 'evil.example/x'
+no_calls "7d. and no call of any kind was made"
+saw "does not begin with a slash" "7d. and the refusal says why"
+
+run 3 "7e. a get path that makes the registry userinfo is refused" get '@evil.example/'
+no_calls "7e. and no call of any kind was made"
+
+run 3 "7f. a get path with an at-sign is refused" get '/api/me@x/'
+no_calls "7f. and no call of any kind was made"
+
+run 3 "7g. a get path with whitespace in it is refused" get '/api/me /x'
+no_calls "7g. and no call of any kind was made"
+
 # ------------------------------------------------------- the gate's own compare
 # The registry serves a hash that cannot match dummy credentials, so this is the
 # WRONG-CREDENTIAL case: it must stop at exit 2 with no authenticated call at
@@ -152,6 +182,16 @@ saw "MISMATCH" "8c. so the new path sits BEHIND the gate, not beside it"
 # the check-in interval declaration that arrived on /api/surface on 2026-09-08).
 run 2 "8d. /api/me/cadence, real body, reaches the compare" post /api/me/cadence "$WORK/body.json"
 saw "MISMATCH" "8d. so the cadence path sits BEHIND the gate, not beside it"
+
+# 8e is the other half of finding 1's fix, and it sits here rather than beside
+# 7d-7g because only a seals response gets a path past the argument block. A
+# check that refuses everything is as useless as one that refuses nothing, and
+# the shape of 7d-7g cannot tell them apart: an ordinary read path must still
+# reach the compare and stop there with the credentials unused.
+run 2 "8e. an ordinary read path passes the anchor and reaches the compare" get '/api/me/history?limit=50&cursor_mode=id'
+saw "MISMATCH" "8e. so the anchor refuses paths, not the verb itself"
+calls "8e. exactly one call, and it is the unauthenticated seals GET" 1
+no_secret_in_argv "8e. the bearer never appeared in curl's argv"
 
 # ------------------------------------------------------- registry-side failures
 # 'Could not run' and 'ran and found nothing wrong' are different cells and the

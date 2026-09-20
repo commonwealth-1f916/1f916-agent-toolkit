@@ -1477,6 +1477,43 @@ def _dig(obj, path):
     return obj
 
 
+# The fields DAILY_JUDGEMENT_NESTED names are the run's to write, by this
+# file's own reckoning, so a judgement carrying one is doing its job and is
+# never a collision -- even where the builder also derives it from a part.
+RUN_WRITABLE_FIELDS = frozenset(
+    "%s.%s" % pair for pair in DAILY_JUDGEMENT_NESTED)
+
+
+def _judgement_collisions(produced, judgement):
+    """The (block, field) pairs a judgement would replace that a check MEASURED.
+
+    The table above says the builder must never decide a verdict. The same
+    reasoning cuts the other way and nothing enforced it until now: the caller
+    is a scheduled run, and a judgement file carrying {"homepage": {"agree":
+    true}} or {"witness": {"fresh": true}} replaced a measured value with an
+    asserted one and left no trace, because `judgement_applied` lists
+    TOP-LEVEL keys only -- the row did not say which mechanical field had
+    moved. Raising is what the rest of this file does with an input it cannot
+    honour, and a row that cannot be built is a cell the run reports as
+    could-not-run rather than a row that reads as measurement.
+
+    Found by the 2026-09-20 review, finding 3, in code shipped the same day.
+    """
+    hits = []
+    for key, value in judgement.items():
+        fields = produced.get(key)
+        if not fields:
+            continue
+        if isinstance(value, dict):
+            candidates = [f for f in value if f in fields]
+        else:
+            # the whole block replaced by a scalar or a list: all of it goes
+            candidates = list(fields)
+        hits.extend("%s.%s" % (key, f) for f in candidates
+                    if "%s.%s" % (key, f) not in RUN_WRITABLE_FIELDS)
+    return sorted(hits)
+
+
 def _deep_merge(base, overlay):
     """overlay wins. Dicts merge; everything else replaces."""
     for key, value in overlay.items():
@@ -1525,11 +1562,13 @@ def cmd_runs_row(ctx, args):
         # discarded on the way in.
         row["witness"]["fresh"] = (bucket == "FRESH") if bucket is not None else None
         row["witness"]["freshness"] = bucket
+        produced["witness"] = sorted(row["witness"])
     if "bindings" in row and isinstance(parts.get("bindings"), dict):
         rows = parts["bindings"].get("bindings")
         if isinstance(rows, list):
             row["bindings"]["domains"] = [r.get("domain") for r in rows
                                           if isinstance(r, dict)]
+            produced["bindings"] = sorted(row["bindings"])
     if "previous_window" in row and isinstance(parts.get("window"), dict):
         win = parts["window"]
         last = win.get("last_run") or {}
@@ -1537,8 +1576,10 @@ def cmd_runs_row(ctx, args):
         for name in ("fired_at", "finished_at"):
             row["previous_window"][name] = last.get(name)
         row["previous_window"]["last_run_status"] = last.get("status")
+        produced["previous_window"] = sorted(row["previous_window"])
     if "front" in row:
         row["front"]["limit"] = args.front_limit
+        produced["front"] = sorted(row["front"])
 
     if args.docket:
         docket = ctx.read_json(args.docket, "docket output")
@@ -1552,6 +1593,15 @@ def cmd_runs_row(ctx, args):
         judgement = ctx.read_json(args.judgement, "judgement")
         if not isinstance(judgement, dict):
             raise CouldNotRun("judgement is not a JSON object: %s" % args.judgement)
+        clash = _judgement_collisions(produced, judgement)
+        if clash:
+            raise CouldNotRun(
+                "judgement would overwrite measured field(s): %s -- a check "
+                "produced each of these and the row must carry what was "
+                "measured, not what the run asserts. Remove them from the "
+                "judgement; if a measurement is wrong, fix the check or "
+                "report the disagreement in a field of your own."
+                % ", ".join(clash))
         _deep_merge(row, judgement)
 
     missing = None
