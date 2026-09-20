@@ -1086,6 +1086,118 @@ class RunsRow(Base):
         self.run_checks("runs-row", "--all", path, want=3)
 
 
+
+# ---------------------------------------------------------------------------
+class PromptIntegrity(Base):
+    """`prompt-integrity` holds each stored prompt against its `prompts` row.
+
+    Every case below is a defect that actually occurred in this project's
+    ledger between 2026-09-17 and 2026-09-20, plus the one the command is
+    honestly unable to catch. The separation under test is not match-versus-
+    mismatch: it is RECORD-wrong versus PROMPT-wrong, because collapsing the
+    two turns a typing slip into evidence of tampering.
+    """
+
+    GOOD = "2bd8eb4f7ad9e668f31b9ae84d6c05f4440f083a7b0fe2eded0303ddadc71516"
+
+    def setUp(self):
+        Base.setUp(self)
+        self.prompt = "a stored prompt, standing in for 34 KB of one\n"
+        self.body = self.prompt.encode("utf-8")
+        self.sha = hashlib.sha256(self.body).hexdigest()
+        self.triggers = self.write("trig.json", {"data": [
+            {"id": "trig_A", "name": "daily", "derived_state": {"prompt": self.prompt}},
+            {"id": "trig_NOPROMPT", "name": "no prompt", "derived_state": {}},
+        ]})
+
+    def ledger(self, row):
+        self.write("db/prompts/trig_A.json", row)
+        return os.path.join(self.tmp, "db")
+
+    def verdict(self, row, **kw):
+        out = self.run_checks("prompt-integrity", "--trigger-json", self.triggers,
+                              "--dir", self.ledger(row), **kw)
+        entry = [r for r in out["results"] if r["id"] == "trig_A"][0]
+        return out, entry
+
+    def test_a_correct_row_matches(self):
+        out, entry = self.verdict({"bytes": len(self.body), "sha256": self.sha})
+        self.assertEqual(entry["verdict"], "match")
+        self.assertEqual(out["match"], ["trig_A"])
+        self.assertEqual(out["mismatch"], [])
+        self.assertEqual(out["row_malformed"], [])
+
+    def test_a_truncated_digest_is_the_record_wrong_not_the_prompt(self):
+        # The 2026-09-17 and 2026-09-20 defects: sha256 written 16 chars long.
+        out, entry = self.verdict({"bytes": len(self.body), "sha256": self.sha[:16]})
+        self.assertEqual(entry["verdict"], "row_malformed")
+        self.assertIn("64 lowercase hex", entry["detail"])
+        self.assertEqual(out["mismatch"], [], "a short digest must never read as tampering")
+
+    def test_a_character_count_recorded_as_bytes_is_the_record_wrong(self):
+        # Digest right, byte count wrong: the chars-counted-as-bytes slip.
+        out, entry = self.verdict({"bytes": len(self.prompt) - 3, "sha256": self.sha})
+        self.assertEqual(entry["verdict"], "row_malformed")
+        self.assertIn("bytes disagree", entry["detail"])
+        self.assertEqual(out["mismatch"], [])
+
+    def test_a_row_with_no_digest_at_all_is_malformed(self):
+        out, entry = self.verdict({"bytes": len(self.body)})
+        self.assertEqual(entry["verdict"], "row_malformed")
+
+    def test_a_genuinely_changed_prompt_is_a_mismatch(self):
+        out, entry = self.verdict({"bytes": len(self.body), "sha256": self.GOOD})
+        self.assertEqual(entry["verdict"], "mismatch")
+        self.assertEqual(out["mismatch"], ["trig_A"])
+
+    def test_the_limit_is_real_and_is_under_test(self):
+        """A well-formed wrong digest reads as tampering, and cannot not.
+
+        This is the command's honest boundary, asserted rather than hoped for:
+        a digest invented at full length is byte-for-byte the same evidence as
+        a prompt edited outside the batch. Detection cannot separate them; only
+        deriving the value at write time avoids the question.
+        """
+        invented = "0" * 64
+        out, entry = self.verdict({"bytes": len(self.body), "sha256": invented})
+        self.assertEqual(entry["verdict"], "mismatch")
+        # identical verdict to the genuine-tampering case above
+        _, real = self.verdict({"bytes": len(self.body), "sha256": self.GOOD})
+        self.assertEqual(entry["verdict"], real["verdict"])
+
+    def test_emit_rows_round_trips_into_a_matching_row(self):
+        # The derive half: what it emits, written back, must verify clean.
+        out = self.run_checks("prompt-integrity", "--trigger-json", self.triggers,
+                              "--emit-rows")
+        emitted = out["emit_rows"]["trig_A"]
+        self.assertEqual(emitted["sha256"], self.sha)
+        self.assertTrue(re.fullmatch(r"[0-9a-f]{64}", emitted["sha256"]))
+        _, entry = self.verdict(emitted)
+        self.assertEqual(entry["verdict"], "match")
+
+    def test_a_trigger_with_no_row_is_not_a_mismatch_and_only_narrows_it(self):
+        out, _ = self.verdict({"bytes": len(self.body), "sha256": self.sha})
+        # trig_NOPROMPT carries no prompt and is skipped entirely
+        self.assertEqual([r["id"] for r in out["results"]], ["trig_A"])
+        # a prompt with no row is its own bucket, never a mismatch
+        self.write("db2/prompts/other.json", {"bytes": 1, "sha256": "a" * 64})
+        out = self.run_checks("prompt-integrity", "--trigger-json", self.triggers,
+                              "--dir", os.path.join(self.tmp, "db2"))
+        self.assertEqual(out["row_missing"], ["trig_A"])
+        self.assertEqual(out["mismatch"], [])
+
+    def test_without_a_dir_it_measures_and_compares_nothing(self):
+        out = self.run_checks("prompt-integrity", "--trigger-json", self.triggers)
+        self.assertEqual(out["not_compared"], ["trig_A"])
+        entry = out["results"][0]
+        self.assertEqual(entry["live_sha256"], self.sha)
+        self.assertIsNone(entry["row_sha256"])
+
+    def test_a_trigger_payload_of_the_wrong_shape_is_could_not_run(self):
+        bad = self.write("bad.json", {"no": "data list"})
+        self.run_checks("prompt-integrity", "--trigger-json", bad, want=3)
+
+
 # ---------------------------------------------------------------------------
 class SubparserDefaults(unittest.TestCase):
     """A default set on one subcommand stays on that subcommand.
