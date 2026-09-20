@@ -27,7 +27,14 @@ jobs:
   shellcheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout is the ONE supply-chain input in a repository that
+      # pins everything else by digest. `@v4` is a tag, and a tag is a name
+      # its owner can move. The four programs in this repository are fetched by
+      # the scheduled runs only after a sha-256 comparison, and the workflows
+      # that check them were trusting a mutable reference. Pinned 2026-09-20 to the
+      # commit `v4` resolved to that day, which is also tagged v4.4.0. To
+      # move it: read the tag again and change the sha here, deliberately.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: shellcheck the test scripts at full severity
         run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh tests/checks.sh
       - name: shellcheck the shipped scripts at full severity
@@ -53,7 +60,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: the scan can go red -- prove it before trusting it green
         # FIRST, deliberately. A scanner that has been broken into always
         # passing is indistinguishable from a clean tree, and the green tick
@@ -75,7 +82,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: pinned recipes against live captures, no network
         run: python3 --version && sh tests/checks.sh
 
@@ -90,7 +97,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: tools present
         run: |
           for t in jq node curl; do

@@ -137,14 +137,34 @@ if [ "$in_repo" = "1" ]; then
   # A fetch that fails is itself a publisher problem: without it, ahead/behind are
   # computed against a STALE origin/main and can read 0 while the public feed is
   # frozen. So the fetch result is a fact to report, never swallowed.
+  fetch_ok=1
   if ! fetch_err=$(git fetch -q origin 2>&1); then
+    fetch_ok=0
+    # git fetch's errors are routinely MULTI-LINE -- "fatal: unable to access
+    # ..." followed by "fatal: Could not read from remote repository." -- and
+    # two things go wrong if that text is interpolated raw. The incident
+    # fingerprint below takes the KIND from each line's leading "word:", so a
+    # second line beginning "fatal:" invents a kind called `fatal`; and that
+    # text varies from run to run, so the fingerprint flaps and the alarm mails
+    # "the incident changed" over and over. A problem line is one line.
+    fetch_err=$(printf '%s' "$fetch_err" | tr '\n' ' ')
     problems="${problems}FETCH FAILED: cannot see origin, so publisher state is UNKNOWN (${fetch_err:-no error text}).
 "
   fi
   ahead=$(git rev-list --count origin/main..main 2>/dev/null || echo "?")
   behind=$(git rev-list --count main..origin/main 2>/dev/null || echo "?")
   healed=""
-  if [ "$ahead" != "0" ] && [ "$ahead" != "?" ] && [ "$behind" != "0" ] && [ "$behind" != "?" ] && [ "$AUTOHEAL" = "1" ]; then
+  # Autoheal is skipped outright when the fetch failed. ahead and behind were
+  # then measured against a STALE origin/main, and rebasing onto a stale ref and
+  # pushing is an action taken on a premise this script has already written down
+  # as UNKNOWN. The push would be rejected and reported, so nothing is lost --
+  # but the heal would have run on a fact nobody had. Reported rather than done
+  # silently: "did not try" and "tried and it was fine" are different cells.
+  if [ "$fetch_ok" = "0" ] && [ "$AUTOHEAL" = "1" ]; then
+    problems="${problems}AUTOHEAL SKIPPED: the fetch failed, so ahead/behind are measured against a stale origin/main and there is nothing trustworthy to rebase onto.
+"
+  fi
+  if [ "$fetch_ok" = "1" ] && [ "$ahead" != "0" ] && [ "$ahead" != "?" ] && [ "$behind" != "0" ] && [ "$behind" != "?" ] && [ "$AUTOHEAL" = "1" ]; then
     heal_msg=$(autoheal "$ahead" "$behind")
     case "$heal_msg" in
       "autoheal OK"*) healed="$heal_msg" ;;
@@ -162,9 +182,21 @@ if [ "$in_repo" = "1" ]; then
     # Corroboration the daily prompt asks a human to check by hand: how many times
     # has the writer logged a rejected push? Distinguishes "push is failing" from
     # "push has not run yet".
-    pushfails=$(grep -c "push failed" witness.log 2>/dev/null || echo 0)
-    problems="${problems}. witness.log records ${pushfails} 'push failed' line(s) in total.
+    # `grep -c` PRINTS 0 and EXITS 1 when a readable file holds no match, so the
+    # old `|| echo 0` appended a second zero and the mail read "records 0
+    # 0 'push failed' line(s)". Cosmetic, but this is the corroborating number
+    # the daily prompt asks a person to weigh, and a count that renders as two
+    # numbers is a count nobody can act on. The file is tested first, because
+    # "no failures logged" and "no log to read" are different cells and the old
+    # form collapsed them both to zero.
+    if [ -r witness.log ]; then
+      pushfails=$(grep -c "push failed" witness.log 2>/dev/null || true)
+      problems="${problems}. witness.log records ${pushfails:-0} 'push failed' line(s) in total.
 "
+    else
+      problems="${problems}. witness.log is not readable, so the push-failure total is UNKNOWN -- not zero.
+"
+    fi
   fi
 
   # --- 2. THE WRITER. Catches a dead cron or a crash before the push line. ---

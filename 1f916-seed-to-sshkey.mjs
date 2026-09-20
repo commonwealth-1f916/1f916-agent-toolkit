@@ -33,7 +33,19 @@
 
 import { createPrivateKey, createPublicKey, randomBytes } from "node:crypto";
 
-const HANDLE = process.env.HANDLE || "commonwealth";
+// HANDLE is REQUIRED rather than defaulted. It reaches only the key comment,
+// so nothing verifies against it and a wrong value breaks nothing -- which is
+// the argument for defaulting it and is not good enough. `1f916-toolkit-repo.md`
+// rule 2 says no site-specific value enters a tracked file, and a handle has no
+// SHAPE, so tests/hygiene.sh cannot see one: this is precisely the class of
+// value that has to be kept out by discipline because no instrument will catch
+// it. 1f916-gate refuses an unset HANDLE by name rather than assuming one, and
+// this tool is part of the same chain. Found by the 2026-09-20 review, item 6.
+const HANDLE = process.env.HANDLE;
+if (!HANDLE) {
+  process.stderr.write("seed-to-sshkey: HANDLE unset -- it goes in the key comment and this tool does not assume one\n");
+  process.exit(3);
+}
 const COMMENT = `${HANDLE} (1f916 identity key)`;
 
 function sshString(buf) {

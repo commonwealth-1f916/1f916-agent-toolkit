@@ -12,8 +12,15 @@
 
 set -u
 HERE=$(cd "$(dirname "$0")/.." && pwd)
-TOOL="$HERE/1f916-seed-to-sshkey.mjs"
-SIGN="$HERE/1f916-ssh-sign"
+# Both subjects are overridable, like tests/gate.sh, tests/scan.sh and
+# tests/alert.sh. Until 2026-09-20 they were not, which is the whole reason
+# 1f916-ssh-sign and 1f916-seed-to-sshkey.mjs had NO mutants: tests/mutants.sh
+# runs a suite against a mutated COPY, and a suite that can only ever run
+# against the file beside it cannot be pointed at one.
+#
+# Usage: tests/sign.sh [path-to-1f916-ssh-sign] [path-to-1f916-seed-to-sshkey.mjs]
+SIGN="${1:-$HERE/1f916-ssh-sign}"
+TOOL="${2:-$HERE/1f916-seed-to-sshkey.mjs}"
 
 for t in node ssh-keygen ssh-agent ssh-add git; do
   command -v "$t" >/dev/null 2>&1 || { printf '# no %s: skipping the signing test\n' "$t"; exit 0; }
@@ -39,23 +46,29 @@ node -e '
 SEED=$(sed -n 1p "$W/kp"); PUB=$(sed -n 2p "$W/kp")
 WRONG_PUB=$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("base64url"))')
 
+# HANDLE is REQUIRED by the seed tool since 2026-09-20 -- it used to default to
+# one site's handle, which is the class of value tests/hygiene.sh cannot see
+# (a handle has no shape). A throwaway one here, like every other value in this
+# suite; the comment it lands in is not what any signature is over.
+TESTHANDLE='testcitizen'
+
 # --- 1. the seed tool ---------------------------------------------------------
-out=$(EXPECT_PUB="$WRONG_PUB" ED25519_PRIV="$SEED" node "$TOOL" --private-pem 2>/dev/null); rc=$?
+out=$(HANDLE="$TESTHANDLE" EXPECT_PUB="$WRONG_PUB" ED25519_PRIV="$SEED" node "$TOOL" --private-pem 2>/dev/null); rc=$?
 if [ "$rc" = 2 ] && [ -z "$out" ]; then ok "1. guard: a seed that does not reproduce EXPECT_PUB -> exit 2, nothing emitted"
 else nok "1. guard: a seed that does not reproduce EXPECT_PUB -> exit 2, nothing emitted" "rc=$rc bytes=${#out}"; fi
 
-out=$(EXPECT_PUB="$PUB" node "$TOOL" --private-pem 2>/dev/null); rc=$?
+out=$(HANDLE="$TESTHANDLE" EXPECT_PUB="$PUB" node "$TOOL" --private-pem 2>/dev/null); rc=$?
 if [ "$rc" = 3 ] && [ -z "$out" ]; then ok "1. no ED25519_PRIV in the environment -> exit 3, nothing emitted"
 else nok "1. no ED25519_PRIV in the environment -> exit 3, nothing emitted" "rc=$rc"; fi
 
-EXPECT_PUB="$PUB" ED25519_PRIV="$SEED" node "$TOOL" --private-pem > "$W/pem" 2>/dev/null
+HANDLE="$TESTHANDLE" EXPECT_PUB="$PUB" ED25519_PRIV="$SEED" node "$TOOL" --private-pem > "$W/pem" 2>/dev/null
 chmod 600 "$W/pem"
 if ssh-keygen -yf "$W/pem" > "$W/k.pub" 2>/dev/null; then ok "1. the emitted PEM is a private key OpenSSH accepts"
 else nok "1. the emitted PEM is a private key OpenSSH accepts"; : > "$W/k.pub"; fi
 if grep -q -- '^-----BEGIN OPENSSH PRIVATE KEY-----$' "$W/pem"; then ok "1. and it is armored as OpenSSH expects"
 else nok "1. and it is armored as OpenSSH expects"; fi
 
-EXPECT_PUB="$PUB" node "$TOOL" --pubkey-only > "$W/derived.pub" 2>/dev/null
+HANDLE="$TESTHANDLE" EXPECT_PUB="$PUB" node "$TOOL" --pubkey-only > "$W/derived.pub" 2>/dev/null
 if [ -s "$W/k.pub" ] && [ "$(cut -d' ' -f1,2 "$W/derived.pub")" = "$(cut -d' ' -f1,2 "$W/k.pub")" ]
 then ok "1. --pubkey-only (from x alone) equals ssh-keygen -y's derivation from the private key"
 else nok "1. --pubkey-only (from x alone) equals ssh-keygen -y's derivation from the private key"; fi
@@ -65,7 +78,7 @@ else nok "1. --pubkey-only (from x alone) equals ssh-keygen -y's derivation from
 # the environment of the key command directly, which is what op run would do.
 CONF="$W/sign.conf"
 cat > "$CONF" <<EOF
-SIGN_KEY_CMD="EXPECT_PUB='$PUB' ED25519_PRIV='$SEED' node '$TOOL' --private-pem"
+SIGN_KEY_CMD="HANDLE='$TESTHANDLE' EXPECT_PUB='$PUB' ED25519_PRIV='$SEED' node '$TOOL' --private-pem"
 EOF
 printf 'tester@example.org %s\n' "$(cut -d' ' -f1,2 "$W/k.pub")" > "$W/allowed"
 
@@ -95,7 +108,7 @@ else nok "2. no ssh-agent outlives the signature" "before=$agents_before after=$
 
 # --- 3. refusal is a failed commit, not an unsigned one -------------------------
 cat > "$CONF" <<EOF
-SIGN_KEY_CMD="EXPECT_PUB='$WRONG_PUB' ED25519_PRIV='$SEED' node '$TOOL' --private-pem"
+SIGN_KEY_CMD="HANDLE='$TESTHANDLE' EXPECT_PUB='$WRONG_PUB' ED25519_PRIV='$SEED' node '$TOOL' --private-pem"
 EOF
 head_before=$(git rev-parse HEAD)
 if SSH_SIGN_CONF="$CONF" git commit -q --allow-empty -S -m refused 2>/dev/null
@@ -107,6 +120,88 @@ else nok "3. and HEAD did not move"; fi
 if SSH_SIGN_CONF="$W/nonexistent" git commit -q --allow-empty -S -m noconf 2>/dev/null
 then nok "3. no config -> no commit" "commit went through"
 else ok "3. no config -> no commit"; fi
+
+# --- 4. the 2026-09-20 review, items 6 and 7 -----------------------------------
+# 4a. The seed tool no longer assumes a handle. It reaches only the key COMMENT,
+#     so nothing verifies against it and a wrong one breaks nothing -- which is
+#     the argument for defaulting it and is not good enough: a handle has no
+#     SHAPE, so tests/hygiene.sh cannot see one, and a site-specific value no
+#     instrument can catch is the one that has to be kept out on purpose.
+out=$(EXPECT_PUB="$PUB" ED25519_PRIV="$SEED" node "$TOOL" --private-pem 2>"$W/err4"); rc=$?
+if [ "$rc" = 3 ] && [ -z "$out" ]; then ok "4a. an unset HANDLE is exit 3, nothing emitted"
+else nok "4a. an unset HANDLE is exit 3, nothing emitted" "rc=$rc bytes=${#out}"; fi
+if grep -q 'HANDLE' "$W/err4"; then ok "4a. and the refusal names HANDLE"
+else nok "4a. and the refusal names HANDLE" "stderr: $(tr '\n' ' ' < "$W/err4")"; fi
+
+# 4b. ...and the wrapper names it too, WITH THE FILE TO EDIT. The operator of a
+#     failed commit is reading 1f916-ssh-sign's message, not node's, and
+#     "HANDLE unset" is not actionable without a path.
+cat > "$W/conf-nohandle" <<EOF
+SEED_REF="op://<VAULT>/<ITEM-ID>/ed25519_priv"
+EXPECT_PUB="$PUB"
+SEED_TOOL="$TOOL"
+EOF
+if SSH_SIGN_CONF="$W/conf-nohandle" git commit -q --allow-empty -S -m nohandle 2>"$W/err4b"
+then nok "4b. a conf with no HANDLE yields NO commit" "commit went through"
+else ok "4b. a conf with no HANDLE yields NO commit"; fi
+if grep -q 'HANDLE unset in' "$W/err4b"; then ok "4b. and the message names HANDLE and the conf file"
+else nok "4b. and the message names HANDLE and the conf file" "stderr: $(tr '\n' ' ' < "$W/err4b" | cut -c1-160)"; fi
+
+# 4c. THE KEY COMMAND'S STDERR REACHES THE OPERATOR. Asserted because the
+#     review said the old `2>/dev/null` discarded it, and the review was half
+#     wrong: the redirection was at the END of the pipeline, so it only ever
+#     applied to ssh-add, and this half always worked. The test is here to keep
+#     it working and to stop the claim being re-argued from the source. 4e is
+#     the half that was genuinely lost.
+cat > "$CONF" <<'EOF'
+SIGN_KEY_CMD="sh -c 'printf %s\\n DISTINCTIVE-REASON-FROM-THE-KEY-COMMAND >&2; exit 9'"
+EOF
+if SSH_SIGN_CONF="$CONF" git commit -q --allow-empty -S -m whyfailed 2>"$W/err4c"
+then nok "4c. a failing key command yields NO commit" "commit went through"
+else ok "4c. a failing key command yields NO commit"; fi
+if grep -q 'DISTINCTIVE-REASON-FROM-THE-KEY-COMMAND' "$W/err4c"
+then ok "4c. and the key command's own reason reaches the operator"
+else nok "4c. and the key command's own reason reaches the operator" "stderr: $(tr '\n' ' ' < "$W/err4c" | cut -c1-200)"; fi
+
+# 4d. THE AGENT KEY HAS A LIFETIME. Asserted against ssh-add's recorded argv,
+#     the same method tests/gate.sh uses to prove the bearer never reaches
+#     curl's command line: the property is about what one program is TOLD, so
+#     the double is placed on PATH rather than the program made testable. The
+#     trap kills the agent on every exit path the script controls; SIGKILL is
+#     the one it does not, and an expiring key is the only cover for it.
+STUB="$W/stub"; mkdir -p "$STUB"
+cat > "$STUB/ssh-add" <<'STUBEOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "$STUB_ADD_LOG"
+cat >/dev/null
+exit 1
+STUBEOF
+chmod +x "$STUB/ssh-add"
+: > "$W/ssh-add.log"
+cat > "$CONF" <<'EOF'
+SIGN_KEY_CMD="printf %s x"
+EOF
+PATH="$STUB:$PATH" STUB_ADD_LOG="$W/ssh-add.log" SSH_SIGN_CONF="$CONF" \
+  git commit -q --allow-empty -S -m lifetime 2>/dev/null || true
+if grep -q -- '-t 30' "$W/ssh-add.log"
+then ok "4d. the signing key is loaded into the agent with a lifetime"
+else nok "4d. the signing key is loaded into the agent with a lifetime" "ssh-add argv: $(tr '\n' '|' < "$W/ssh-add.log")"; fi
+
+# 4e. SSH-ADD'S OWN REASON, which is the half `2>/dev/null` really did swallow.
+#     It is the one that tells "the key command produced nothing usable" from
+#     "it produced something and the agent would not take it" -- and with it
+#     gone, both read as this script's single "could not load the signing key".
+#     The key command here SUCCEEDS and emits a non-key, so the failure is
+#     ssh-add's alone. The real ssh-add, not the stub 4d uses.
+cat > "$CONF" <<'EOF'
+SIGN_KEY_CMD="printf %s not-a-key"
+EOF
+if SSH_SIGN_CONF="$CONF" git commit -q --allow-empty -S -m notakey 2>"$W/err4e"
+then nok "4e. a key the agent refuses yields NO commit" "commit went through"
+else ok "4e. a key the agent refuses yields NO commit"; fi
+if grep -qi 'error loading key\|invalid format\|libcrypto' "$W/err4e"
+then ok "4e. and ssh-add's own reason reaches the operator"
+else nok "4e. and ssh-add's own reason reaches the operator" "stderr: $(tr '\n' ' ' < "$W/err4e" | cut -c1-200)"; fi
 
 printf '# %d tests, %d passed, %d failed\n' "$n" "$pass" "$fail"
 [ "$fail" = 0 ] || exit 1

@@ -14,7 +14,9 @@ name: pin
 # the reason the control is shaped the way it is.
 #
 # Two files in the operator's private prompts pin a commit in this repository
-# and check three sha-256s before the scheduled runs execute anything. That is
+# and check FOUR sha-256s before the scheduled runs execute anything -- one per
+# shipped program the runs fetch, which tests/pin.sh enumerates and this comment
+# had wrong since `1f916-checks` was added. That is
 # what stops a run changing the code the next run will execute. It also means a
 # merge here deploys NOTHING: until a person moves the pin, the runs keep
 # fetching the old commit, and in September that silence lasted 28 commits on
@@ -46,7 +48,14 @@ jobs:
   self-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout is the ONE supply-chain input in a repository that
+      # pins everything else by digest. `@v4` is a tag, and a tag is a name
+      # its owner can move. The four programs in this repository are fetched by
+      # the scheduled runs only after a sha-256 comparison, and the workflows
+      # that check them were trusting a mutable reference. Pinned 2026-09-20 to the
+      # commit `v4` resolved to that day, which is also tagged v4.4.0. To
+      # move it: read the tag again and change the sha here, deliberately.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: prove the pin check can go red
         run: sh tests/pin.sh --self-test
 
@@ -55,7 +64,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
       - name: does this pull request touch code the runs execute?
@@ -103,7 +112,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
       - name: open a pin-owed issue if a tool file moved
@@ -144,7 +153,7 @@ jobs:
             echo "A push to \`main\` changed code the scheduled runs execute."
             echo
             echo "Merging did not deploy it. The runs fetch a PINNED commit and verify"
-            echo "three digests before executing anything, so they are still running the"
+            echo "four digests before executing anything, so they are still running the"
             echo "previous code and will keep doing so until a person moves the pin."
             echo
             echo '```'
