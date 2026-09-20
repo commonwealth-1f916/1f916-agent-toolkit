@@ -272,6 +272,53 @@ check_modes() {
   fi
 }
 
+# Every program this repository ships is named in README.md.
+#
+# WHAT THIS DOES NOT CATCH, stated first because this check was written after a
+# defect it would NOT have caught. On 2026-09-20 the README opened "Two small
+# shell scripts" while the repository shipped seven programs, the largest of
+# them Python -- and every one of those seven was ALREADY NAMED in the body,
+# 12, 6, 4, 2, 3, 3 and 3 times over. The stale claim was a SUMMARY SENTENCE,
+# and a summary going stale while every name stays present is not mechanically
+# detectable here. Checked rather than assumed: run against the README as
+# published before the fix, this check reports nothing missing. That half of
+# the problem stays with a reader, and writing a check that merely looks like
+# it covers it would be worse than having none.
+#
+# What it DOES catch is the other half: a program landing at the root and never
+# being documented at all -- which is how the sentence got stale in the first
+# place, five programs at a time, with nothing asking whether the README had
+# kept up.
+#
+# DERIVED, NEVER A LIST. A hardcoded set would have to be edited by the same
+# person who forgot the sentence, so it would go stale in the same way. Every
+# tracked file at the repository root that is not documentation, example config
+# or a dotfile is a program, which means a new one is covered the day it lands.
+#
+# Takes the README path so the self-test can point it at a doctored copy: a
+# check nobody has watched fail is not evidence, which is the rule the planted
+# specimens below already follow.
+check_readme_names_the_programs() {
+  readme="${1:-README.md}"
+  missing=''
+  listing=$(mktemp) || exit 1
+  git ls-files | grep -v '/' > "$listing"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in
+      .*|*.md|*.example|LICENSE) continue ;;
+    esac
+    grep -qF -- "$f" "$readme" || missing="$missing $f"
+  done < "$listing"
+  rm -f "$listing"
+  if [ -n "$missing" ]; then
+    notok "README.md names every program this repo ships -- not named:$missing"
+    return 1
+  fi
+  ok "README.md names every program this repo ships"
+  return 0
+}
+
 # The escape hatch must not spread. If the marker appears anywhere but this
 # file, someone has silenced the scan in a place it was meant to look.
 check_marker_confined() {
@@ -362,6 +409,20 @@ EOF
     fi
   done
 
+  # The README check must be able to go red too, by the same rule as the scan
+  # above: run it against a copy with one program's name removed and require a
+  # failure. 1f916-checks is the specimen because it is the one the stale
+  # sentence actually omitted -- 57% of this repository's program text.
+  doctored=$(mktemp) || exit 1
+  grep -v -- '1f916-checks' README.md > "$doctored"
+  if ( check_readme_names_the_programs "$doctored" ) >/dev/null 2>&1; then
+    echo "not ok - self-test/readme: PASSED on a README that names no 1f916-checks"
+    fails=$((fails + 1))
+  else
+    echo "ok - self-test/readme caught a program the README does not name"
+  fi
+  rm -f "$doctored"
+
   echo "self-test: $caught of $planted planted values caught"
   [ "$caught" = "$planted" ] || fails=$((fails + 1))
 }
@@ -378,6 +439,7 @@ case "${1:-}" in
     }
     check_modes
     check_marker_confined
+    check_readme_names_the_programs
     tmpl=$(mktemp) || exit 1
     trap 'rm -f "$tmpl"' EXIT INT TERM
     git ls-files > "$tmpl"
