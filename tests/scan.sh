@@ -105,11 +105,33 @@ else nok "blank line in the pattern file" "rc=$rc out=$out"; fi
 #     scanned, so every temporary the tool makes lands inside the search path
 #     and a single match there is the failure. Scanning the real /tmp would
 #     have measured this suite's own fixtures instead.
+#
+#     BUT TMPDIR IS NOT PORTABLE HERE, and the mutation suite is what said so.
+#     BSD mktemp on macOS IGNORES TMPDIR outright -- it takes the per-user
+#     Darwin temp directory from confstr -- so on that host the tool's copy
+#     lands nowhere near the search path and this test would pass without
+#     testing anything. It PASSED on the macOS runner and the matching mutant
+#     SURVIVED there, which is the whole reason tests/mutants.sh exists. So the
+#     condition is PROBED rather than assumed, and where it does not hold this
+#     SKIPS AND SAYS SO -- the same rule as the root case below and the alert
+#     suite's macOS skip. It runs for real on the Linux runner, and CI requires
+#     both.
 mkdir -p "$WORK/scratch"
-out=$(TMPDIR="$WORK/scratch" sh "$SCAN" "$WORK/pat-blank.txt" "$WORK/clean" "$WORK/scratch" 2>&1); rc=$?
-if [ "$rc" -eq 0 ] && [ "$out" = 'scan: 2 paths, 0 files matched, 0 unreadable' ]; then
-  ok "the tool's own filtered copy of the pattern file is never a hit"
-else nok "filtered copy excluded" "rc=$rc out=$out"; fi
+probe=$(TMPDIR="$WORK/scratch" mktemp 2>/dev/null) || probe=""
+case "$probe" in
+  "$WORK/scratch"/*)
+    rm -f "$probe"
+    out=$(TMPDIR="$WORK/scratch" sh "$SCAN" "$WORK/pat-blank.txt" "$WORK/clean" "$WORK/scratch" 2>&1); rc=$?
+    if [ "$rc" -eq 0 ] && [ "$out" = 'scan: 2 paths, 0 files matched, 0 unreadable' ]; then
+      ok "the tool's own filtered copy of the pattern file is never a hit"
+    else nok "filtered copy excluded" "rc=$rc out=$out"; fi
+    ;;
+  *)
+    [ -n "$probe" ] && rm -f "$probe"
+    printf '# mktemp ignores TMPDIR on this host (BSD/macOS uses the per-user Darwin\n'
+    printf '# temp directory): the filtered-copy exclusion test was SKIPPED, not passed.\n'
+    ;;
+esac
 
 # 6. no pattern file at all: usage, exit 3
 sh "$SCAN" >/dev/null 2>&1; rc=$?

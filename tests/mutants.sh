@@ -96,7 +96,22 @@ mutant 'empty manifest reported done'       's|^      .. fail3 "manifest is not 
 # the cheaper half of not repeating that.
 mutant 'the verdict is always clean'      's|^\[ "\$matched" -eq 0 \]$|true|'                            scan
 mutant 'the pattern file counts as a hit' 's# -e "\$patabs"##'                                           scan
-mutant 'the filtered copy counts as a hit' 's# -e "\$patscan"##'                                          scan
+# Gated on the same condition tests/scan.sh probes: where mktemp ignores TMPDIR
+# (BSD/macOS) its exclusion test cannot create the condition, so this mutant
+# would "survive" because its test never ran -- the same lie the root case below
+# and the alert block refuse. SKIPPED AND SAID SO there; enforced on Linux, and
+# CI requires both runners.
+scan_probe_dir=$(mktemp -d) || exit 1
+scan_probe=$(TMPDIR="$scan_probe_dir" mktemp 2>/dev/null) || scan_probe=""
+case "$scan_probe" in
+  "$scan_probe_dir"/*)
+    rm -f "$scan_probe"
+    mutant 'the filtered copy counts as a hit' 's# -e "\$patscan"##'                                        scan ;;
+  *)
+    [ -n "$scan_probe" ] && rm -f "$scan_probe"
+    printf '# mktemp ignores TMPDIR here: the filtered-copy mutant was SKIPPED, not passed\n' ;;
+esac
+rm -rf "$scan_probe_dir"
 # The 2026-09-20 review's finding 2: a blank line is an EMPTY PATTERN and
 # grep -F -f matches every line of every file against one. The header had
 # claimed blank lines were ignored since the tool was written.
