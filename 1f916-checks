@@ -1123,6 +1123,115 @@ def cmd_queue_age(ctx, args):
 # CLI
 
 
+
+# ---------------------------------------------------------------------------
+# prompt-integrity -- the stored prompts against the ledger rows that describe them
+
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def load_trigger_prompts(obj):
+    """[(id, name, prompt)] from a raw list_triggers payload.
+
+    RAW, not the slim file the daily and evening runs save: this is the one
+    check that needs derived_state.prompt, and it still never reads the text --
+    it measures it here and emits numbers.
+    """
+    rows = obj.get("data") if isinstance(obj, dict) else obj
+    if not isinstance(rows, list):
+        raise CouldNotRun("trigger json has no `data` list")
+    out = []
+    for t in rows:
+        if not isinstance(t, dict):
+            continue
+        ds = t.get("derived_state") or {}
+        out.append((t.get("id"), t.get("name"), ds.get("prompt")))
+    return out
+
+
+def cmd_prompt_integrity(ctx, args):
+    """Compare each stored prompt with the `prompts` row that describes it.
+
+    THREE OUTCOMES, KEPT APART, and that separation is the point of the command.
+    A `mismatch` says a prompt changed outside the batch process, which is the
+    most serious thing this project's weekly audit can report. A `row_malformed`
+    says the RECORD is wrong -- a digest that is truncated, invented or left at
+    the previous revision -- which looks identical to a mismatch if the two are
+    collapsed, and points at the opposite conclusion. Reporting the second as
+    the first manufactures evidence of tampering out of a typing slip.
+
+    WHAT THIS CANNOT CATCH, and it is the reason --emit-rows exists. A digest
+    that is well formed but wrong -- invented at full length, or left at the
+    previous revision -- is indistinguishable from a prompt that really did
+    change outside the batch process. Both are "the row says X, the prompt
+    hashes to Y", and nothing here can tell which side is lying. Detection
+    therefore closes only half the hole; the other half closes by DERIVING the
+    value with --emit-rows at the moment the row is written, so that no digest
+    is ever typed by a hand that can slip. Both defects this command was built
+    after were typed: one truncated to 16 characters, one invented past 16.
+    """
+    payload = ctx.read_json(args.trigger_json, "trigger json")
+    triggers = load_trigger_prompts(payload)
+    rows = dict(read_collection(ctx, args.dir, args.collection)) if args.dir else {}
+
+    results, buckets, emit = [], {}, {}
+    for tid, name, prompt in triggers:
+        if prompt is None:
+            continue
+        if args.only and tid not in args.only:
+            continue
+        body = prompt.encode("utf-8")
+        live_bytes, live_sha = len(body), sha256_hex(body)
+        emit[tid] = {"bytes": live_bytes, "sha256": live_sha}
+        entry = {"id": tid, "name": name, "live_bytes": live_bytes, "live_sha256": live_sha,
+                 "row_bytes": None, "row_sha256": None, "verdict": None, "detail": None}
+
+        row = rows.get(tid)
+        if not args.dir:
+            entry["verdict"] = "not_compared"
+            entry["detail"] = "no --dir given; live values measured only"
+        elif row is None:
+            entry["verdict"] = "row_missing"
+            entry["detail"] = "no prompts row for this trigger"
+        else:
+            rb, rh = row.get("bytes"), row.get("sha256")
+            entry["row_bytes"], entry["row_sha256"] = rb, rh
+            bad = []
+            if not isinstance(rb, int):
+                bad.append("bytes is not an integer")
+            if not isinstance(rh, str) or not SHA256_RE.match(rh):
+                bad.append("sha256 is not 64 lowercase hex")
+            if bad:
+                entry["verdict"] = "row_malformed"
+                entry["detail"] = "; ".join(bad)
+            elif rh == live_sha and rb == live_bytes:
+                entry["verdict"] = "match"
+            elif rh == live_sha:
+                # The digest is the authority; a byte count that disagrees with
+                # a matching digest is a miscounted record, not a changed prompt
+                # (characters counted as bytes is the way this has gone wrong).
+                entry["verdict"] = "row_malformed"
+                entry["detail"] = "sha256 matches but bytes disagree: row %r, live %d" % (rb, live_bytes)
+            else:
+                entry["verdict"] = "mismatch"
+                entry["detail"] = "stored prompt does not match the row's digest"
+        buckets.setdefault(entry["verdict"], []).append(tid)
+        results.append(entry)
+
+    out = {"collection": args.collection, "triggers_with_prompts": len(results),
+           "results": results,
+           "match": buckets.get("match", []), "mismatch": buckets.get("mismatch", []),
+           "row_malformed": buckets.get("row_malformed", []),
+           "row_missing": buckets.get("row_missing", []),
+           "not_compared": buckets.get("not_compared", [])}
+    if args.emit_rows:
+        # What the row SHOULD say, so a sitting writes a derived value instead
+        # of typing one. The reason this exists is that the field an automated
+        # check reads had been hand-typed and was wrong three times in four days.
+        out["emit_rows"] = emit
+    return out
+
+
 # ---------------------------------------------------------------------------
 # all -- several checks in one process
 
@@ -1574,6 +1683,13 @@ def build_parser():
     s.add_argument("--collection", default="queue")
     s.add_argument("--tier", default="owed")
 
+    s = sub.add_parser("prompt-integrity", parents=[common_parser()])
+    s.add_argument("--trigger-json", required=True, help="a RAW list_triggers payload as a file")
+    s.add_argument("--dir", help="a directory of ledger collections (omit to measure only)")
+    s.add_argument("--collection", default="prompts")
+    s.add_argument("--only", action="append", metavar="TRIGGER_ID")
+    s.add_argument("--emit-rows", action="store_true", help="also emit the {bytes, sha256} each row should carry")
+
     s = sub.add_parser("all", parents=[common_parser()])
     s.add_argument("--prior-dir", help="DIR holding ledger state rows as <id>.json")
     s.add_argument("--citizen", default="commonwealth")
@@ -1609,6 +1725,7 @@ COMMANDS = {
     "docket": cmd_docket, "push-verify": cmd_push_verify, "window": cmd_window,
     "witness-gaps": cmd_witness_gaps, "hygiene": cmd_hygiene, "tally": cmd_tally,
     "queue-age": cmd_queue_age, "all": cmd_all,
+    "prompt-integrity": cmd_prompt_integrity,
     "runs-row": cmd_runs_row,
 }
 
