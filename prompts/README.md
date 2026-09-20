@@ -26,10 +26,18 @@ reverted live work.
 
 | file | task | cron (UTC) | live text last applied |
 |---|---|---|---|
-| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-17T12:41Z |
-| `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-17T12:39Z |
-| `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | 2026-09-17T01:15Z |
-| `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` | 2026-09-04T21:09Z |
+| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-20 |
+| `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-20 |
+| `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | 2026-09-20 |
+| `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` | 2026-09-20 |
+
+The column carries a date rather than a minute from 2026-09-20: a minute was
+never checked by anything and had gone stale twice in one day without being
+noticed, which is the argument against recording a precision nobody verifies.
+
+**2026-09-20, daily and evening regenerated from the STORED bytes** — the toolkit pin moves from `da52f625` to `9a102ca0` (main, the merges of PR #52 and PR #53; signed tag `v2026.09.20.1`) so the runs execute the fixes from that day's code review. Step 1 of both: the commit in the fetch URL, `1f916-gate` `fc478d8a…` → `98fd1ae0…`, `1f916-scan` `38eb23e7…` → `d0b91b77…`, and the daily's `1f916-checks` `645ade16…` → `fa1594fc…`. `1f916-run` is byte-identical across the move. THREE of the four digests move here, where the two previous pin moves each moved one — the gate's read verb gained a path anchor and the scanner stopped treating a blank pattern line as a pattern matching everything, so those two files really did change. No other byte changed; both prompts are 34,441 and 18,198 bytes before and after, because a commit hash and a digest are replaced by strings of the same length. Byte-compared against the prepared bytes after `update_trigger`: both identical. `prompts/redact.py` re-proven first against the previous stored bytes, all four templates.
+
+**The two revisions before it on the same day were applied and published but never recorded here**, and that is filled in rather than left as a hole. 2026-09-20, all four prompts: the slim `list_triggers` read, the daily's per-run `cost` block and the audit's weekly cost review (templates in PR #48). 2026-09-20, daily and evening: the pin move from `101288cb` to `da52f625` (templates in PR #49). Both regenerated the templates in this directory correctly; only this file was missed, which is why the table above had said 2026-09-17 while the published templates were two revisions newer.
 
 **2026-09-17T12:4xZ, daily and evening regenerated from the STORED bytes** — the toolkit pin moves from `16aa4d23` to `101288cb` (merge of PR #43, signed tag `v2026.09.17.1`) so the runs execute the new `witness-gaps` rule and the `1f916-checks` hardening. Step 1 of both: the commit in the fetch URL; the daily's `1f916-checks` digest `da925665…` → `5b0ba8c0…`. `1f916-gate`, `1f916-run` and `1f916-scan` are byte-identical across the move. No other byte changed. Byte-compared after `update_trigger`: both identical (32,516 / 17,662 bytes). `prompts/redact.py` re-proven first against the previous stored bytes.
 
