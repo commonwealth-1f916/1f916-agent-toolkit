@@ -13,8 +13,10 @@
 #   1f916-scan PATTERN-FILE [PATH ...]
 #
 #   PATTERN-FILE  one pattern per line, exactly the bytes to look for (grep -F).
-#                 Blank lines are ignored. The file itself is excluded from the
-#                 results, and its contents are never printed.
+#                 Blank lines are ignored -- filtered out before grep sees them,
+#                 because an empty pattern matches every line of every file.
+#                 The file itself is excluded from the results, and its
+#                 contents are never printed.
 #   PATH ...      directories or files to scan. Default: the caller's home, the
 #                 current directory, and /tmp. Unreadable paths are skipped and
 #                 counted.
@@ -46,6 +48,31 @@ if ! grep -q '[^[:space:]]' "$pat"; then
 fi
 patabs=$(CDPATH='' cd -- "$(dirname -- "$pat")" && pwd)/$(basename -- "$pat")
 
+# A BLANK LINE IS AN EMPTY PATTERN, and grep -F -f matches every line of every
+# file against one. Line 16 of this header has claimed since the tool was
+# written that blank lines are ignored; they were not, and the check above only
+# catches a file with NO non-blank line. The case the runs actually produce is
+# a real pattern followed by a stray empty line, which the daily prompts write
+# with the Write tool two values at a time -- one newline too many and the scan
+# reports every file under the run home, /tmp and /root/.claude as a hit. That
+# fails loud rather than silent, which is the right direction, but it is a
+# verdict the run cannot use on the one step whose exit status the brief makes
+# load-bearing. So the patterns are filtered into a copy and grep reads the
+# copy. The copy holds the secret, so it is mode 600 before anything is written
+# to it, it is excluded from the hits like the pattern file itself, and the
+# existing EXIT trap removes it. Found by the 2026-09-20 review, finding 2.
+patscan=$(mktemp) || exit 3
+chmod 600 "$patscan" || { rm -f "$patscan"; exit 3; }
+# This cannot be the "no pattern in it" case -- the check above already
+# established a non-blank line -- so a failure here is grep itself failing, and
+# it gets its OWN message. Two refusals that print the same sentence are two
+# refusals no test can tell apart, which is how the guard above stopped being
+# killable by tests/mutants.sh the first time this filter was written.
+if ! grep -v '^[[:space:]]*$' "$pat" > "$patscan"; then
+  printf '1f916-scan: could not filter blank lines out of the pattern file: %s\n' "$pat" >&2
+  rm -f "$patscan"; exit 3
+fi
+
 if [ $# -eq 0 ]; then
   set -- "$HOME" "$PWD" /tmp
 fi
@@ -56,16 +83,16 @@ fi
 # as "Binary file matches" and then miscounted. Errors (permission denied,
 # vanished files) are counted, not hidden.
 n=0; matched=0; unreadable=0
-tmp_err=$(mktemp) || exit 3
-tmp_hits=$(mktemp) || { rm -f "$tmp_err"; exit 3; }
-trap 'rm -f "$tmp_err" "$tmp_hits"' EXIT
+tmp_err=$(mktemp) || { rm -f "$patscan"; exit 3; }
+tmp_hits=$(mktemp) || { rm -f "$patscan" "$tmp_err"; exit 3; }
+trap 'rm -f "$patscan" "$tmp_err" "$tmp_hits"' EXIT
 
 for p in "$@"; do
   n=$((n+1))
   if [ ! -e "$p" ]; then
     unreadable=$((unreadable+1)); continue
   fi
-  grep -rlaF -f "$pat" -- "$p" 2>>"$tmp_err" | grep -Fxv -- "$patabs" >>"$tmp_hits" || true
+  grep -rlaF -f "$patscan" -- "$p" 2>>"$tmp_err" | grep -Fxv -e "$patabs" -e "$patscan" >>"$tmp_hits" || true
 done
 
 if [ -s "$tmp_err" ]; then

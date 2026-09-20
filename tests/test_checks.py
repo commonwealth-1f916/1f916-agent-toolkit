@@ -1081,6 +1081,65 @@ class RunsRow(Base):
         self.assertIs(out["row"]["witness"]["fresh"], False)
         self.assertEqual(out["row"]["witness"]["freshness"], "LATE")
 
+    def test_a_judgement_may_not_overwrite_a_measured_field(self):
+        # Finding 3 of the 2026-09-20 review, in code shipped the same day.
+        # The caller is a scheduled run; before the guard, a judgement file
+        # carrying {"homepage": {"agree": true}} replaced a MEASURED value and
+        # left no trace, because judgement_applied names top-level keys only.
+        judgement = self.write("j.json", {"homepage": {"agree": True}})
+        err = self.run_checks("runs-row", "--all", self.all_path,
+                              "--judgement", judgement, want=3)
+        self.assertIn("homepage.agree", json.dumps(err))
+
+    def test_the_guard_covers_derived_fields_too(self):
+        # witness.fresh is the review's own second example and it is NOT in
+        # RUNS_ROW_MAP -- the builder derives it from the freshness bucket
+        # after the block is built. A guard that only knew the map would have
+        # let exactly the named case through.
+        judgement = self.write("j.json", {"witness": {"fresh": True}})
+        err = self.run_checks("runs-row", "--all", self.all_path,
+                              "--judgement", judgement, want=3)
+        self.assertIn("witness.fresh", json.dumps(err))
+
+    def test_replacing_a_whole_block_is_caught_as_every_field_in_it(self):
+        judgement = self.write("j.json", {"surface": "all fine"})
+        err = self.run_checks("runs-row", "--all", self.all_path,
+                              "--judgement", judgement, want=3)
+        blob = json.dumps(err)
+        self.assertIn("surface.count", blob)
+        self.assertIn("surface.hash", blob)
+
+    def test_a_field_the_run_is_meant_to_write_is_not_a_collision(self):
+        # The other half, and without it the guard would be a refusal machine:
+        # DAILY_JUDGEMENT_NESTED is this file's own list of fields the RUN
+        # writes, so a judgement carrying one is doing its job -- including
+        # previous_window.task, which the builder also derives when the window
+        # part ran.
+        judgement = self.write("j.json", {
+            "surface": {"change": "two routes added"},
+            "previous_window": {"task": "1F916 evening (trig_x)"},
+            "note": "a sentence only the run can write",
+        })
+        out = self.run_checks("runs-row", "--all", self.all_path,
+                              "--judgement", judgement)
+        self.assertEqual(out["row"]["surface"]["change"], "two routes added")
+        self.assertEqual(out["row"]["previous_window"]["task"],
+                         "1F916 evening (trig_x)")
+        self.assertIn("capability_sha256", out["row"]["surface"])
+
+    def test_a_block_that_did_not_run_leaves_the_judgement_free_to_write_it(self):
+        # No measurement, no collision: when the part could not run the row
+        # carries no block for it, and the run may say what it knows.
+        payload = fixture_json("all-output.json")
+        payload["parts"]["homepage"] = {"status": "could_not_run",
+                                        "reason": "fetch failed: nope"}
+        path = self.write("degraded.json", payload)
+        out = self.run_checks("runs-row", "--all", path,
+                              "--judgement", self.write("j.json",
+                                                        {"homepage": {"agree": False}}))
+        self.assertIs(out["row"]["homepage"]["agree"], False)
+        self.assertIn("homepage", out["blocks_absent"])
+
     def test_an_all_output_of_the_wrong_shape_is_could_not_run(self):
         path = self.write("nope.json", {"no": "parts here"})
         self.run_checks("runs-row", "--all", path, want=3)
