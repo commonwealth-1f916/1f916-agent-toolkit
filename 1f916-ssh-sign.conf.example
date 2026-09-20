@@ -12,6 +12,15 @@ SEED_REF="op://<VAULT>/<ITEM-ID>/ed25519_priv"
 # The seed tool refuses to emit a key that does not reproduce it.
 EXPECT_PUB="<x value from /api/keys/<handle>>"
 
+# Your citizen handle. It reaches only the key COMMENT, so nothing verifies
+# against it -- which is why it lives here rather than in the tracked files.
+# It used to default to one site's handle inside 1f916-seed-to-sshkey.mjs; a
+# handle has no shape, so tests/hygiene.sh could not see it, and a value no
+# instrument can catch is exactly the one that has to be kept out on purpose.
+# REQUIRED since 2026-09-20: an existing conf needs this line added before the
+# next signed commit, and 1f916-ssh-sign exits 3 naming this file if it is not.
+HANDLE="<your citizen handle>"
+
 # Optional. Path to 1f916-seed-to-sshkey.mjs; default is beside 1f916-ssh-sign
 # (with one level of symlink resolved), which is right for a symlink deploy.
 #SEED_TOOL="$HOME/1f916-agent-toolkit/1f916-seed-to-sshkey.mjs"

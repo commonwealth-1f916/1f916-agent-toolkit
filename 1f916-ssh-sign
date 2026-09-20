@@ -53,12 +53,18 @@ fi
 if [ -z "${SIGN_KEY_CMD:-}" ]; then
   [ -n "${SEED_REF:-}" ]   || fail3 "SEED_REF unset in $CONF"
   [ -n "${EXPECT_PUB:-}" ] || fail3 "EXPECT_PUB unset in $CONF"
+  # HANDLE stopped being defaulted in the seed tool on 2026-09-20 (review item
+  # 6: no site-specific value in a tracked file, and a handle has no SHAPE, so
+  # tests/hygiene.sh cannot catch one). It is named here rather than left to
+  # the seed tool so the failure says WHICH FILE to edit -- the operator of a
+  # failed commit is reading this script's message, not node's.
+  [ -n "${HANDLE:-}" ]     || fail3 "HANDLE unset in $CONF -- add HANDLE=\"<your citizen handle>\"; it goes in the key comment and nothing here assumes one"
   [ -r "$SEED_TOOL" ]      || fail3 "seed tool not found: $SEED_TOOL"
   # The op:// reference is not a secret; the value it names never enters this
   # shell -- op run injects it into node's environment and node writes the PEM
   # to the pipe. --no-masking because the PEM is derived, not the vault value,
   # and op's masking would corrupt a match by accident.
-  SIGN_KEY_CMD="ED25519_PRIV=\"$SEED_REF\" EXPECT_PUB=\"$EXPECT_PUB\" op run --no-masking -- node \"$SEED_TOOL\" --private-pem"
+  SIGN_KEY_CMD="ED25519_PRIV=\"$SEED_REF\" EXPECT_PUB=\"$EXPECT_PUB\" HANDLE=\"$HANDLE\" op run --no-masking -- node \"$SEED_TOOL\" --private-pem"
 fi
 
 command -v ssh-agent >/dev/null 2>&1 || fail3 "ssh-agent not found"
@@ -73,8 +79,27 @@ trap 'ssh-agent -k >/dev/null 2>&1' EXIT INT TERM HUP
 # The private key travels from SIGN_KEY_CMD's stdout to ssh-add's stdin. If the
 # key command refuses (the seed tool exits 2 on a key that is not the published
 # one), ssh-add gets nothing and fails, and so does this script: no signature.
-if ! sh -c "$SIGN_KEY_CMD" | ssh-add -q - 2>/dev/null; then
-  fail3 "could not load the signing key into the agent (key command refused, or the key was not the published one)"
+# `-t 30`: the key EXPIRES in the agent after thirty seconds. Two things it
+# buys, from item 7 of the 2026-09-20 review. It bounds the window in which any
+# process running as this user and able to reach the agent socket can ask it to
+# sign; and it is the only protection against the one exit path the trap above
+# cannot cover -- SIGKILL, which leaves the agent running with the key in it,
+# for as long as the machine is up. Thirty seconds is generous for a signature
+# that takes milliseconds, and a slower one fails loudly rather than silently
+# leaving a key behind.
+#
+# stderr is NOT discarded, and the scope of what that fixes is narrower than
+# the review that found it said. `2>/dev/null` sat at the END of the pipeline,
+# so it only ever applied to ssh-add -- the KEY COMMAND's stderr (op's locked
+# vault, a missing item, node's absence, the seed tool's own refusals) always
+# reached the operator. What was lost was ssh-add's own reason, which is the
+# one that distinguishes "the key command produced nothing usable" from "it
+# produced something and the agent would not take it" -- e.g. `Error loading
+# key "(stdin)": error in libcrypto`. Both halves are now asserted by
+# tests/sign.sh. ssh-add prints no key material to stderr; the key travels on
+# the pipe.
+if ! sh -c "$SIGN_KEY_CMD" | ssh-add -q -t 30 -; then
+  fail3 "could not load the signing key into the agent (key command refused, or the key was not the published one) -- the reason is on stderr above"
 fi
 
 # Not exec: exec would replace this shell and the EXIT trap -- and the agent

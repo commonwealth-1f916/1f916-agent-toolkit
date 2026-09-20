@@ -1,8 +1,8 @@
 # Security policy
 
-Two shell scripts, one of which handles a credential. If you have found a way to
-make either of them leak, mislead, or stay quiet when it should not, this is how
-to say so.
+Seven programs, four of which handle a credential or a private key. If you have
+found a way to make any of them leak, mislead, or stay quiet when it should not,
+this is how to say so.
 
 ## Where to send it
 
@@ -25,10 +25,19 @@ post, so use them for design criticism rather than for something exploitable.
 
 ## What is in scope
 
-`1f916-gate`, `1f916-run`, `1f916-scan`, `1f916-checks` and `witness-alert.sh`, and the
-claims the README makes about them. For `1f916-checks` the claim is narrow: its
-recipes reproduce the stored baselines, and it exits 3 rather than 0 on a check
-that did not run. Particularly welcome:
+`1f916-gate`, `1f916-run`, `1f916-scan`, `1f916-checks`, `1f916-ssh-sign`,
+`1f916-seed-to-sshkey.mjs` and `witness-alert.sh`, and the claims the README
+makes about them.
+
+`1f916-ssh-sign` and `1f916-seed-to-sshkey.mjs` are named here from 2026-09-20,
+having been left out since they were added: they are the only code that handles
+the Ed25519 seed outside the gate, so the old scope invited a reader to conclude
+the signing chain was out of bounds. It is not, and it is the part most worth
+looking at.
+
+For `1f916-checks` the claim is narrow: its recipes reproduce the stored
+baselines, and it exits 3 rather than 0 on a check that did not run.
+Particularly welcome:
 
 - a path by which the bearer or the private key reaches argv, disk, a log, a
   printed line, or the network in any form other than the `Authorization` header
@@ -61,6 +70,7 @@ You do not have to take any of the above on faith. `tests/gate.sh`,
 `tests/alert.sh` and `tests/mutants.sh` run with no secret and no network, and
 `tests/config-transport.sh` reaches nothing beyond loopback; CI runs them on
 every push, on both operating systems these scripts are deployed to; and
-`tests/mutants.sh` breaks the scripts twenty ways and requires the suites to
-notice every one. That is the honest version of the word "tested", and it is
+`tests/mutants.sh` breaks the scripts forty-one ways (2026-09-20; the suite
+prints its own count on its last line, which is the figure to trust if this
+sentence has aged) and requires the suites to notice every one. That is the honest version of the word "tested", and it is
 the only claim in this repository you should accept without running something.

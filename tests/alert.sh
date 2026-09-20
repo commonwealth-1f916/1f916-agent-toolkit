@@ -61,6 +61,17 @@ export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid
 export GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
 git init -q --bare "$W/origin.git"
 git clone -q "$W/origin.git" "$W/repo" 2>/dev/null
+# THE LOCAL BRANCH MUST BE CALLED main, and this line is the whole reason the
+# publisher arm of witness-alert.sh had never been tested. A clone of an empty
+# bare repo takes git's default init branch, which is `master` on the runners
+# and on this container; the script measures `git rev-list --count
+# origin/main..main`, which then fails to resolve, so `ahead` and `behind` came
+# back "?" and EVERY publisher branch -- the UNPUSHED report, the push-failure
+# count, autoheal -- was skipped in silence. Twenty-five tests were green over
+# an arm that never ran, and the publisher is the failure this alarm was built
+# for: twelve unpushed commits on 2026-09-01. Found 2026-09-20 while writing a
+# test for finding 5 that could not be made to fail.
+( cd "$W/repo" && git symbolic-ref HEAD refs/heads/main )
 mkdir -p "$W/repo/witness-state"
 
 fresh_feed() {  # fresh_feed <minutes-ago>
@@ -166,6 +177,52 @@ touch -d "-200 minutes" "$W/repo/witness.log"
 run_alert
 count_is "9. after migration a new kind still alerts" 4
 body_lacks "nobody@example.invalid: command not found" "9. and the fake msmtp really ran"
+
+# --- the 2026-09-20 review, finding 5 -------------------------------------
+# Three small defects, none of which any test reached: the suite had never
+# produced an UNPUSHED problem and had never made a fetch fail.
+
+# 10. `grep -c` PRINTS 0 and EXITS 1 on a readable file with no match, so the
+#     old `|| echo 0` appended a SECOND zero and the mail read "records 0\n0
+#     'push failed' line(s)". The assertion is the whole string on one line,
+#     which is exactly what the old form could not produce.
+rm -f "$W/state"
+( cd "$W/repo" && fresh_feed 5 && touch witness.log && git add -A && git commit -q -m "local only" )
+run_alert
+count_is "10. an unpushed commit alerts" 5
+body_has "UNPUSHED:" "10. and names the kind"
+body_has "records 0 'push failed' line(s)" "10. and the push-failure total renders as ONE number"
+
+# 11. ...and a log it cannot read is UNKNOWN, not zero. The old form collapsed
+#     "no failures logged" and "no log to read" into the same 0.
+rm -f "$W/state" "$W/repo/witness.log"
+run_alert
+count_is "11. a missing witness.log alerts" 6
+body_has "UNKNOWN -- not zero" "11. and the push-failure total is unknown rather than zero"
+
+# 12. A FAILING FETCH. git's errors are multi-line, and the fingerprint takes
+#     each problem line's leading "word:" as a KIND -- so a second line
+#     beginning "fatal:" used to invent a kind called `fatal`, out of text that
+#     varies run to run, which is how a fingerprint flaps. The state file is
+#     where the fingerprint is written down, so that is where this is checked.
+rm -f "$W/state"
+: > "$W/repo/witness.log"
+( cd "$W/repo" && git remote set-url origin "$W/there-is-no-repo-here.git" )
+PATH="$BIN:$PATH" FAKE_MSMTP_DIR="$MAIL" WITNESS_ALERT_CONF="$CONF" WITNESS_AUTOHEAL=1 \
+  bash "$ALERT" > "$W/out" 2> "$W/err"
+count_is "12. an unreachable origin alerts" 7
+body_has "FETCH FAILED:" "12. and names the kind"
+if [ -f "$W/state" ] && ! grep -q 'fatal' "$W/state"; then
+  ok "12. and git's second error line did not become a problem KIND"
+else nok "12. and git's second error line did not become a problem KIND" \
+        "kinds are: $(sed -n 's/^kinds=//p' "$W/state" 2>/dev/null)"; fi
+if [ -f "$W/state" ] && [ "$(sed -n 's/^kinds=//p' "$W/state" | tr ',' '\n' | grep -c .)" -le 3 ]; then
+  ok "12. and the fingerprint is a short set of kinds, not a line of error text"
+else nok "12. and the fingerprint is a short set of kinds, not a line of error text" \
+        "kinds are: $(sed -n 's/^kinds=//p' "$W/state" 2>/dev/null)"; fi
+body_has "AUTOHEAL SKIPPED:" "12. and autoheal did not rebase onto a stale origin/main"
+
+( cd "$W/repo" && git remote set-url origin "$W/origin.git" )
 
 printf '# %d tests, %d passed, %d failed\n' "$n" "$pass" "$fail"
 [ "$fail" = 0 ] || exit 1

@@ -19,29 +19,44 @@ GATE="$here/../1f916-gate"
 ALERT="$here/../witness-alert.sh"
 RUNTOOL="$here/../1f916-run"
 SCANTOOL="$here/../1f916-scan"
+SIGNTOOL="$here/../1f916-ssh-sign"
+SEEDTOOL="$here/../1f916-seed-to-sshkey.mjs"
 WORK=$(mktemp -d) || exit 1
 trap 'rm -rf "$WORK"' EXIT
 
 killed=0; survived=0
 
-mutant() {  # mutant <name> <sed-expression> [gate|alert]
-  case "${3:-gate}" in
+mutant() {  # mutant <name> <sed-expression> [gate|run|scan|sign|seed|alert]
+  name="$1"; expr="$2"; kind="${3:-gate}"
+  second=""
+  case "$kind" in
     alert) src="$ALERT"; suite="$here/alert.sh" ;;
     run)   src="$RUNTOOL"; suite="$here/run.sh" ;;
     scan)  src="$SCANTOOL"; suite="$here/scan.sh" ;;
+    sign)  src="$SIGNTOOL"; suite="$here/sign.sh" ;;
+    seed)  src="$SEEDTOOL"; suite="$here/sign.sh"; second="$SIGNTOOL" ;;
     *)     src="$GATE";  suite="$here/gate.sh"  ;;
   esac
   cp "$src" "$WORK/subject"
-  sed -i.bak "$2" "$WORK/subject" 2>/dev/null || sed -i "$2" "$WORK/subject"
+  chmod +x "$WORK/subject"
+  sed -i.bak "$expr" "$WORK/subject" 2>/dev/null || sed -i "$expr" "$WORK/subject"
   if cmp -s "$src" "$WORK/subject"; then
-    printf 'ERROR  %-52s the edit changed nothing -- fix the mutant\n' "$1"
+    printf 'ERROR  %-52s the edit changed nothing -- fix the mutant\n' "$name"
     survived=$((survived+1)); return
   fi
-  if sh "$suite" "$WORK/subject" >/dev/null 2>&1; then
-    printf 'SURVIVED %-50s the suite did not notice\n' "$1"
+  # tests/sign.sh takes TWO subjects, and which one is mutated decides the
+  # argument order: `sign` mutates the wrapper and the real seed tool goes
+  # second; `seed` mutates the seed tool and the real wrapper goes first.
+  case "$kind" in
+    sign) set -- "$WORK/subject" "$SEEDTOOL" ;;
+    seed) set -- "$second" "$WORK/subject" ;;
+    *)    set -- "$WORK/subject" ;;
+  esac
+  if sh "$suite" "$@" >/dev/null 2>&1; then
+    printf 'SURVIVED %-50s the suite did not notice\n' "$name"
     survived=$((survived+1))
   else
-    printf 'killed   %-50s\n' "$1"
+    printf 'killed   %-50s\n' "$name"
     killed=$((killed+1))
   fi
 }
@@ -111,8 +126,30 @@ if date -u -d "2020-01-01T00:00:00Z" +%s >/dev/null 2>&1 && stat -c %Y "$ALERT" 
   mutant 'state written despite a failed send' 's|^      note_send_failure "the incident alert" "\$?"|      printf "since=x\\nkinds=y\\n" > "$STATE"|' alert
   mutant 'recovery never clears the state'  's|^      rm -f "\$STATE"$|      :|'                    alert
   mutant 'migration cries wolf'             's|^    prev_kinds="\$kinds"$|    prev_kinds="ZZZ"|'    alert
+  # The 2026-09-20 review's finding 5, and the publisher arm generally. Until
+  # that day the alert suite's throwaway clone was on `master`, so `ahead` and
+  # `behind` resolved to "?" and every mutant below would have survived by
+  # never being reached.
+  mutant 'unpushed commits are not reported' 's|UNPUSHED: local main is|FINE: local main is|'      alert
+  mutant 'the push-failure count doubles'    's|^      pushfails=\$(grep -c .*$|      pushfails=$(grep -c "push failed" witness.log 2>/dev/null \|\| echo 0)|' alert
+  mutant 'an unreadable log counts as zero'  's|^      problems="\${problems}. witness.log is not readable.*$|      problems="${problems}. witness.log records 0 (log) line(s).\n"|' alert
+  mutant 'a multi-line fetch error is raw'   's|^    fetch_err=\$(printf .*tr .*)$|    :|'         alert
+  mutant 'autoheal runs on a stale ref'      's|^  if \[ "\$fetch_ok" = "0" \] && \[ "\$AUTOHEAL" = "1" \]; then$|  if false; then|' alert
 else
   printf '# GNU date -d / stat -c absent: alert mutants skipped, not passed\n'
+fi
+
+# --- the signing chain ------------------------------------------------------
+# No mutants existed for either of these until 2026-09-20, because tests/sign.sh
+# could only run against the files beside it and tests/mutants.sh runs a suite
+# against a mutated COPY. Both are the 2026-09-20 review's items 6 and 7.
+if command -v ssh-keygen >/dev/null 2>&1 && command -v ssh-agent >/dev/null 2>&1; then
+  mutant 'the agent key has no lifetime'   's|ssh-add -q -t 30 -|ssh-add -q -|'                    sign
+  mutant 'the key command stderr is lost'  's|ssh-add -q -t 30 -|ssh-add -q -t 30 - 2>/dev/null|'  sign
+  mutant 'HANDLE is not required by the wrapper' 's|^  \[ -n "\${HANDLE:-}" \].*$||'                sign
+  mutant 'HANDLE is defaulted again'       's|^const HANDLE = process.env.HANDLE;$|const HANDLE = process.env.HANDLE \|\| "commonwealth";|' seed
+else
+  printf '# no ssh-keygen/ssh-agent: signing mutants skipped, not passed\n'
 fi
 
 printf '# %d killed, %d survived\n' "$killed" "$survived"
