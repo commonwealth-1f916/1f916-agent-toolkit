@@ -23,6 +23,12 @@ What it refuses to do, by construction:
 Exit codes: 0 status ok (whatever the values say), 3 could_not_run (the JSON is
 still printed, with a reason, and no partial result), 64 usage error.
 
+`all` runs several checks in one process and exits 0 with status "degraded"
+when any part could not run, because it HAS a partial result and exit 3
+promises there is none. Its parts_ran / parts_could_not_run / parts_skipped
+lists are the three outcomes, kept apart: not asked for is not the same fact
+as tried and failed.
+
 Python 3.9+ standard library only. `git` is the only external command, and only
 docket, push-verify and witness-gaps use it.
 """
@@ -1116,6 +1122,342 @@ def cmd_queue_age(ctx, args):
 # ---------------------------------------------------------------------------
 # CLI
 
+
+# ---------------------------------------------------------------------------
+# all -- several checks in one process
+
+# Order is the daily run's reading order, so the output reads the way the run
+# works. A part is RUN, SKIPPED (an input it needs was not supplied) or
+# COULD_NOT_RUN (it was tried and failed). The three are different facts and
+# the caller is given all three; standing rule 4 says a check that could not
+# run is never reported as clean, and a check nobody asked for is not a check
+# that failed.
+ALL_PARTS = ("surface", "witness", "hashes", "seal", "homepage", "bindings",
+             "model", "front", "window")
+
+# cmd_bindings runs against /api/record, measured at 40-47 s on 2026-09-17.
+# Its subparser raises the default timeout on its own; sharing one Ctx here
+# would silently hand it the 30 s default and make it never run.
+ALL_PART_TIMEOUT = {"bindings": 120.0}
+
+
+class _Skip(Exception):
+    """A part was not asked for. Not a failure."""
+
+
+def _part_args(args, **extra):
+    """A namespace carrying the common flags plus one part's own."""
+    ns = argparse.Namespace()
+    for name in ("offline_dir", "now", "workdir", "timeout"):
+        setattr(ns, name, getattr(args, name, None))
+    for name, value in extra.items():
+        setattr(ns, name, value)
+    return ns
+
+
+def _prior_path(args, stem):
+    """<prior-dir>/<ledger state row id>.json, if it is there."""
+    if not args.prior_dir:
+        return None
+    path = os.path.join(args.prior_dir, stem + ".json")
+    return path if os.path.exists(path) else None
+
+
+def _all_entries(args):
+    """[(display name, command, builder)] in reading order.
+
+    `seal` expands to one entry per --seal-label, so a failure names the label
+    that failed rather than reporting that sealing, in general, did not work.
+    """
+    def surface():
+        return _part_args(args, prior=_prior_path(args, "route-surface"),
+                          emit_baseline=args.emit_baseline)
+
+    def witness():
+        if not args.witness_url:
+            raise _Skip("no --witness-url")
+        return _part_args(args, prior=_prior_path(args, "witness-pair"),
+                          url=args.witness_url)
+
+    def hashes():
+        if not args.url:
+            raise _Skip("no --url NAME=URL given")
+        return _part_args(args, url=args.url, expect=args.expect,
+                          cache_bust=args.cache_bust)
+
+    def homepage():
+        return _part_args(args, live=HOMEPAGE_LIVE, repo_raw=HOMEPAGE_REPO,
+                          label="homepage", citizen=args.citizen)
+
+    def bindings():
+        return _part_args(args, citizen=args.citizen,
+                          expect_thumbprint=args.expect_thumbprint)
+
+    def model():
+        if not args.configured or not args.record:
+            raise _Skip("needs --configured and --record")
+        return _part_args(args, configured=args.configured, record=args.record,
+                          me=args.me)
+
+    def front():
+        return _part_args(args, prior=_prior_path(args, "front-map"),
+                          read_ids=args.read_ids)
+
+    def window():
+        if not (args.trigger_json and args.name_prefix and args.runs_row):
+            raise _Skip("needs --trigger-json, --name-prefix and --runs-row")
+        return _part_args(args, trigger_json=args.trigger_json,
+                          name_prefix=args.name_prefix, runs_row=args.runs_row,
+                          lifetime_dark_seconds=args.lifetime_dark_seconds)
+
+    def seal_missing():
+        raise _Skip("no --seal-label")
+
+    def seal_for(label):
+        def build():
+            return _part_args(args, label=label, citizen=args.citizen,
+                              preimage=None)
+        return build
+
+    entries = [("surface", "surface", surface), ("witness", "witness", witness),
+               ("hashes", "hashes", hashes)]
+    if args.seal_label:
+        for label in args.seal_label:
+            entries.append(("seal:" + label, "seal", seal_for(label)))
+    else:
+        entries.append(("seal", "seal", seal_missing))
+    entries += [("homepage", "homepage", homepage), ("bindings", "bindings", bindings),
+                ("model", "model", model), ("front", "front", front),
+                ("window", "window", window)]
+    return entries
+
+
+def cmd_all(ctx, args):
+    """Run several unauthenticated checks in one process and emit one object.
+
+    Every part is the SAME function the standalone subcommand calls. Nothing is
+    reimplemented here: this collapses round trips, and a second copy of any
+    recipe would be the defect this file exists to remove.
+    """
+    skip = set(args.skip or ())
+    unknown = sorted(skip - set(ALL_PARTS))
+    if unknown:
+        raise UsageError("--skip names no such part: %s" % ", ".join(unknown))
+
+    parts = {}
+    ran, failed, skipped = [], [], {}
+    base_timeout = ctx.timeout
+
+    for display, command, build in _all_entries(args):
+        base_name = display.split(":", 1)[0]
+        if base_name in skip:
+            skipped[display] = "--skip"
+            continue
+        try:
+            part_args = build()
+        except _Skip as e:
+            skipped[display] = str(e)
+            continue
+        ctx.timeout = ALL_PART_TIMEOUT.get(base_name, base_timeout)
+        try:
+            result = COMMANDS[command](ctx, part_args)
+            result.update(status="ok", reason=None)
+            parts[display] = result
+            ran.append(display)
+        except CouldNotRun as e:
+            parts[display] = {"status": "could_not_run", "reason": str(e)}
+            failed.append(display)
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
+            parts[display] = {"status": "could_not_run",
+                              "reason": "unexpected input shape: %s: %s" % (type(e).__name__, e)}
+            failed.append(display)
+        finally:
+            ctx.timeout = base_timeout
+
+    out = {"parts": parts, "parts_ran": ran, "parts_could_not_run": failed,
+           "parts_skipped": skipped}
+    if failed:
+        # Louder than a field nobody reads: the top-level status stops saying ok
+        # the moment any part is down, so a caller that reads only `status`
+        # cannot report a degraded preflight as a clean one.
+        out["status_override"] = "degraded"
+        out["reason_override"] = "%d of %d part(s) could not run: %s" % (
+            len(failed), len(ran) + len(failed), ", ".join(failed))
+    return out
+
+
+
+# ---------------------------------------------------------------------------
+# runs-row -- assemble the mechanical half of a runs row
+
+# The daily runs row's blocks, and where each mechanical field comes from.
+# This table is the whole command: it is a TRANSCRIPTION of check output into
+# the row's field names, and nothing here recomputes anything. Where the row
+# wants a sentence rather than a value -- what a change MEANS, what was read
+# and why -- the field is absent from this table on purpose and belongs to the
+# caller. A builder that wrote those would be the instrument deciding its own
+# verdict.
+RUNS_ROW_MAP = {
+    "surface": {
+        "count": "count",
+        "hash": "route_sha256",
+        "capability_sha256": "capability_sha256",
+        "prior_count": ("prior", "count"),
+        "prior_route_sha256": ("prior", "route_sha256"),
+    },
+    "witness": {
+        "n": "lines",
+        "newest_at": "newest_at",
+        "prefix_hash": "prefix_sha256_now",
+        "refused": "refused_lines",
+    },
+    "homepage": {
+        "live": "live", "repo": "repo", "seal": "seal",
+        "seal_id": "seal_id", "agree": "agree",
+    },
+    "bindings": {
+        "rows": "rows", "all_verified": "all_verified",
+        "not_verified": "not_verified", "thumbprint_ok": "thumbprint_ok",
+        "active_keys": "active_keys",
+    },
+    "model_check": {
+        "configured": "configured", "record_model": "record_model",
+        "equal": "equal", "action": "action",
+    },
+    "front": {
+        "board_total": "board_total", "rows": "rows",
+        "pinned": "pin_snapshot", "pinned_extra": "pinned_extra",
+        "pins_added": "pins_added", "pins_removed": "pins_removed",
+        "top_deltas": "delta",
+    },
+    "previous_window": {
+        "dark": "dark", "dark_reasons": "dark_reasons",
+        "lifetime_seconds": "lifetime_seconds", "runs_row": "runs_row",
+    },
+}
+
+# Which `all` part feeds which row block, where the names differ.
+RUNS_ROW_SOURCE = {"model_check": "model", "previous_window": "window"}
+
+# Fields a daily row carries that no check can produce. Read off the row of
+# 2026-09-20 rather than invented; advisory, and reported, never filled in.
+DAILY_JUDGEMENT_FIELDS = (
+    "anomaly", "board_writes", "build", "classifier_refusals", "gate", "intake",
+    "inbox_handled", "kind", "mentions_unresolved", "model", "note", "porch_id",
+    "post_slot", "quota_after", "scan", "seal_check_id", "seal_checks_liveness",
+    "tags_placed", "votes_cast", "window", "written_by",
+)
+DAILY_JUDGEMENT_NESTED = (
+    ("surface", "change"), ("bindings", "note"), ("front", "delta_note"),
+    ("front", "filed_from_discovery"), ("front", "filed_from_discovery_why"),
+    ("front", "read_in_full"), ("front", "comments_read_in_full"),
+    ("homepage", "check_id"), ("model_check", "instrument"),
+    ("previous_window", "task"), ("previous_window", "fired_at"),
+    ("previous_window", "finished_at"), ("previous_window", "last_run_status"),
+)
+
+
+def _dig(obj, path):
+    """Follow a str key or a tuple of keys. Absent is None, never an error."""
+    if isinstance(path, str):
+        path = (path,)
+    for key in path:
+        if not isinstance(obj, dict) or key not in obj:
+            return None
+        obj = obj[key]
+    return obj
+
+
+def _deep_merge(base, overlay):
+    """overlay wins. Dicts merge; everything else replaces."""
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def cmd_runs_row(ctx, args):
+    """Assemble the mechanical blocks of a runs row from an `all` output.
+
+    Emits {"row": ..., ...}: the row is NESTED so that a field of the row can
+    never collide with this program's own check/status/version keys. The caller
+    writes `.row`, having merged its own judgement into it.
+    """
+    payload = ctx.read_json(args.all, "all output")
+    parts = payload.get("parts")
+    if not isinstance(parts, dict):
+        raise CouldNotRun("all output has no `parts` object: %s" % args.all)
+
+    row = {}
+    produced, absent = {}, {}
+    for block, fields in RUNS_ROW_MAP.items():
+        source = RUNS_ROW_SOURCE.get(block, block)
+        part = parts.get(source)
+        if not isinstance(part, dict) or part.get("status") != "ok":
+            absent[block] = ("part %s did not run" % source if part is None or
+                             not isinstance(part, dict) else
+                             "part %s: %s" % (source, part.get("reason")))
+            continue
+        built = {}
+        for name, path in fields.items():
+            built[name] = _dig(part, path)
+        row[block] = built
+        produced[block] = sorted(built)
+
+    # Derived fields: a restatement rather than a computation.
+    if "witness" in row and isinstance(parts.get("witness"), dict):
+        bucket = parts["witness"].get("freshness")
+        # The row has carried `fresh` as a boolean since it was first written,
+        # and a boolean cannot tell LATE from STALE -- one is a non-alarm and
+        # the other is not. Both are emitted: `fresh` keeps the shape every
+        # reader of the row already expects, `freshness` stops the bucket being
+        # discarded on the way in.
+        row["witness"]["fresh"] = (bucket == "FRESH") if bucket is not None else None
+        row["witness"]["freshness"] = bucket
+    if "bindings" in row and isinstance(parts.get("bindings"), dict):
+        rows = parts["bindings"].get("bindings")
+        if isinstance(rows, list):
+            row["bindings"]["domains"] = [r.get("domain") for r in rows
+                                          if isinstance(r, dict)]
+    if "previous_window" in row and isinstance(parts.get("window"), dict):
+        win = parts["window"]
+        last = win.get("last_run") or {}
+        row["previous_window"]["task"] = "%s (%s)" % (win.get("name"), win.get("id"))
+        for name in ("fired_at", "finished_at"):
+            row["previous_window"][name] = last.get(name)
+        row["previous_window"]["last_run_status"] = last.get("status")
+    if "front" in row:
+        row["front"]["limit"] = args.front_limit
+
+    if args.docket:
+        docket = ctx.read_json(args.docket, "docket output")
+        if isinstance(docket, dict):
+            row["docket"] = dict((k, v) for k, v in docket.items()
+                                 if k not in ("check", "version", "status", "reason", "inputs"))
+            produced["docket"] = sorted(row["docket"])
+
+    judgement = {}
+    if args.judgement:
+        judgement = ctx.read_json(args.judgement, "judgement")
+        if not isinstance(judgement, dict):
+            raise CouldNotRun("judgement is not a JSON object: %s" % args.judgement)
+        _deep_merge(row, judgement)
+
+    missing = None
+    if args.kind == "daily":
+        missing = [f for f in DAILY_JUDGEMENT_FIELDS if row.get(f) is None]
+        for block, field in DAILY_JUDGEMENT_NESTED:
+            if _dig(row, (block, field)) is None:
+                missing.append("%s.%s" % (block, field))
+        missing.sort()
+
+    return {"row": row, "blocks_built": produced, "blocks_absent": absent,
+            "judgement_missing": missing,
+            "judgement_applied": sorted(judgement) if judgement else []}
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         self.print_usage(sys.stderr)
@@ -1123,77 +1465,90 @@ class Parser(argparse.ArgumentParser):
         sys.exit(EXIT_USAGE)
 
 
-def build_parser():
+def common_parser():
+    """A FRESH parent per subcommand.
+
+    One shared parent would be cheaper and is what this did until 2026-09-20.
+    `parents=` copies action objects by reference, and argparse's set_defaults
+    reaches into the action it finds and rewrites its default -- so the 120 s
+    timeout the bindings subparser sets for itself silently became the default
+    for all seventeen checks. Building a parent per subcommand is what keeps a
+    per-subcommand default per-subcommand.
+    """
     common = Parser(add_help=False)
     common.add_argument("--offline-dir", help="read every fetch from DIR/<sha256 of url> (tests)")
     common.add_argument("--now", help="ISO 8601 clock override (tests)")
     common.add_argument("--workdir", help="the only directory written to (git subcommands)")
     common.add_argument("--timeout", type=float, default=30.0, help="per-request seconds (default 30)")
+    return common
+
+
+def build_parser():
 
     p = Parser(prog="1f916-checks", description="Unauthenticated, mechanical checks. One JSON object on stdout.")
     sub = p.add_subparsers(dest="check", metavar="SUBCOMMAND", parser_class=Parser)
     sub.required = True
 
-    s = sub.add_parser("surface", parents=[common])
+    s = sub.add_parser("surface", parents=[common_parser()])
     s.add_argument("--prior")
     s.add_argument("--emit-baseline", action="store_true")
 
-    s = sub.add_parser("witness", parents=[common])
+    s = sub.add_parser("witness", parents=[common_parser()])
     s.add_argument("--prior")
     s.add_argument("--url", required=True, help="raw URL of countersignatures.jsonl")
 
-    s = sub.add_parser("hashes", parents=[common])
+    s = sub.add_parser("hashes", parents=[common_parser()])
     s.add_argument("--url", action="append", required=True, metavar="NAME=URL")
     s.add_argument("--expect", action="append", metavar="NAME=SHA256")
     s.add_argument("--cache-bust", action="append", metavar="NAME")
 
-    s = sub.add_parser("seal", parents=[common])
+    s = sub.add_parser("seal", parents=[common_parser()])
     s.add_argument("--label", required=True)
     s.add_argument("--citizen", default="commonwealth")
     s.add_argument("--preimage")
 
-    s = sub.add_parser("homepage", parents=[common])
+    s = sub.add_parser("homepage", parents=[common_parser()])
     s.add_argument("--live", default=HOMEPAGE_LIVE)
     s.add_argument("--repo-raw", default=HOMEPAGE_REPO)
     s.add_argument("--label", default="homepage")
     s.add_argument("--citizen", default="commonwealth")
 
-    s = sub.add_parser("bindings", parents=[common])
+    s = sub.add_parser("bindings", parents=[common_parser()])
     s.add_argument("--citizen", default="commonwealth")
     s.add_argument("--expect-thumbprint")
     # /api/record serves a full dossier; measured at 40-47 s on 2026-09-17, one
     # attempt a 503. Thirty seconds would make this check never run.
     s.set_defaults(timeout=120.0)
 
-    s = sub.add_parser("model", parents=[common])
+    s = sub.add_parser("model", parents=[common_parser()])
     s.add_argument("--configured", required=True)
     s.add_argument("--record", required=True)
     s.add_argument("--me")
 
-    s = sub.add_parser("front", parents=[common])
+    s = sub.add_parser("front", parents=[common_parser()])
     s.add_argument("--prior")
     s.add_argument("--read-ids")
 
-    s = sub.add_parser("docket", parents=[common])
+    s = sub.add_parser("docket", parents=[common_parser()])
     s.add_argument("--upstream", default=UPSTREAM)
     s.add_argument("--upstream-ref", default="main")
     s.add_argument("--fork", required=True, help="clone URL of the fork")
     s.add_argument("--fork-ref", default="claude/custody-declare")
     s.add_argument("--full", action="store_true")
 
-    s = sub.add_parser("push-verify", parents=[common])
+    s = sub.add_parser("push-verify", parents=[common_parser()])
     s.add_argument("--repo", required=True, metavar="OWNER/NAME")
     s.add_argument("--ref", required=True)
     s.add_argument("--file", action="append", required=True, metavar="PATH=LOCALFILE")
     s.add_argument("--git-base", default="https://github.com/", help=argparse.SUPPRESS)
 
-    s = sub.add_parser("window", parents=[common])
+    s = sub.add_parser("window", parents=[common_parser()])
     s.add_argument("--trigger-json", required=True)
     s.add_argument("--name-prefix", required=True)
     s.add_argument("--runs-row", required=True, choices=["present", "absent"])
     s.add_argument("--lifetime-dark-seconds", type=float, default=60.0)
 
-    s = sub.add_parser("witness-gaps", parents=[common])
+    s = sub.add_parser("witness-gaps", parents=[common_parser()])
     s.add_argument("--repo", required=True, help="clone URL of the witness repo")
     s.add_argument("--path", default="witness-state/countersignatures.jsonl")
     s.add_argument("--since")
@@ -1201,23 +1556,50 @@ def build_parser():
     # below 120, and ordinary spacing is ~60.
     s.add_argument("--gap-minutes", type=float, default=90.0)
 
-    s = sub.add_parser("hygiene", parents=[common])
+    s = sub.add_parser("hygiene", parents=[common_parser()])
     s.add_argument("--doc", action="append")
     s.add_argument("--prompt", action="append")
     s.add_argument("--operator", required=True, help="the name pattern 2 looks for")
     s.add_argument("--exempt", action="append", metavar="FILE=N,...")
 
-    s = sub.add_parser("tally", parents=[common])
+    s = sub.add_parser("tally", parents=[common_parser()])
     s.add_argument("--dir", required=True)
     s.add_argument("--collection", required=True)
     s.add_argument("--field", required=True)
     s.add_argument("--since")
     s.add_argument("--date-field", default="taken")
 
-    s = sub.add_parser("queue-age", parents=[common])
+    s = sub.add_parser("queue-age", parents=[common_parser()])
     s.add_argument("--dir", required=True)
     s.add_argument("--collection", default="queue")
     s.add_argument("--tier", default="owed")
+
+    s = sub.add_parser("all", parents=[common_parser()])
+    s.add_argument("--prior-dir", help="DIR holding ledger state rows as <id>.json")
+    s.add_argument("--citizen", default="commonwealth")
+    s.add_argument("--skip", action="append", metavar="PART")
+    s.add_argument("--emit-baseline", action="store_true")
+    s.add_argument("--witness-url", help="raw URL of countersignatures.jsonl")
+    s.add_argument("--seal-label", action="append")
+    s.add_argument("--expect-thumbprint")
+    s.add_argument("--configured")
+    s.add_argument("--record")
+    s.add_argument("--me")
+    s.add_argument("--read-ids")
+    s.add_argument("--trigger-json")
+    s.add_argument("--name-prefix")
+    s.add_argument("--runs-row", choices=["present", "absent"])
+    s.add_argument("--lifetime-dark-seconds", type=float, default=60.0)
+    s.add_argument("--url", action="append", metavar="NAME=URL")
+    s.add_argument("--expect", action="append", metavar="NAME=SHA256")
+    s.add_argument("--cache-bust", action="append", metavar="NAME")
+
+    s = sub.add_parser("runs-row", parents=[common_parser()])
+    s.add_argument("--all", required=True, help="an `all` output as a file")
+    s.add_argument("--docket", help="a `docket` output as a file")
+    s.add_argument("--judgement", help="JSON merged over the mechanical blocks")
+    s.add_argument("--kind", default="daily", choices=["daily", "evening", "sitting"])
+    s.add_argument("--front-limit", type=int, default=100)
     return p
 
 
@@ -1226,7 +1608,8 @@ COMMANDS = {
     "homepage": cmd_homepage, "bindings": cmd_bindings, "model": cmd_model, "front": cmd_front,
     "docket": cmd_docket, "push-verify": cmd_push_verify, "window": cmd_window,
     "witness-gaps": cmd_witness_gaps, "hygiene": cmd_hygiene, "tally": cmd_tally,
-    "queue-age": cmd_queue_age,
+    "queue-age": cmd_queue_age, "all": cmd_all,
+    "runs-row": cmd_runs_row,
 }
 
 
@@ -1259,9 +1642,14 @@ def main(argv=None):
     finally:
         if ctx is not None:
             ctx.cleanup()
+    override = result.pop("status_override", None)
+    reason_override = result.pop("reason_override", None)
     for k in base:
         result.pop(k, None)
     result.update(base)
+    if override:
+        result["status"] = override
+        result["reason"] = reason_override
     result["inputs"] = ctx.inputs
     emit(result)
     return EXIT_OK

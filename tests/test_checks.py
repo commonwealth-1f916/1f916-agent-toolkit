@@ -15,6 +15,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -115,7 +116,8 @@ class Base(unittest.TestCase):
         out = json.loads(p.stdout.decode("utf-8"))
         self.assertEqual(out["version"], 1)
         self.assertEqual(out["check"], args[0])
-        self.assertEqual(out["status"], "ok" if want == 0 else "could_not_run")
+        self.assertEqual(out["status"],
+                         kw.get("status", "ok" if want == 0 else "could_not_run"))
         return out
 
 
@@ -837,6 +839,284 @@ class Ledger(Base):
         self.assertEqual(out["oldest"], {"id": "q1", "opened": "2026-09-14T21:0xZ", "parsed_as": "date",
                                          "age_days": 3.0})
         out = self.run_checks("queue-age", "--dir", os.path.join(self.tmp, "nope"), want=3)
+
+
+
+# ---------------------------------------------------------------------------
+class All(Base):
+    """`all` runs several checks in one process.
+
+    The property that matters is NOT that it produces plausible output: it is
+    that each part equals what the standalone subcommand produces, so the
+    consolidation cannot drift into a second implementation of the recipes.
+    The other tests here guard the thing consolidation puts at risk -- a part
+    that fails must be at least as visible as it is when it has a process and
+    an exit code of its own.
+    """
+
+    def setUp(self):
+        Base.setUp(self)
+        self.serve(SURFACE_URL, fixture_bytes("surface.json"))
+        self.serve(WITNESS_URL, fixture_bytes("witness-head.jsonl"))
+        self.serve(HOME_LIVE, fixture_bytes("homepage.html"))
+        self.serve(HOME_REPO, fixture_bytes("homepage.html"))
+        self.serve(seal_url("homepage"), fixture_bytes("seals-homepage.json"))
+        self.serve(seal_url("witness-reference"), fixture_bytes("seals-witness-reference.json"))
+        self.serve(RECORD_URL, fixture_bytes("record.json"))
+        self.serve(FRONT_URL, fixture_bytes("front.json"))
+        self.serve(NEW_URL, fixture_bytes("new.json"))
+        self.prior_dir = os.path.join(self.tmp, "prior")
+        os.makedirs(self.prior_dir)
+        for fixture, stem in (("prior-route-surface.json", "route-surface"),
+                              ("prior-witness-pair.json", "witness-pair"),
+                              ("prior-front-map.json", "front-map")):
+            with open(os.path.join(self.prior_dir, stem + ".json"), "wb") as fh:
+                fh.write(fixture_bytes(fixture))
+
+    def all_args(self, *extra):
+        return ("all", "--prior-dir", self.prior_dir, "--witness-url", WITNESS_URL,
+                "--now", "2026-09-17T12:00:00Z") + extra
+
+    def test_every_part_equals_its_standalone_subcommand(self):
+        out = self.run_checks(*self.all_args("--seal-label", "homepage"))
+        self.assertEqual(out["parts_could_not_run"], [])
+        cases = [
+            ("surface", ("surface", "--prior", os.path.join(self.prior_dir, "route-surface.json"))),
+            ("witness", ("witness", "--prior", os.path.join(self.prior_dir, "witness-pair.json"),
+                         "--url", WITNESS_URL)),
+            ("front", ("front", "--prior", os.path.join(self.prior_dir, "front-map.json"))),
+            ("homepage", ("homepage",)),
+            ("bindings", ("bindings",)),
+            ("seal:homepage", ("seal", "--label", "homepage")),
+        ]
+        for name, argv in cases:
+            alone = self.run_checks(*(argv + ("--now", "2026-09-17T12:00:00Z")))
+            mine = dict(out["parts"][name])
+            for key in ("check", "version", "inputs", "status", "reason"):
+                alone.pop(key, None)
+                mine.pop(key, None)
+            self.assertEqual(mine, alone, "part %s differs from the standalone check" % name)
+
+    def test_a_part_that_fails_degrades_the_whole_and_is_named(self):
+        # Everything is served except one seal label, so exactly one part fails.
+        out = self.run_checks(*self.all_args("--seal-label", "homepage",
+                                             "--seal-label", "absent-label"),
+                              status="degraded")
+        self.assertEqual(out["parts_could_not_run"], ["seal:absent-label"])
+        self.assertIn("seal:absent-label", out["reason"])
+        self.assertEqual(out["parts"]["seal:absent-label"]["status"], "could_not_run")
+        # and the parts around it still ran and are still reported
+        self.assertIn("surface", out["parts_ran"])
+        self.assertEqual(out["parts"]["seal:homepage"]["status"], "ok")
+
+    def test_skipped_is_not_failed(self):
+        out = self.run_checks(*self.all_args("--seal-label", "homepage"))
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["parts_could_not_run"], [])
+        # A part nobody supplied inputs for is named, with its reason, and is
+        # absent from both the ran and the failed list.
+        for name in ("hashes", "model", "window"):
+            self.assertIn(name, out["parts_skipped"])
+            self.assertNotIn(name, out["parts_ran"])
+            self.assertNotIn(name, out["parts_could_not_run"])
+            self.assertNotIn(name, out["parts"])
+        self.assertEqual(out["parts_skipped"]["model"], "needs --configured and --record")
+
+    def test_skip_drops_every_label_of_a_part_and_an_unknown_name_is_usage(self):
+        out = self.run_checks(*self.all_args("--seal-label", "homepage",
+                                             "--seal-label", "witness-reference",
+                                             "--skip", "seal", "--skip", "front"))
+        self.assertEqual(out["parts_skipped"]["seal:homepage"], "--skip")
+        self.assertEqual(out["parts_skipped"]["seal:witness-reference"], "--skip")
+        self.assertEqual(out["parts_skipped"]["front"], "--skip")
+        self.assertNotIn("front", out["parts"])
+        self.run_checks(*self.all_args("--skip", "nonesuch"), want=64)
+
+    def test_model_and_window_run_when_their_inputs_are_given(self):
+        trigger = self.write("triggers.json", [{
+            "id": "trig_x", "name": "1F916 evening reply check", "cron_expression": "0 23 * * *",
+            "enabled": True, "next_run_at": "2026-09-18T23:00:00Z",
+            "last_run": {"status": "ROUTINE_RUN_STATUS_SUCCEEDED",
+                         "fired_at": "2026-09-16T23:09:00Z",
+                         "finished_at": "2026-09-16T23:22:00Z"}}])
+        record = self.write("record-model.json", {"model": "claude-opus-5"})
+        out = self.run_checks(*self.all_args(
+            "--seal-label", "homepage",
+            "--configured", "claude-opus-5", "--record", record,
+            "--trigger-json", trigger, "--name-prefix", "1F916 evening reply check",
+            "--runs-row", "present"))
+        self.assertIn("model", out["parts_ran"])
+        self.assertIn("window", out["parts_ran"])
+        self.assertEqual(out["parts_skipped"], {"hashes": "no --url NAME=URL given"})
+
+    def test_bindings_keeps_the_longer_timeout_it_sets_for_itself(self):
+        # cmd_bindings reads /api/record, which has been measured at 40-47 s.
+        # Sharing one Ctx across parts would hand it the 30 s default and make
+        # it never run; this pins the override to the subparser's own default
+        # so the two cannot drift apart unnoticed.
+        mod = load_module()
+        args = mod.build_parser().parse_args(["bindings"])
+        self.assertEqual(mod.ALL_PART_TIMEOUT["bindings"], args.timeout)
+        self.assertNotEqual(args.timeout, mod.build_parser().parse_args(["surface"]).timeout)
+
+
+    def test_one_call_fetches_what_the_separate_calls_would(self):
+        out = self.run_checks(*self.all_args("--seal-label", "homepage"))
+        urls = [rec["url"] for rec in out["inputs"]["urls"]]
+        self.assertIn(SURFACE_URL, urls)
+        self.assertIn(WITNESS_URL, urls)
+        self.assertIn(RECORD_URL, urls)
+        # every fetch recorded a status and a digest, so the caller can audit
+        # what one consolidated call actually touched
+        for rec in out["inputs"]["urls"]:
+            self.assertEqual(rec["status"], 200)
+            self.assertTrue(re.match(r"^[0-9a-f]{64}$", rec["sha256"]))
+
+
+
+
+
+# ---------------------------------------------------------------------------
+class RunsRow(Base):
+    """`runs-row` transcribes check output into the runs row's field names.
+
+    The risk this command carries is not that it crashes: it is that it writes
+    a row that LOOKS right. So the tests below check it against the shape of a
+    real row (2026-09-20, read from the ledger), and check that it never fills
+    a judgement field, never emits a block for a part that did not run, and
+    keeps the row clear of this program's own keys.
+    """
+
+    # Read off runs/2026-09-20T12-daily. Split into what a check can produce
+    # and what only the run can say.
+    REAL_ROW_BLOCKS = {
+        "surface": (("capability_sha256", "count", "hash", "prior_count",
+                     "prior_route_sha256"), ("change",)),
+        "witness": (("fresh", "n", "newest_at", "prefix_hash", "refused"), ()),
+        "homepage": (("agree", "live", "repo", "seal", "seal_id"), ("check_id",)),
+        "bindings": (("active_keys", "all_verified", "domains", "not_verified",
+                      "rows", "thumbprint_ok"), ("note",)),
+        "model_check": (("action", "configured", "equal", "record_model"),
+                        ("instrument",)),
+        "previous_window": (("dark", "dark_reasons", "finished_at", "fired_at",
+                             "last_run_status", "lifetime_seconds", "runs_row",
+                             "task"), ()),
+        "front": (("board_total", "limit", "pinned", "pinned_extra", "pins_added",
+                   "pins_removed", "rows", "top_deltas"),
+                  ("comments_read_in_full", "delta_note", "filed_from_discovery",
+                   "filed_from_discovery_why", "read_in_full")),
+    }
+
+    def setUp(self):
+        Base.setUp(self)
+        self.all_path = self.write("all.json", fixture_bytes("all-output.json"))
+
+    def test_it_produces_every_mechanical_field_a_real_row_carries(self):
+        out = self.run_checks("runs-row", "--all", self.all_path)
+        for block, (mechanical, judgement) in self.REAL_ROW_BLOCKS.items():
+            self.assertIn(block, out["row"], "block %s missing" % block)
+            got = out["row"][block]
+            for field in mechanical:
+                self.assertIn(field, got, "%s.%s is not produced" % (block, field))
+            # and it does not quietly fill in the ones that are not its business
+            for field in judgement:
+                self.assertNotIn(field, got, "%s.%s was invented" % (block, field))
+
+    def test_a_part_that_did_not_run_leaves_no_block_at_all(self):
+        payload = fixture_json("all-output.json")
+        payload["parts"]["surface"] = {"status": "could_not_run", "reason": "fetch failed: nope"}
+        payload["parts_ran"].remove("surface")
+        payload["parts_could_not_run"] = ["surface"]
+        path = self.write("degraded.json", payload)
+        out = self.run_checks("runs-row", "--all", path)
+        # not a block of nulls, which would read as measurements of zero
+        self.assertNotIn("surface", out["row"])
+        self.assertIn("surface", out["blocks_absent"])
+        self.assertIn("fetch failed", out["blocks_absent"]["surface"])
+        self.assertIn("witness", out["row"])
+
+    def test_judgement_is_merged_and_what_is_missing_is_named(self):
+        out = self.run_checks("runs-row", "--all", self.all_path)
+        self.assertIn("note", out["judgement_missing"])
+        self.assertIn("surface.change", out["judgement_missing"])
+        self.assertIsNone(out["row"].get("note"))
+
+        judgement = self.write("j.json", {
+            "note": "a sentence only the run can write",
+            "kind": "daily",
+            "surface": {"change": "two routes added"},
+            "front": {"delta_note": "one row"},
+        })
+        out = self.run_checks("runs-row", "--all", self.all_path, "--judgement", judgement)
+        self.assertEqual(out["row"]["note"], "a sentence only the run can write")
+        self.assertEqual(out["row"]["surface"]["change"], "two routes added")
+        # the merge is deep: the mechanical fields of that block survive it
+        self.assertIn("capability_sha256", out["row"]["surface"])
+        self.assertNotIn("note", out["judgement_missing"])
+        self.assertNotIn("surface.change", out["judgement_missing"])
+        self.assertEqual(out["judgement_applied"], ["front", "kind", "note", "surface"])
+
+    def test_the_row_is_nested_so_its_fields_cannot_collide_with_ours(self):
+        # A row legitimately carries a field called `note`; this program emits
+        # `status` and `reason` of its own. Nesting is what keeps a judgement
+        # field from overwriting the envelope that says whether this even ran.
+        judgement = self.write("j.json", {"status": "invented", "check": "invented",
+                                          "version": 99, "reason": "invented"})
+        out = self.run_checks("runs-row", "--all", self.all_path, "--judgement", judgement)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["check"], "runs-row")
+        self.assertEqual(out["version"], 1)
+        self.assertEqual(out["row"]["status"], "invented")
+
+    def test_witness_keeps_the_bucket_a_boolean_would_lose(self):
+        out = self.run_checks("runs-row", "--all", self.all_path)
+        witness = out["row"]["witness"]
+        self.assertEqual(witness["freshness"], "STALE")
+        self.assertIs(witness["fresh"], False)
+        # LATE is a non-alarm and STALE is not; `fresh` alone cannot say which
+        payload = fixture_json("all-output.json")
+        payload["parts"]["witness"]["freshness"] = "LATE"
+        path = self.write("late.json", payload)
+        out = self.run_checks("runs-row", "--all", path)
+        self.assertIs(out["row"]["witness"]["fresh"], False)
+        self.assertEqual(out["row"]["witness"]["freshness"], "LATE")
+
+    def test_an_all_output_of_the_wrong_shape_is_could_not_run(self):
+        path = self.write("nope.json", {"no": "parts here"})
+        self.run_checks("runs-row", "--all", path, want=3)
+
+
+# ---------------------------------------------------------------------------
+class SubparserDefaults(unittest.TestCase):
+    """A default set on one subcommand stays on that subcommand.
+
+    Until 2026-09-20 every subcommand shared one parent parser. `parents=`
+    copies action objects by REFERENCE, and set_defaults rewrites the default
+    on the action it finds -- so bindings raising its own timeout to 120 s
+    raised it for all seventeen checks, four times the documented 30 s, and
+    nothing said so. This is the regression test that was missing.
+    """
+
+    def test_only_bindings_carries_the_long_timeout(self):
+        # Deliberately independent of anything `all` defines, so it measures the
+        # parser and would run against any version of this file.
+        mod = load_module()
+        documented = 30.0
+        long_one = mod.build_parser().parse_args(["bindings"]).timeout
+        self.assertGreater(long_one, documented)
+        for sub, extra in (("surface", []), ("front", []), ("homepage", []),
+                           ("seal", ["--label", "homepage"]),
+                           ("hashes", ["--url", "a=https://example.invalid/"]),
+                           ("witness", ["--url", "https://example.invalid/w.jsonl"])):
+            got = mod.build_parser().parse_args([sub] + extra).timeout
+            self.assertEqual(got, documented,
+                             "%s should default to %s, got %s" % (sub, documented, got))
+
+    def test_an_explicit_timeout_still_wins_everywhere(self):
+        mod = load_module()
+        for sub in ("surface", "bindings"):
+            args = mod.build_parser().parse_args([sub, "--timeout", "7.5"])
+            self.assertEqual(args.timeout, 7.5)
 
 
 if __name__ == "__main__":
