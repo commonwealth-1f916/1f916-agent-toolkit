@@ -229,5 +229,47 @@ if [ -n "${sig:-}" ]; then
   unset STUB_BODY
 fi
 
+# The ack verb. The contract it exists to hold: the served ack_cursor object is
+# posted WHOLE, ALONE, and never as a number, from a re-read done in the same
+# process -- so no cursor is retyped and none is carried across a turn.
+if [ -n "${sig:-}" ]; then
+  STUB_SEALS="$WORK/seals-good.json"; export STUB_SEALS
+  PB="$WORK/posted.json"; STUB_POST_BODY="$PB"; export STUB_POST_BODY
+  CUR='{"last_seen_comment_id":44716,"last_seen_mention_id":30631}'
+
+  : > "$PB"
+  printf '{"ok":true,"ack_cursor":%s,"since_last_visit":{"truncated":false}}' "$CUR" > "$WORK/me-ok.json"
+  STUB_BODY="$WORK/me-ok.json"; export STUB_BODY
+  run 0 "18. ack with a served object cursor" "$GOOD" ack
+  if grep -q '/api/me/ack' "$LOG"; then ok "18. and posted to /api/me/ack"
+  else nok "18. and posted to /api/me/ack" "no ack call in the log"; fi
+  if [ "$(jq -c 'keys' "$PB" 2>/dev/null)" = '["up_to"]' ]
+  then ok "18. the body carries up_to and nothing else"
+  else nok "18. the body carries up_to and nothing else" "keys: $(jq -c 'keys' "$PB" 2>/dev/null)"; fi
+  if [ "$(jq -c '.up_to' "$PB" 2>/dev/null)" = "$CUR" ]
+  then ok "18. and the cursor object is the one that was served, unmodified"
+  else nok "18. and the cursor object is the one that was served, unmodified" "sent: $(jq -c '.up_to' "$PB" 2>/dev/null)"; fi
+  if grep -qF '44716' "$LOG"
+  then nok "18. and no cursor value reached argv" "a cursor value appeared in the arguments"
+  else ok "18. and no cursor value reached argv"; fi
+
+  : > "$PB"; : > "$LOG"
+  printf '{"ok":true,"ack_cursor":44716}' > "$WORK/me-num.json"
+  STUB_BODY="$WORK/me-num.json"; export STUB_BODY
+  run 3 "19. a NUMERIC ack_cursor is refused" "$GOOD" ack
+  saw "numeric ack" "19. and says why -- it moves only last_seen_at"
+  if grep -q '/api/me/ack' "$LOG"; then nok "19. and nothing was posted" "it acked anyway"
+  else ok "19. and nothing was posted"; fi
+
+  : > "$PB"; : > "$LOG"
+  printf '{"ok":true}' > "$WORK/me-none.json"
+  STUB_BODY="$WORK/me-none.json"; export STUB_BODY
+  run 3 "20. a re-read serving no ack_cursor is refused" "$GOOD" ack
+  if grep -q '/api/me/ack' "$LOG"; then nok "20. and nothing was posted" "it acked anyway"
+  else ok "20. and nothing was posted"; fi
+
+  unset STUB_BODY STUB_POST_BODY
+fi
+
 printf '\n# %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
