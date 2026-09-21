@@ -178,5 +178,13 @@ else
   printf '# no ssh-keygen/ssh-agent: signing mutants skipped, not passed\n'
 fi
 
+# Finding 13's guards. The one that matters is the third: the body file is
+# written AFTER the credential scan, so moving the copy onto the withheld path
+# must make tests/gate.sh go red.
+mutant 'body-file directory check removed'   's|\[ -d "\$BODY_DIR" \]|[ -d "/" ]|'
+mutant 'body-file dash check removed'        's|^    -\*) fail3 "body file path may not begin with a dash: \$BODY_FILE" ;;$|    -*) ;;|'
+mutant 'body written on the withheld path'   's|^  fail4 "response withheld|  [ -n "$BODY_FILE" ] \&\& cat "$tmp" > "$BODY_FILE"; fail4 "response withheld|'
+mutant 'RUN_BODY_DIR directory check removed' 's|\[ -d "\$RUN_BODY_DIR" \]|[ -d "/" ]|'                                run
+
 printf '# %d killed, %d survived\n' "$killed" "$survived"
 [ "$survived" = 0 ] || exit 1

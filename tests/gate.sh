@@ -352,5 +352,65 @@ if [ -n "$sig" ]; then
   else nok "23. curl was told to read a config from a pipe" "no -K in argv"; fi
 fi
 
+# Finding 13 of the 2026-09-20 review -- `--body-file`. The option exists so a
+# consumer does not have to re-find where the gate's two header lines end. The
+# properties that matter are that stdout is UNCHANGED, that a bad path is
+# refused before the bearer is used, and that a body the gate refuses to PRINT
+# is a body it refuses to WRITE.
+BD="$WORK/bodies"; mkdir -p "$BD"
+
+run 3 "24. --body-file with no path is refused" --body-file
+no_calls "24. and made no network call"
+
+run 3 "24b. --body-file into a missing directory is refused" --body-file "$WORK/nope/x.json" seal-check
+saw "body file directory does not exist" "24b. and names the directory"
+no_calls "24b. and made no network call -- refused before the bearer is used"
+
+run 3 "24c. a body-file path beginning with a dash is refused" --body-file "-rf" seal-check
+no_calls "24c. and made no network call"
+# And it created nothing. Without the guard the gate writes a file literally
+# named -rf into the caller's working directory, which is how a stray file
+# reaches a pull request; here that is a failure rather than litter.
+if [ -e "./-rf" ]; then nok "24c. and created no file" "a file named -rf was created"; rm -f -- "./-rf"
+else ok "24c. and created no file"; fi
+
+if [ -n "$sig" ]; then
+  STUB_SEALS="$WORK/seals-good.json"; export STUB_SEALS
+  printf '{"ok":true,"me":{"handle":"testcitizen"}}' > "$WORK/plain.json"
+  STUB_BODY="$WORK/plain.json"; export STUB_BODY
+
+  run 0 "24d. a passing gate with no --body-file" seal-check
+  cp "$OUT" "$WORK/stdout-without"
+
+  run 0 "24e. the same call with --body-file" --body-file "$BD/me.json" seal-check
+  if cmp -s "$WORK/stdout-without" "$OUT"
+  then ok "24e. stdout is byte-identical with and without the option"
+  else nok "24e. stdout is byte-identical with and without the option" "the contract 1f916-run documents moved"; fi
+
+  if cmp -s "$WORK/plain.json" "$BD/me.json"
+  then ok "24e. the body file holds exactly the response body"
+  else nok "24e. the body file holds exactly the response body" "got: $(head -c 120 "$BD/me.json" 2>/dev/null)"; fi
+
+  if grep -q 'gate: PASS\|^http:' "$BD/me.json"
+  then nok "24e. and carries none of the gate's header lines" "a header line reached the file"
+  else ok "24e. and carries none of the gate's header lines"; fi
+
+  if [ "$(id -u)" = 0 ]; then
+    ok "24e. body file mode -- SKIPPED as root, not passed"
+  elif [ -n "$(find "$BD/me.json" -perm 600 2>/dev/null)" ]
+  then ok "24e. the body file is not world-readable"
+  else nok "24e. the body file is not world-readable" "mode is not 600"; fi
+
+  # The property that decides where the copy lives in the program.
+  printf '{"ok":true,"echo":"%s"}' "$D_BEARER" > "$WORK/leaky2.json"
+  STUB_BODY="$WORK/leaky2.json"; export STUB_BODY
+  rm -f "$BD/leak.json"
+  run 4 "24f. a response carrying the credential is still withheld" --body-file "$BD/leak.json" seal-check
+  if [ -e "$BD/leak.json" ]
+  then nok "24f. and no body file is written" "the gate wrote a file holding credential material"
+  else ok "24f. and no body file is written"; fi
+  unset STUB_BODY
+fi
+
 printf '# %d tests, %d passed, %d failed\n' "$n" "$pass" "$fail"
 [ "$fail" = 0 ] || exit 1

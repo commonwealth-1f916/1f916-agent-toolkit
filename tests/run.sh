@@ -182,5 +182,52 @@ EOF
   calls "15. one call, unauthenticated" 1
 fi
 
+# Finding 13 -- RUN_BODY_DIR. One body file per step, so a consumer reads JSON
+# from a file instead of re-finding where the gate's header ended. Stdout is
+# unchanged whether the variable is set or not.
+RBD="$WORK/bodies"; mkdir -p "$RBD"
+
+: > "$LOG"
+PATH="$BIN:$PATH" STUB_LOG="$LOG" RUN_GATE="$GATE" RUN_BODY_DIR="$WORK/nope" \
+  sh "$RUN" "$GOOD" wake > "$OUT" 2> "$ERR"
+got=$?
+if [ "$got" = 3 ]; then ok "16. RUN_BODY_DIR that is not a directory -> exit 3"
+else nok "16. RUN_BODY_DIR that is not a directory -> exit 3" "expected exit 3, got $got"; fi
+saw "RUN_BODY_DIR is not a directory" "16. and names the variable"
+no_calls "16. and made no network call -- checked before the first authenticated call"
+
+if [ -n "${sig:-}" ]; then
+  STUB_SEALS="$WORK/seals-good.json"; export STUB_SEALS
+  printf '{"ok":true}' > "$WORK/plain.json"
+  STUB_BODY="$WORK/plain.json"; export STUB_BODY
+
+  run 0 "17. a wake with no RUN_BODY_DIR" "$GOOD" wake
+  cp "$OUT" "$WORK/stdout-without"
+
+  : > "$LOG"
+  PATH="$BIN:$PATH" STUB_LOG="$LOG" RUN_GATE="$GATE" RUN_BODY_DIR="$RBD" \
+    sh "$RUN" "$GOOD" wake > "$OUT" 2> "$ERR"
+  got=$?
+  if [ "$got" = 0 ]; then ok "17. the same wake with RUN_BODY_DIR set (exit 0)"
+  else nok "17. the same wake with RUN_BODY_DIR set (exit 0)" "expected exit 0, got $got: $(tr '\n' ' ' < "$ERR" | cut -c1-160)"; fi
+
+  if cmp -s "$WORK/stdout-without" "$OUT"
+  then ok "17. stdout is byte-identical either way"
+  else nok "17. stdout is byte-identical either way" "the transcript shape moved"; fi
+
+  c=$(find "$RBD" -name '*.json' | wc -l | tr -d ' ')
+  if [ "$c" = 3 ]; then ok "17. one body file per wake step (seal-check, pulse, me)"
+  else nok "17. one body file per wake step (seal-check, pulse, me)" "found $c files: $(find "$RBD" -name '*.json' -exec basename {} \; | tr '\n' ' ')"; fi
+
+  if [ -f "$RBD/me.json" ] && cmp -s "$WORK/plain.json" "$RBD/me.json"
+  then ok "17. and the me step's file holds exactly the response body"
+  else nok "17. and the me step's file holds exactly the response body" "$(find "$RBD" -name '*.json' -exec basename {} \; | tr '\n' ' ')"; fi
+
+  if grep -lq '== \|gate: PASS' "$RBD"/*.json 2>/dev/null
+  then nok "17. and no body file carries a step or gate header" "a header line reached a body file"
+  else ok "17. and no body file carries a step or gate header"; fi
+  unset STUB_BODY
+fi
+
 printf '\n# %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

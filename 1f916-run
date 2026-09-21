@@ -55,6 +55,10 @@
 #   3  gate file missing, unreadable, or not the canonical shape; manifest
 #      missing or not a JSON array; a manifest step without path or body
 #
+# If RUN_BODY_DIR is set to a writable directory, each step also writes the
+# registry's raw response body to <RUN_BODY_DIR>/<label-slug>.json. Stdout is
+# unchanged whether it is set or not.
+#
 # Output: one `== <step>` line per step, followed by the gate's own output for
 # that step (gate: PASS / http: NNN / response body). Machine-readable enough
 # for the run that follows it; human-readable enough for the ledger.
@@ -74,6 +78,12 @@ gatefile="$1"; verb="$2"
 [ -r "$gatefile" ] || fail3 "gate file not readable: $gatefile"
 [ -r "$GATE" ] || fail3 "1f916-gate not found beside this script (or at \$RUN_GATE): $GATE"
 command -v jq >/dev/null 2>&1 || fail3 "jq not found on PATH"
+# Checked once here rather than per step, so a missing directory fails before
+# the first authenticated call instead of after it.
+if [ -n "${RUN_BODY_DIR:-}" ]; then
+  [ -d "$RUN_BODY_DIR" ] || fail3 "RUN_BODY_DIR is not a directory: $RUN_BODY_DIR"
+  [ -w "$RUN_BODY_DIR" ] || fail3 "RUN_BODY_DIR is not writable: $RUN_BODY_DIR"
+fi
 
 # 1. Read the four values out of the gate file into this shell's variables.
 #    Line by line, in the shell, from a FILE: nothing here is an argument to
@@ -114,7 +124,15 @@ export HANDLE CITIZEN BEARER ED25519_PRIV
 step() {  # step <label> <gate-args...>
   label="$1"; shift
   printf '== %s\n' "$label"
-  sh "$GATE" "$@"
+  if [ -n "${RUN_BODY_DIR:-}" ]; then
+    # One body file per step, named for the label, so a consumer reads JSON
+    # from a file instead of re-finding where the gate's header ended. Stdout
+    # is unchanged either way.
+    slug=$(printf '%s' "$label" | tr -cs 'A-Za-z0-9' '-' | sed 's/^-*//; s/-*$//')
+    sh "$GATE" --body-file "$RUN_BODY_DIR/$slug.json" "$@"
+  else
+    sh "$GATE" "$@"
+  fi
   rc=$?
   if [ "$rc" != 0 ]; then
     printf '== stopped at %s (exit %s)\n' "$label" "$rc"
