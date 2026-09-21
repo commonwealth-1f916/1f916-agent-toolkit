@@ -843,6 +843,65 @@ class Ledger(Base):
 
 
 # ---------------------------------------------------------------------------
+class Cost(Base):
+    FIXTURE = os.path.join(HERE, "fixtures", "cost", "transcript.jsonl")
+
+    def assertOnlyInts(self, obj):
+        """Every leaf under obj is an int (never a string, float or None)."""
+        if isinstance(obj, dict):
+            for v in obj.values():
+                self.assertOnlyInts(v)
+        else:
+            self.assertIsInstance(obj, int)
+            self.assertNotIsInstance(obj, bool)
+
+    def test_totals_synthetic_split_tool_calls_and_unparsed(self):
+        out = self.run_checks("cost", "--transcript", self.FIXTURE)
+        self.assertEqual(out["tokens"], {"input": 2550, "output": 2305,
+                                         "cache_creation": 376, "cache_read": 62})
+        self.assertEqual(out["synthetic"], {"input": 9, "output": 8, "cache_creation": 7,
+                                            "cache_read": 6, "messages": 1})
+        self.assertEqual(out["messages"], 9)
+        self.assertEqual(out["tool_calls"], {"bash": 1, "artifactdata": 1, "mcp": 2,
+                                             "web": 2, "other": 1})
+        self.assertEqual(out["lines"], 12)
+        self.assertEqual(out["unparsed_lines"], 1)
+
+    def test_output_leaves_are_integers_only(self):
+        out = self.run_checks("cost", "--transcript", self.FIXTURE)
+        for block in ("tokens", "synthetic", "tool_calls"):
+            self.assertOnlyInts(out[block])
+        for field in ("messages", "lines", "unparsed_lines"):
+            self.assertIsInstance(out[field], int)
+
+    def test_missing_file_is_could_not_run_with_no_tokens_key(self):
+        out = self.run_checks("cost", "--transcript", os.path.join(self.tmp, "nope.jsonl"), want=3)
+        self.assertNotIn("tokens", out)
+        self.assertNotIn("synthetic", out)
+        self.assertIsInstance(out["reason"], str)
+
+    def test_a_message_with_no_usage_still_counts_and_contributes_zero(self):
+        path = self.write("t.jsonl", "\n".join([
+            json.dumps({"type": "assistant",
+                        "message": {"role": "assistant", "model": "m",
+                                    "content": [{"type": "tool_use", "name": "Bash"}]}}),
+        ]) + "\n")
+        out = self.run_checks("cost", "--transcript", path)
+        self.assertEqual(out["messages"], 1)
+        self.assertEqual(out["tokens"], {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0})
+        self.assertEqual(out["tool_calls"]["bash"], 1)
+
+    def test_non_assistant_lines_never_contribute(self):
+        path = self.write("t.jsonl", "\n".join([
+            json.dumps({"type": "user", "message": {"role": "user", "content": []}}),
+            json.dumps({"type": "system", "content": "irrelevant"}),
+        ]) + "\n")
+        out = self.run_checks("cost", "--transcript", path)
+        self.assertEqual(out["messages"], 0)
+        self.assertEqual(out["unparsed_lines"], 0)
+
+
+# ---------------------------------------------------------------------------
 class All(Base):
     """`all` runs several checks in one process.
 
