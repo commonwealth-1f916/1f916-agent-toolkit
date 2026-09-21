@@ -9,11 +9,18 @@ and GitHub login:
 
     {"<LEDGER-ARTIFACT-URL>": "...", "<WITNESS-REPO>": "owner/repo", "<OPERATOR-FORK>": "owner/repo",
      "<OPERATOR-GITHUB-LOGIN>": "...", "<INTAKE-ADDRESS>": "...", "<BOUND-DOMAIN>": "...",
-     "<WITNESS-HOST>": "...", "<RUN-HOME>": "/home/...", "OPERATOR_NAME": "..."}
+     "<WITNESS-HOST>": "...", "<RUN-HOME>": "/home/...", "<OPERATOR-NAME>": "...",
+     "<VAULT-ITEM-CREDENTIAL>": "op://<vault>/<item>", "<VAULT-ITEM-WITNESS-KEY>": "op://<vault>/<item>",
+     "<OPERATOR-MAC-HOME>": "/Users/...", "<OPERATOR-EMAIL-PERSONAL>": "...",
+     "<OPERATOR-EMAIL-ICLOUD>": "...", "<OPERATOR-EMAIL-ICLOUD-2>": "...",
+     "OPERATOR_FULL_NAME": "...", "OPERATOR_NAME": "..."}
 
-Order matters: longer literals are replaced before the shorter ones they contain (the witness repo
-before the fork before the login; the intake address before the bound domain). The operator's name
-becomes "the operator" and the handful of pronoun phrases that name a person become neutral.
+Every key of the form <NAME> is a placeholder; the values file, not this file, says which exist.
+Longer literals are replaced before the shorter ones they contain (the witness repo before the fork
+before the login; the intake address before the bound domain). The operator's full name, then given
+name, become "the operator" and the handful of pronoun phrases that name a person become neutral.
+Since 2026-09-21 the stored prompts and the published docs carry the placeholders themselves, so
+this program is the leak check (`leak_check`) and the one-time converter, not a per-revision step.
 
 Proven 2026-09-13 to reproduce all four templates then in the repository byte-for-byte from the
 stored prompts. The weekly audit's leak check greps each template for the same literals; a hit means
@@ -22,16 +29,13 @@ a personal reference entered a stored prompt after this list was written and pas
 import json
 import sys
 
-PLACEHOLDER_ORDER = [
-    "<LEDGER-ARTIFACT-URL>",
-    "<WITNESS-REPO>",
-    "<OPERATOR-FORK>",
-    "<OPERATOR-GITHUB-LOGIN>",
-    "<INTAKE-ADDRESS>",
-    "<BOUND-DOMAIN>",
-    "<WITNESS-HOST>",
-    "<RUN-HOME>",
-]
+def placeholder_order(values):
+    """Every key that looks like a placeholder, longest literal first, so a literal that
+    contains another (the witness repo contains the login; the intake address contains
+    the bound domain) is replaced before the one it contains. The values file, not this
+    file, says which placeholders exist."""
+    return sorted((k for k in values if k.startswith("<") and k.endswith(">") and values[k]),
+                  key=lambda k: -len(values[k]))
 
 
 def phrase_subs(name):
@@ -52,7 +56,10 @@ def phrase_subs(name):
 
 
 def redact(text, values):
-    for ph in PLACEHOLDER_ORDER:
+    full = values.get("OPERATOR_FULL_NAME")
+    if full:
+        text = text.replace(full, "the operator")
+    for ph in placeholder_order(values):
         text = text.replace(values[ph], ph)
     for old, new in phrase_subs(values["OPERATOR_NAME"]):
         text = text.replace(old, new)

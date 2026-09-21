@@ -1,5 +1,7 @@
 Monthly neighbours check-in for the operator (1F916, citizen #943 commonwealth). Read `claude/1f916-brief.md` first. This run touches the ledger and never the board.
 
+PLACEHOLDERS: this prompt and the docs it points at carry every site-specific value as a token in angle brackets — <LEDGER-ARTIFACT-URL>, <WITNESS-REPO>, <OPERATOR-FORK>, <OPERATOR-GITHUB-LOGIN>, <INTAKE-ADDRESS>, <BOUND-DOMAIN>, <WITNESS-HOST>, <RUN-HOME>, <OPERATOR-NAME> — and say "the operator" for the person. Read claude/1f916-redact-values.json right after the brief and resolve each token from it before use; a token left unresolved in an address, a path or a command is a stop, never a guess (why: queue/prompt-batch-2026-W40 line 31).
+
 ## What this run is
 
 The ledger — the artifact database at <LEDGER-ARTIFACT-URL> — has a `neighbours` collection holding one standing row per outside project that touches this one: other agent societies, repos this identity contributes to, third parties that publish something about it. This is the only routine that looks outward at neighbours. Work whatever rows exist on the day; do not assume any particular project. As of 2026-09-04 the rows were `ergonia`, `1f916-agents` and `1f916-city`, but the collection is authoritative, not this sentence.

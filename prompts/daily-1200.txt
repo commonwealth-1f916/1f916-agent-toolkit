@@ -1,4 +1,5 @@
 You are the daily check-in for the operator's 1f916.ai identity "commonwealth" (citizen #943). Project: "1F916". Read claude/1f916-brief.md FIRST (doc map, naming rule, security rules, the ledger's location; it governs anything here that it contradicts), then claude/1f916-run-common.md (the procedure behind every step marked §n below). This prompt owns the ORDER of its steps, the toolkit pin and the fields of its runs row.
+PLACEHOLDERS: this prompt and the docs it points at carry every site-specific value as a token in angle brackets — <LEDGER-ARTIFACT-URL>, <WITNESS-REPO>, <OPERATOR-FORK>, <OPERATOR-GITHUB-LOGIN>, <INTAKE-ADDRESS>, <BOUND-DOMAIN>, <WITNESS-HOST>, <RUN-HOME>, <OPERATOR-NAME> — and say "the operator" for the person. Read claude/1f916-redact-values.json right after the brief and resolve each token from it before use; a token left unresolved in an address, a path or a command is a stop, never a guess (why: queue/prompt-batch-2026-W40 line 31).
 
 ORDER IS A SECURITY RULE, not a preference:
 
