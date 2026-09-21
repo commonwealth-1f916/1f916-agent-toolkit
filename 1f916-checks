@@ -1120,6 +1120,89 @@ def cmd_queue_age(ctx, args):
 
 
 # ---------------------------------------------------------------------------
+# cost -- token and tool-call counters from a transcript, never its content
+
+COST_USAGE_FIELDS = (
+    ("input_tokens", "input"),
+    ("output_tokens", "output"),
+    ("cache_creation_input_tokens", "cache_creation"),
+    ("cache_read_input_tokens", "cache_read"),
+)
+
+
+def _cost_tool_class(name):
+    if name == "Bash":
+        return "bash"
+    if name == "ArtifactData":
+        return "artifactdata"
+    if isinstance(name, str) and name.startswith("mcp__"):
+        return "mcp"
+    if name in ("WebFetch", "WebSearch"):
+        return "web"
+    return "other"
+
+
+def cmd_cost(ctx, args):
+    """Token and tool-call counters read from a transcript, integers only.
+
+    The four counters are not one currency and are never summed into each
+    other; a `<synthetic>` model row is kept apart in its own block rather
+    than folded into the real usage it did not cost. Nothing here prints,
+    greps, tails or copies a line of the file -- only the sums and the fixed
+    field names below ever reach the output, by construction: no code path
+    below assigns a string pulled from the transcript into the result.
+    """
+    data = ctx.read_file(args.transcript, "transcript")
+    raw_lines = data.split(b"\n")
+    if raw_lines and raw_lines[-1] == b"":
+        raw_lines = raw_lines[:-1]
+    if raw_lines == [b""]:
+        raw_lines = []
+
+    tokens = {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0}
+    synthetic = {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0, "messages": 0}
+    tool_calls = {"bash": 0, "artifactdata": 0, "mcp": 0, "web": 0, "other": 0}
+    messages = 0
+    unparsed = 0
+
+    for raw in raw_lines:
+        if not raw.strip():
+            continue
+        try:
+            obj = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            unparsed += 1
+            continue
+        if not isinstance(obj, dict):
+            continue
+        msg = obj.get("message")
+        if not isinstance(msg, dict):
+            continue
+        if obj.get("type") != "assistant" and msg.get("role") != "assistant":
+            continue
+        messages += 1
+        is_synthetic = msg.get("model") == "<synthetic>"
+        bucket = synthetic if is_synthetic else tokens
+        if is_synthetic:
+            synthetic["messages"] += 1
+        usage = msg.get("usage")
+        if isinstance(usage, dict):
+            for src, dst in COST_USAGE_FIELDS:
+                v = usage.get(src)
+                if isinstance(v, bool) or not isinstance(v, int):
+                    continue
+                bucket[dst] += v
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    tool_calls[_cost_tool_class(block.get("name"))] += 1
+
+    return {"tokens": tokens, "synthetic": synthetic, "messages": messages,
+            "tool_calls": tool_calls, "lines": len(raw_lines), "unparsed_lines": unparsed}
+
+
+# ---------------------------------------------------------------------------
 # CLI
 
 
@@ -1767,6 +1850,10 @@ def build_parser():
     s.add_argument("--since")
     s.add_argument("--date-field", default="taken")
 
+    s = sub.add_parser("cost", parents=[common_parser()])
+    s.add_argument("--transcript", required=True,
+                    help="path to a session's .jsonl transcript (read, never printed)")
+
     s = sub.add_parser("queue-age", parents=[common_parser()])
     s.add_argument("--dir", required=True)
     s.add_argument("--collection", default="queue")
@@ -1813,7 +1900,7 @@ COMMANDS = {
     "homepage": cmd_homepage, "bindings": cmd_bindings, "model": cmd_model, "front": cmd_front,
     "docket": cmd_docket, "push-verify": cmd_push_verify, "window": cmd_window,
     "witness-gaps": cmd_witness_gaps, "hygiene": cmd_hygiene, "tally": cmd_tally,
-    "queue-age": cmd_queue_age, "all": cmd_all,
+    "queue-age": cmd_queue_age, "cost": cmd_cost, "all": cmd_all,
     "prompt-integrity": cmd_prompt_integrity,
     "runs-row": cmd_runs_row,
 }

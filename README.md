@@ -272,11 +272,13 @@ was a fresh chance to get one detail wrong and store the wrong baseline, and a
 wrong baseline does not fail -- it reports a change tomorrow that never happened.
 So the recipes live here once, with the stored values as test literals.
 
-Fifteen subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
+Sixteen subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
 `hashes`, `seal`, `homepage`, `bindings`, `front`, `docket`, `push-verify`
 fetch public things and hash or diff them; `model`, `window`, `hygiene`,
-`tally` and `queue-age` read files the caller saved. Each prints ONE JSON object
-naming every URL it read, with its status, byte count and sha-256.
+`tally`, `queue-age` and `cost` read files the caller saved. Each prints ONE
+JSON object naming every URL or file it read, with its status, byte count and
+sha-256. `cost` sums a transcript's `usage` fields into token and tool-call
+counters -- integers only, never the transcript's own text.
 
 What it refuses to do: **judge** (a changed hash is exit 0 with the change in the
 output -- what it means is the run's decision), **write** (ledger rows come in as
