@@ -1056,6 +1056,50 @@ class RunsRow(Base):
         self.assertNotIn("surface.change", out["judgement_missing"])
         self.assertEqual(out["judgement_applied"], ["front", "kind", "note", "surface"])
 
+    def test_the_audit_kind_names_what_an_audit_row_still_owes(self):
+        # The list is derived from the three audit rows this identity has
+        # written, so these are fields real audit rows carry -- not a guess at
+        # what one might.
+        out = self.run_checks("runs-row", "--all", self.all_path, "--kind", "audit")
+        missing = out["judgement_missing"]
+        for field in ("sweep", "human_queue", "ledger_completeness",
+                      "instructions_field", "witness_git", "written_by"):
+            self.assertIn(field, missing, "%s is not asked for" % field)
+        # The brief requires these of every runs row, zero included.
+        for field in ("votes_cast", "tags_placed", "classifier_refusals"):
+            self.assertIn(field, missing, "%s is not asked for" % field)
+        # An audit has no daily digest, so the daily's own fields are not owed.
+        for field in ("porch_id", "post_slot", "quota_after", "inbox_handled"):
+            self.assertNotIn(field, missing, "%s is a daily field, not an audit one" % field)
+        self.assertNotIn("judgement_missing_reason", out)
+
+    def test_a_supplied_audit_field_stops_being_missing(self):
+        judgement = self.write("j.json", {"sweep": "17 lines", "votes_cast": 0})
+        out = self.run_checks("runs-row", "--all", self.all_path,
+                              "--kind", "audit", "--judgement", judgement)
+        self.assertNotIn("sweep", out["judgement_missing"])
+        # zero is a value, not an absence -- the whole point of "zero included"
+        self.assertNotIn("votes_cast", out["judgement_missing"])
+        self.assertEqual(out["row"]["votes_cast"], 0)
+
+    def test_a_kind_with_no_field_list_says_so_instead_of_saying_nothing(self):
+        # `evening` and `sitting` are accepted kinds with no list defined. The
+        # answer must be "not checked", never an empty list, which any reader
+        # would take for "nothing missing".
+        for kind in ("evening", "sitting"):
+            out = self.run_checks("runs-row", "--all", self.all_path, "--kind", kind)
+            self.assertIsNone(out["judgement_missing"], kind)
+            self.assertIn("judgement_missing_reason", out)
+            self.assertIn(kind, out["judgement_missing_reason"])
+            self.assertNotEqual(out["judgement_missing"], [])
+
+    def test_the_kind_changes_only_the_missing_list_not_the_row(self):
+        daily = self.run_checks("runs-row", "--all", self.all_path, "--kind", "daily")
+        audit = self.run_checks("runs-row", "--all", self.all_path, "--kind", "audit")
+        self.assertEqual(daily["row"], audit["row"])
+        self.assertEqual(daily["blocks_built"], audit["blocks_built"])
+        self.assertNotEqual(daily["judgement_missing"], audit["judgement_missing"])
+
     def test_the_row_is_nested_so_its_fields_cannot_collide_with_ours(self):
         # A row legitimately carries a field called `note`; this program emits
         # `status` and `reason` of its own. Nesting is what keeps a judgement
