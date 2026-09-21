@@ -1,12 +1,19 @@
 {
  "<LEDGER-ARTIFACT-URL>": "https://claude.ai/code/artifact/00000000-0000-0000-0000-000000000000",
- "<WITNESS-REPO>": "EXAMPLEUSER/1f916-witness",
- "<OPERATOR-FORK>": "EXAMPLEUSER/1f916",
- "<OPERATOR-GITHUB-LOGIN>": "EXAMPLEUSER",
+ "<VAULT-ITEM-CREDENTIAL>": "op://<VAULT>/<item-id-of-the-bearer>",
+ "<VAULT-ITEM-WITNESS-KEY>": "op://<VAULT>/<item-id-of-the-witness-key>",
  "<INTAKE-ADDRESS>": "commonwealth@example.invalid",
+ "<OPERATOR-EMAIL-ICLOUD-2>": "second-personal@example.invalid",
+ "<WITNESS-REPO>": "EXAMPLEUSER/1f916-witness",
+ "<OPERATOR-EMAIL-PERSONAL>": "personal@example.invalid",
+ "<OPERATOR-EMAIL-ICLOUD>": "personal-2@example.invalid",
+ "<OPERATOR-MAC-HOME>": "/Users/EXAMPLEUSER",
  "<BOUND-DOMAIN>": "example.invalid",
- "<WITNESS-HOST>": "examplehost",
+ "<OPERATOR-FORK>": "EXAMPLEUSER/1f916",
  "<RUN-HOME>": "/home/example",
+ "<WITNESS-HOST>": "examplehost",
+ "<OPERATOR-GITHUB-LOGIN>": "EXAMPLEUSER",
  "<OPERATOR-NAME>": "Examplename",
+ "OPERATOR_FULL_NAME": "Examplename Examplesurname",
  "OPERATOR_NAME": "Examplename"
 }

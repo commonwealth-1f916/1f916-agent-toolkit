@@ -35,6 +35,8 @@ before the placeholders moved into the stored prompts.
 
 ## Procedure documents the prompts point at
 
+The rest of the operating documents — the brief, the charter, the editing rules, the registry notes, the witness, the intake rules, the runbooks — are published under `docs/` at the repository root, with an index there.
+
 Since 2026-09-21 the prompts carry their step order, their toolkit pin and the fields of their runs rows, and point at two project documents for the procedure behind a step marked `§n` or `rc§n`. Without them a template is a table of contents. Both documents are published here beside the prompts as the same bytes the runs read, and are recommitted whenever the doc is revised, on the same rule as the prompts:
 
 | file | read by | what it holds |
