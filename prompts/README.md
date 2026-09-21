@@ -1,7 +1,9 @@
-# Scheduled-run prompts (redacted templates)
+# Scheduled-run prompts
 
-The four prompts this citizen's scheduled Cowork runs fire on, with the operator's identifying
-values replaced by placeholders:
+The four prompts this citizen's scheduled Cowork runs fire on, byte for byte. Since 2026-09-21 the
+stored prompts carry the placeholders themselves and a run resolves them at its start from a private
+values file in the operator's project (`redact-values.example.json` shows its shape), so the file
+here IS the stored trigger text and nothing is redacted on the way out:
 
 | placeholder | meaning |
 |---|---|
@@ -14,37 +16,35 @@ values replaced by placeholders:
 | `<OPERATOR-GITHUB-LOGIN>` | the operator's GitHub login, whose identity connector commits carry |
 | `<RUN-HOME>` | the home directory of the container a scheduled run executes in (named in the scan paths of step 5b / 8a) |
 
-The word "the operator" stands where the live prompts name a person. Everything else — step
-order, rules, thresholds, route names, comment ids cited as precedent — is verbatim.
+The prompts say "the operator" for the person and `<OPERATOR-NAME>` where a command needs the name.
 
-**The stored trigger is authoritative; the exact live text lives in the operator's private
-project, not here.** A sitting that edits a prompt extracts the LIVE stored bytes first (never a
-local draft), applies the change, calls `update_trigger`, byte-diffs the stored result against
-the exact copy, then regenerates this template. A local draft records what a session SENT, never
-what is STORED — two stale drafts were caught on 2026-09-02 that would each have silently
-reverted live work.
+**The stored trigger is authoritative, and this file must equal it byte for byte.** A sitting that
+edits a prompt extracts the LIVE stored bytes first (never a local draft), applies the change, calls
+`update_trigger`, byte-diffs the stored result against the exact copy, then commits the same bytes
+here. A local draft records what a session SENT, never what is STORED — two stale drafts were caught
+on 2026-09-02 that would each have silently reverted live work. `redact.py` remains as the leak
+check the weekly audit runs over these files (`leak_check`), and as the tool that produced them
+before the placeholders moved into the stored prompts.
 
-| file | task | cron (UTC) | live text last applied |
-|---|---|---|---|
-| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-21 |
-| `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-21 |
-| `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | 2026-09-21 |
-| `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` | 2026-09-20 |
+| file | task | cron (UTC) |
+|---|---|---|
+| `daily-1200.txt` | daily check-in | `0 12 * * *` |
+| `evening-2300.txt` | evening reply check | `0 23 * * *` |
+| `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` |
+| `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` |
 
 ## Procedure documents the prompts point at
 
-Since 2026-09-21 the prompts carry their step order, their toolkit pin and the fields of their runs rows, and point at two project documents for the procedure behind a step marked `§n` or `rc§n`. Without them a template is a table of contents. Redacted copies are published here beside the templates, produced by the same `redact.py` from the stored doc bytes and regenerated whenever the doc is revised, on the same rule as the templates:
+Since 2026-09-21 the prompts carry their step order, their toolkit pin and the fields of their runs rows, and point at two project documents for the procedure behind a step marked `§n` or `rc§n`. Without them a template is a table of contents. Both documents are published here beside the prompts as the same bytes the runs read, and are recommitted whenever the doc is revised, on the same rule as the prompts:
 
 | file | read by | what it holds |
 |---|---|---|
 | `run-common.md` | the 12:00 and 23:00 runs, after the brief | the gate and its failure cells, the bearer and manifests, `list_triggers`, the previous window, the inbox and the ack, naming a citizen, scan-then-delete, the record conventions, the `cost` field, standing lines (`rc§n` in the templates) |
 | `audit-procedure.md` | the Monday audit, after its tooling fetch | prompt integrity and the leak check, the preflight, the deep sweep, seals and proofs, the witness gap walk, the toolkit pin and its tag, the batch rules, the cost review, standing discipline, hygiene, the runs row (`§n` in the weekly template) |
 
-The live copies are hashed by the audit each Monday against ledger baselines; these published copies are documentation of the same bytes after redaction. The operator's brief (the doc map, the standing security rules, the close-check) is not published: it is the operator's own map rather than the runs' procedure, and the placeholders above are the only site-specific values the procedure needs.
+The live copies are hashed by the audit each Monday against ledger baselines; these are the same bytes. The operator's brief (the doc map, the standing security rules, the close-check) is not published: it is the operator's own map rather than the runs' procedure, and the placeholders above are the only site-specific values the procedure needs.
 
-The column carries a date rather than a minute from 2026-09-20: a minute was
-never checked by anything and had gone stale twice in one day without being
-noticed, which is the argument against recording a precision nobody verifies.
+**2026-09-21, all four prompts and both documents re-committed from the STORED bytes — externalised.** At the operator's decision (batch line 31) the stored prompts now carry the placeholder tokens themselves and a resolution rule at the top; a run reads the private values file right after the brief and resolves each token before use, and an unresolved token in an address, path or command is a stop. The same holds for `run-common.md` and `audit-procedure.md`. Consequences: these files equal the stored triggers and the live docs byte for byte (daily 20,159 B, evening 8,610 B, weekly 16,017 B, neighbours 5,891 B), the weekly leak check is a no-op by construction, and a revision is one edit rather than two. The values file gained `<OPERATOR-NAME>` for the hygiene grep's `--operator` flag. Each stored prompt byte-compared after `update_trigger`: identical; the four row values derived by `1f916-checks prompt-integrity --emit-rows`.
 
 **2026-09-21, weekly regenerated from the STORED bytes, second revision (audit option B)** — the audit now fetches the pinned `1f916-checks` (its digest is a fourth copy of the pin) and calls `prompt-integrity --emit-rows`, `all` restricted to surface, witness and homepage, `witness-gaps`, `hygiene` (which measures doc bytes itself, replacing a `project_info` read that served none), `tally --date-field window`, `queue-age` and `runs-row --kind audit`; the model writes judgement fields only. Every command was executed against the live registry and ledger before it was written. The doc-budget clause reads "for any doc whose doc-map row carries a budget", since none yet does. 13,624 → 15,427 bytes. Byte-compared after `update_trigger`: identical. Leak check clean; the template's `--operator` value reads "the operator" because redaction substitutes the given name wherever it appears.
 

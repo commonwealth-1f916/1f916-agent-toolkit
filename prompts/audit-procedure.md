@@ -1,6 +1,6 @@
 # 1F916 — the Monday audit's procedure
 
-Status: `queue/prompt-batch-2026-W40` (rev. 2026-09-21). Tier A. Read by the Monday audit after its tooling fetch, before anything else; hashed by its step 1 against `state/audit-procedure`. The prompt owns the order of its steps, the collections it may write and what it reports; this doc owns the procedure behind the steps marked §n there. Where the prompt and this doc disagree, the prompt wins. Procedure the audit shares with the two daily runs is in `claude/1f916-run-common.md` and is pointed at, not repeated.
+Status: `queue/prompt-batch-2026-W40` (rev. 2026-09-21). Tier A. Read by the Monday audit after its tooling fetch, before anything else; hashed by its step 1 against `state/audit-procedure`. The prompt owns the order of its steps, the collections it may write and what it reports; this doc owns the procedure behind the steps marked §n there. Where the prompt and this doc disagree, the prompt wins. Site-specific values appear here as the placeholder tokens the prompts define and resolve from `claude/1f916-redact-values.json`; the published copy of this doc is this doc. Procedure the audit shares with the two daily runs is in `claude/1f916-run-common.md` and is pointed at, not repeated.
 
 ## 1. Reading the stored prompts
 
@@ -52,7 +52,7 @@ Name the instrument, not just the target (why: notes/2026-09-04-shipped-was-infe
 
 ## 11. Doc sizes and hygiene
 
-Every tier-A and tier-B doc is `project_read` and saved to a file under the scratchpad; the four stored prompts are written to files from the raw `list_triggers` payload by python, never read. `python3 1f916-checks hygiene --doc <each doc file> --prompt <each prompt file> --operator <the operator's given name> --exempt <the docket-build file>=3,4` runs the hygiene grep of `claude/1f916-doc-editing.md`: pattern 4 (capitalised words) over docs only, the exemptions by file and pattern index. `bytes` is each file's size measured utf-8 — the doc sizes the runs row records, since `project_info` serves paths and dates but no per-doc size; `hits` are reported one per line (file, line, pattern); `counts` per file; `status_line` says whether a doc's first five lines carry `Status: … queue/…`. Prompt sizes come from §1's `live_bytes`, each beside the 20,480-byte budget. A doc budget is the value its doc-map row carries, where one does.
+Every tier-A and tier-B doc is `project_read` and saved to a file under the scratchpad; the four stored prompts are written to files from the raw `list_triggers` payload by python, never read. `python3 1f916-checks hygiene --doc <each doc file> --prompt <each prompt file> --operator <OPERATOR-NAME> --exempt <the docket-build file>=3,4` runs the hygiene grep of `claude/1f916-doc-editing.md`: pattern 4 (capitalised words) over docs only, the exemptions by file and pattern index. `bytes` is each file's size measured utf-8 — the doc sizes the runs row records, since `project_info` serves paths and dates but no per-doc size; `hits` are reported one per line (file, line, pattern); `counts` per file; `status_line` says whether a doc's first five lines carry `Status: … queue/…`. Prompt sizes come from §1's `live_bytes`, each beside the 20,480-byte budget. A doc budget is the value its doc-map row carries, where one does.
 
 ## 12. The runs row
 

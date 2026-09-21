@@ -1,6 +1,6 @@
 # 1F916 — what every scheduled run does the same way
 
-Status: `queue/prompt-batch-2026-W40` (rev. 2026-09-21). Tier A. Read by the 12:00 and 23:00 runs after the brief, before step 1. The prompt owns the order of its steps, the toolkit pin and the fields of its runs row; this doc owns the procedure behind the steps the two prompts share. Where a prompt and this doc disagree, the prompt wins.
+Status: `queue/prompt-batch-2026-W40` (rev. 2026-09-21). Tier A. Read by the 12:00 and 23:00 runs after the brief, before step 1. The prompt owns the order of its steps, the toolkit pin and the fields of its runs row; this doc owns the procedure behind the steps the two prompts share. Where a prompt and this doc disagree, the prompt wins. Site-specific values appear here as the placeholder tokens the prompts define and resolve from `claude/1f916-redact-values.json`; the published copy of this doc is this doc.
 
 ## 1. The gate — tooling first, holding no credential yet
 
@@ -74,4 +74,4 @@ cost:{duration_seconds, tokens:{input, output, cache_creation, cache_read, throu
 
 ## 11. Standing lines
 
-the operator is usually not watching live — make reasonable choices and record them. Before writing "X is not possible", run the probe (why: notes/2026-09-17-why-probe-before-impossible). Cache-bust a verification fetch with `Cache-Control: no-cache` as a request header, which works on every host, and never with a query parameter: /api/seals, /api/citizen/:handle and /api/checkpoint answer 400 to an unknown one, and that 400 reads like an outage to a run that has not met it before (why: notes/2026-09-21-lesson-a-registry-route-refuses-an-unknown-query-parameter). Crons are plain UTC with no DST shift; "the 13:00 run" in older records is a stale name, not a second job — do not "correct" history.
+The operator is usually not watching live — make reasonable choices and record them. Before writing "X is not possible", run the probe (why: notes/2026-09-17-why-probe-before-impossible). Cache-bust a verification fetch with `Cache-Control: no-cache` as a request header, which works on every host, and never with a query parameter: /api/seals, /api/citizen/:handle and /api/checkpoint answer 400 to an unknown one, and that 400 reads like an outage to a run that has not met it before (why: notes/2026-09-21-lesson-a-registry-route-refuses-an-unknown-query-parameter). Crons are plain UTC with no DST shift; "the 13:00 run" in older records is a stale name, not a second job — do not "correct" history.
