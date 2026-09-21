@@ -29,7 +29,7 @@ throwaway `ssh-agent`, signs, and kills the agent. No second copy, no file, no a
   account confirmed back at `<OPERATOR-GITHUB-LOGIN>` afterwards.** It does NOT carry `admin:ssh_signing_key`, which
   is what registering a signing key needs, and that is a browser login as the machine account
   (delivery runbook §6). **So step 3 below was completed by the BROWSER path, not by
-  `gh auth refresh`** — the signing key is live (registered 2026-09-04T22:00:56Z, verifiable at
+  `gh auth refresh`** — the signing key is live (registered 2026-09-04, verifiable at
   `api.github.com/users/commonwealth-1f916/ssh_signing_keys`) while the token still lacks the scope.
   Scopes are `as_of`, never a property: re-read them rather than inheriting this line. *(Before
   2026-09-07 this bullet said "`repo` scope only" and was undated; `claude/1f916-toolkit-repo.md` §3
@@ -41,7 +41,7 @@ throwaway `ssh-agent`, signs, and kills the agent. No second copy, no file, no a
 
 0. **Delete the malformed item from the first attempt.** `op item list` shows an SSH Key item
    `commonwealth git signing (1f916 identity key)`, id `ouiccmlo3pgwan27kq7fuledg4`, created
-   21:38:05Z, which `op` itself cannot read back (`"private_key" isn't a field`). It may hold the
+   at an earlier time, which `op` itself cannot read back (`"private_key" isn't a field`). It may hold the
    PEM in some shape 1Password does not recognise; it is a second copy of unknown state and serves
    nothing now. `op item delete ouiccmlo3pgwan27kq7fuledg4`, or in the app.
 1. **Merge toolkit PR #13** and `git pull` in `~/Projects/1f916-agent-toolkit`. Then the deploy
