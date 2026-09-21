@@ -26,14 +26,16 @@ reverted live work.
 
 | file | task | cron (UTC) | live text last applied |
 |---|---|---|---|
-| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-20 |
-| `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-20 |
+| `daily-1200.txt` | daily check-in | `0 12 * * *` | 2026-09-21 |
+| `evening-2300.txt` | evening reply check | `0 23 * * *` | 2026-09-21 |
 | `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | 2026-09-20 |
 | `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` | 2026-09-20 |
 
 The column carries a date rather than a minute from 2026-09-20: a minute was
 never checked by anything and had gone stale twice in one day without being
 noticed, which is the argument against recording a precision nobody verifies.
+
+**2026-09-21, daily and evening regenerated from the STORED bytes** — two revisions in one day, and this regeneration carries both. First, the toolkit pin moved from `9a102ca0` to `d8ce7463` (main, merge of PR #61, signed tag `v2026.09.21`): `1f916-gate` `98fd1ae0…` → `d80a11c8…`, `1f916-run` `35863340…` → `6dde02eb…`, the daily's `1f916-checks` `fa1594fc…` → `f4160519…`, `1f916-scan` unchanged; and the daily's step 9(a), the board digest, was retired at the operator's decision, leaving step 9 as the run report alone. That revision was applied and byte-verified but its templates were not regenerated, which the operator's ledger recorded as owed. Second, the same day: the procedure the two prompts shared word for word — the gate and its three failure cells, the bearer and the manifest, the slim `list_triggers` read, the previous-window check, the inbox and the ack, naming a citizen, scan-then-delete, the record conventions and the `cost` field — moved to one project document the two runs read after the brief, and each prompt points at it by section. Each prompt keeps its step order, its toolkit pin and digests, and the fields of its own runs row; no instruction, threshold, field name, exit code or citation was dropped, and a script checked every `notes/` and `queue/` citation and every literal against the pair. Daily 33,017 → 17,564 bytes, evening 18,198 → 7,581. Each byte-compared after `update_trigger` against the prepared file: identical. `prompts/redact.py` re-proven first: the previous stored bytes, redacted, differ from the templates then in this directory only in the two changes of the first revision. Both templates leak-checked clean.
 
 **2026-09-20, daily and evening regenerated from the STORED bytes** — the toolkit pin moves from `da52f625` to `9a102ca0` (main, the merges of PR #52 and PR #53; signed tag `v2026.09.20.1`) so the runs execute the fixes from that day's code review. Step 1 of both: the commit in the fetch URL, `1f916-gate` `fc478d8a…` → `98fd1ae0…`, `1f916-scan` `38eb23e7…` → `d0b91b77…`, and the daily's `1f916-checks` `645ade16…` → `fa1594fc…`. `1f916-run` is byte-identical across the move. THREE of the four digests move here, where the two previous pin moves each moved one — the gate's read verb gained a path anchor and the scanner stopped treating a blank pattern line as a pattern matching everything, so those two files really did change. No other byte changed; both prompts are 34,441 and 18,198 bytes before and after, because a commit hash and a digest are replaced by strings of the same length. Byte-compared against the prepared bytes after `update_trigger`: both identical. `prompts/redact.py` re-proven first against the previous stored bytes, all four templates.
 
