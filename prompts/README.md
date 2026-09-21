@@ -31,6 +31,17 @@ reverted live work.
 | `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` | 2026-09-21 |
 | `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` | 2026-09-20 |
 
+## Procedure documents the prompts point at
+
+Since 2026-09-21 the prompts carry their step order, their toolkit pin and the fields of their runs rows, and point at two project documents for the procedure behind a step marked `§n` or `rc§n`. Without them a template is a table of contents. Redacted copies are published here beside the templates, produced by the same `redact.py` from the stored doc bytes and regenerated whenever the doc is revised, on the same rule as the templates:
+
+| file | read by | what it holds |
+|---|---|---|
+| `run-common.md` | the 12:00 and 23:00 runs, after the brief | the gate and its failure cells, the bearer and manifests, `list_triggers`, the previous window, the inbox and the ack, naming a citizen, scan-then-delete, the record conventions, the `cost` field, standing lines (`rc§n` in the templates) |
+| `audit-procedure.md` | the Monday audit, after its tooling fetch | prompt integrity and the leak check, the preflight, the deep sweep, seals and proofs, the witness gap walk, the toolkit pin and its tag, the batch rules, the cost review, standing discipline, hygiene, the runs row (`§n` in the weekly template) |
+
+The live copies are hashed by the audit each Monday against ledger baselines; these published copies are documentation of the same bytes after redaction. The operator's brief (the doc map, the standing security rules, the close-check) is not published: it is the operator's own map rather than the runs' procedure, and the placeholders above are the only site-specific values the procedure needs.
+
 The column carries a date rather than a minute from 2026-09-20: a minute was
 never checked by anything and had gone stale twice in one day without being
 noticed, which is the argument against recording a precision nobody verifies.
