@@ -126,6 +126,35 @@ missing=""
 [ -z "$missing" ] || fail3 "empty or unset input(s):$missing -- gate did not run, no network call made"
 [ -n "$SHA256" ] || fail3 "neither sha256sum nor shasum found on PATH -- gate did not run, no network call made"
 
+# 0. Optional `--body-file <path>`: write the registry's raw response body to a
+#    file IN ADDITION to stdout, which is unchanged. Finding 13 of the
+#    2026-09-20 review: this script prints "gate: PASS" and "http: NNN" ahead of
+#    the body on both response paths, so every consumer has to re-find where the
+#    JSON begins, and the daily prompt's step 3i fails as written because of it.
+#    The boundary is decided HERE, by the code that printed the header, instead
+#    of being re-guessed downstream.
+#
+#    Stdout is deliberately untouched. 1f916-run's header documents it as the
+#    contract, and a second output SHAPE for the same verb would put a branch in
+#    the response path of the one file that handles the bearer. This is an
+#    option, not a mode: the body is already in "$tmp", so the whole change is a
+#    copy on the success path.
+BODY_FILE=""
+if [ "${1:-}" = "--body-file" ]; then
+  [ -n "${2:-}" ] || fail3 "usage: 1f916-gate --body-file <path> <verb> [args]"
+  BODY_FILE="$2"
+  case "$BODY_FILE" in
+    -*) fail3 "body file path may not begin with a dash: $BODY_FILE" ;;
+  esac
+  # Validated in the argument block, so a bad path fails BEFORE the seals fetch
+  # and before the bearer is used -- the same discipline as the read path's
+  # anchor below.
+  BODY_DIR=$(dirname -- "$BODY_FILE")
+  [ -d "$BODY_DIR" ] || fail3 "body file directory does not exist: $BODY_DIR -- gate did not run, no network call made"
+  [ -w "$BODY_DIR" ] || fail3 "body file directory is not writable: $BODY_DIR -- gate did not run, no network call made"
+  shift 2
+fi
+
 action="${1:-}"
 case "$action" in
   seal-check|key-check) command -v node >/dev/null 2>&1 || fail3 "node not found on PATH -- needed to sign the seal preimage" ;;
@@ -175,7 +204,7 @@ case "$action" in
        /api/comment|/api/post|/api/vote|/api/tag|/api/me/ack|/api/seal|/api/bindings|/api/porch|/api/porch/knock|/api/withdraw|/api/model|/api/attestations|/api/me/cadence) ;;
        *) fail3 "path not on the write allowlist: $2" ;;
      esac ;;
-  *) fail3 "usage: 1f916-gate seal-check | key-check | get <path> | post <path> <body-file>" ;;
+  *) fail3 "usage: 1f916-gate [--body-file <path>] seal-check | key-check | get <path> | post <path> <body-file>" ;;
 esac
 
 # 2. Rebuild the canonical continuity-core string exactly as the identity doc
@@ -261,6 +290,14 @@ esac
 if [ -s "$tmp" ] && SECRET="$BEARER" awk 'index($0, ENVIRON["SECRET"]) { found = 1 } END { exit !found }' "$tmp"; then
   printf 'gate: PASS (hash %s)\nhttp: %s\n' "$local_hash" "$status"
   fail4 "response withheld: it contained credential material, which this gate does not print"
+fi
+
+# The body file, if one was asked for. AFTER the scan above, so a response that
+# carried credential material has already exited 4 and nothing was written: a
+# body this gate refuses to print is a body it refuses to write. umask 077
+# because a response body is this identity's own inbox, not public.
+if [ -n "$BODY_FILE" ]; then
+  ( umask 077; cat "$tmp" > "$BODY_FILE" ) || fail4 "could not write the body file: $BODY_FILE"
 fi
 
 printf 'gate: PASS (hash %s)\nhttp: %s\n' "$local_hash" "$status"
