@@ -186,5 +186,10 @@ mutant 'body-file dash check removed'        's|^    -\*) fail3 "body file path 
 mutant 'body written on the withheld path'   's|^  fail4 "response withheld|  [ -n "$BODY_FILE" ] \&\& cat "$tmp" > "$BODY_FILE"; fail4 "response withheld|'
 mutant 'RUN_BODY_DIR directory check removed' 's|\[ -d "\$RUN_BODY_DIR" \]|[ -d "/" ]|'                                run
 
+# The ack verb's three contract properties: whole, alone, never a number.
+mutant 'ack accepts a numeric cursor'        's|type == "object"|type != "nothing"|'                                  run
+mutant 'ack rebuilds the cursor field by field' 's|{up_to: .ack_cursor}|{up_to: {last_seen_comment_id: .ack_cursor.last_seen_comment_id}}|' run
+mutant 'ack sends the cursor with company'   's|{up_to: .ack_cursor}|{up_to: .ack_cursor, now: 1}|'                   run
+
 printf '# %d killed, %d survived\n' "$killed" "$survived"
 [ "$survived" = 0 ] || exit 1

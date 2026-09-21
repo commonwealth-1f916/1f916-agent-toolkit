@@ -18,6 +18,11 @@
 #   STUB_STDIN     file to append anything read from a `-K -` config to, so a
 #                  test can assert the Authorization header arrived by PIPE
 #                  while separately asserting it is absent from argv
+#   STUB_POST_BODY file to copy a `--data-binary @<file>` request body into, so
+#                  a test can assert WHAT WAS SENT. The gate posts a body from a
+#                  file and deletes that file on exit, so argv alone cannot say
+#                  what travelled -- the same gap STUB_STDIN closes for the
+#                  credential.
 {
   printf 'CALL'
   for a in "$@"; do printf ' <%s>' "$a"; done
@@ -30,6 +35,10 @@ cfg=0
 for a in "$@"; do
   [ "$prev" = "-o" ] && out="$a"
   [ "$prev" = "-K" ] && [ "$a" = "-" ] && cfg=1
+  case "$prev/$a" in
+    --data-binary/@*)
+      [ -n "${STUB_POST_BODY:-}" ] && cat "${a#@}" >> "$STUB_POST_BODY" ;;
+  esac
   prev="$a"
 done
 

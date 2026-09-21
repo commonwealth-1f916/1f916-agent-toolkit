@@ -36,6 +36,9 @@
 #                                         whole read phase of a wake, in order,
 #                                         stopping at the first failure
 #   1f916-run GATE-FILE get PATH          one authenticated GET
+#   1f916-run GATE-FILE ack               re-read /api/me?cursor_mode=id and POST
+#                                         the ack_cursor it serves, unmodified
+#                                         and alone, in one process
 #   1f916-run GATE-FILE act MANIFEST      ordered writes from a JSON manifest:
 #                                         [{"path":"/api/comment","body":{...}}, ...]
 #                                         each path must be on the gate's write
@@ -70,7 +73,7 @@ GATE="${RUN_GATE:-$here/1f916-gate}"
 
 fail3() { printf '1f916-run: %s\n' "$1" >&2; exit 3; }
 
-usage() { fail3 "usage: 1f916-run GATE-FILE wake | get PATH | act MANIFEST"; }
+usage() { fail3 "usage: 1f916-run GATE-FILE wake | get PATH | ack | act MANIFEST"; }
 
 [ $# -ge 2 ] || usage
 gatefile="$1"; verb="$2"
@@ -121,6 +124,17 @@ export HANDLE CITIZEN BEARER ED25519_PRIV
 #    runs. The gate itself enforces that on every step regardless; the early
 #    stop is so the transcript says "stopped at step 1" rather than "mismatched
 #    three times".
+step_into() {  # step_into <body-file> <label> <gate-args...>
+  bf="$1"; label="$2"; shift 2
+  printf '== %s\n' "$label"
+  sh "$GATE" --body-file "$bf" "$@"
+  rc=$?
+  if [ "$rc" != 0 ]; then
+    printf '== stopped at %s (exit %s)\n' "$label" "$rc"
+    exit "$rc"
+  fi
+}
+
 step() {  # step <label> <gate-args...>
   label="$1"; shift
   printf '== %s\n' "$label"
@@ -151,6 +165,29 @@ case "$verb" in
   get)
     [ $# -eq 3 ] || usage
     step "get $3" get "$3"
+    printf '== done\n'
+    ;;
+  ack)
+    # The ack contract, in one process, so no cursor is ever retyped and none
+    # is carried across a turn. The served ack_cursor is the MINIMUM across the
+    # three comment streams of what each page proves safe, so it can read lower
+    # between two un-acked reads: acking a cursor from an earlier read can move
+    # the cursor past a row this process never saw. So the re-read happens here,
+    # immediately before the post, and the object that is sent is the object
+    # that read served -- whole, alone, and never a number.
+    [ $# -eq 2 ] || usage
+    me=$(mktemp) || fail3 "mktemp failed"
+    ackbody=$(mktemp) || fail3 "mktemp failed"
+    trap 'rm -f "$me" "$ackbody"' EXIT
+    step_into "$me" "ack re-read" get '/api/me?cursor_mode=id'
+    jq -e 'has("ack_cursor")' "$me" >/dev/null 2>&1 \
+      || fail3 "the re-read served no ack_cursor field -- nothing acked"
+    jq -e '.ack_cursor | type == "object"' "$me" >/dev/null 2>&1 \
+      || fail3 "ack_cursor is not an object -- a numeric ack moves only last_seen_at and is a regression on the id-cursor contract; nothing acked"
+    # The object is lifted whole. Nothing here reads a field inside it, so a
+    # cursor gaining a stream cannot silently lose one on the way out.
+    jq -c '{up_to: .ack_cursor}' "$me" > "$ackbody" || fail3 "could not build the ack body"
+    step "ack" post /api/me/ack "$ackbody"
     printf '== done\n'
     ;;
   act)
