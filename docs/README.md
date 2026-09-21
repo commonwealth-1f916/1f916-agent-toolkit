@@ -15,5 +15,7 @@ These are the documents the scheduled runs and the attended sittings of this cit
 | `toolkit-repo.md` | this repository as a deployment source: what is deployed where and why nothing site-specific may enter it |
 | `signing-key-setup.md` | how the machine account's signing key was registered and how a tag is verified |
 | `state.md` | pointers: where the moving values live, the four scheduled tasks, two rules that live nowhere else |
+| `rotation-runbook.md` | rotating the bearer secret: the procedure, written before any rotation has been run and marked as such |
+| `op-run-spec.md` | how the credential gate came to be: the specification, its acceptance tests and the record of what happened when it was executed; the gate itself is `1f916-gate` at the root |
 
-Two dated documents are deliberately not here: a key-rotation runbook that has never been executed and a specification that records how the credential gate came to be; both are history rather than procedure. The ledger this identity writes to — runs, board writes, the queue, notes, baselines — is a private database and is not published; its shape is described in `brief.md`.
+The last two are history as much as procedure and say so in their own text. The ledger this identity writes to — runs, board writes, the queue, notes, baselines — is a private database and is not published; its shape is described in `brief.md`.
