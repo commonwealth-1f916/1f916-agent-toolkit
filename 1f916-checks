@@ -1465,6 +1465,34 @@ DAILY_JUDGEMENT_NESTED = (
     ("previous_window", "finished_at"), ("previous_window", "last_run_status"),
 )
 
+# The weekly audit's equivalent. DERIVED, not invented: the three audit rows
+# this identity has written -- 2026-09-07T11, 2026-09-14T11, 2026-09-21T11 --
+# were read and the fields present in ALL THREE were taken, less the blocks a
+# check produces (an audit row carries surface, witness and homepage). To those
+# are added votes_cast, tags_placed and classifier_refusals, which the brief
+# requires of EVERY runs row, zero included, and which the older two rows
+# predate rather than omit.
+#
+# The audit holds no credential and fetches nothing authenticated, so several
+# of these are n/a rather than absent on a healthy row. `judgement_missing` is
+# advisory in both cases: it says what the row does not yet carry, never that
+# the run did wrong.
+AUDIT_JUDGEMENT_FIELDS = (
+    "anomaly", "classifier_refusals", "collections", "docs_bytes_measured_utf8",
+    "human_queue", "instructions_field", "kind", "ledger_completeness", "model",
+    "note", "pr172", "probes_aging", "scan", "sweep", "swept_closed",
+    "tags_placed", "votes_cast", "window", "witness_git", "written_by",
+)
+
+# kind -> (flat fields, nested fields). A kind absent from this table gets no
+# missing-list, and says so rather than returning an empty one: silence and
+# "nothing missing" are different answers and this command has no business
+# conflating them.
+JUDGEMENT_FIELDS_BY_KIND = {
+    "daily": (DAILY_JUDGEMENT_FIELDS, DAILY_JUDGEMENT_NESTED),
+    "audit": (AUDIT_JUDGEMENT_FIELDS, ()),
+}
+
 
 def _dig(obj, path):
     """Follow a str key or a tuple of keys. Absent is None, never an error."""
@@ -1605,16 +1633,27 @@ def cmd_runs_row(ctx, args):
         _deep_merge(row, judgement)
 
     missing = None
-    if args.kind == "daily":
-        missing = [f for f in DAILY_JUDGEMENT_FIELDS if row.get(f) is None]
-        for block, field in DAILY_JUDGEMENT_NESTED:
+    missing_reason = None
+    if args.kind in JUDGEMENT_FIELDS_BY_KIND:
+        flat, nested = JUDGEMENT_FIELDS_BY_KIND[args.kind]
+        missing = [f for f in flat if row.get(f) is None]
+        for block, field in nested:
             if _dig(row, (block, field)) is None:
                 missing.append("%s.%s" % (block, field))
         missing.sort()
+    else:
+        # Not an error: the kind is valid and the row is built. What is absent
+        # is the FIELD LIST for it, and a null with no reason reads as "nothing
+        # missing" to anyone who does not know the table.
+        missing_reason = ("no judgement field list is defined for kind %r, so "
+                          "this is 'not checked', not 'nothing missing'" % args.kind)
 
-    return {"row": row, "blocks_built": produced, "blocks_absent": absent,
-            "judgement_missing": missing,
-            "judgement_applied": sorted(judgement) if judgement else []}
+    out = {"row": row, "blocks_built": produced, "blocks_absent": absent,
+           "judgement_missing": missing,
+           "judgement_applied": sorted(judgement) if judgement else []}
+    if missing_reason:
+        out["judgement_missing_reason"] = missing_reason
+    return out
 
 
 class Parser(argparse.ArgumentParser):
@@ -1764,7 +1803,7 @@ def build_parser():
     s.add_argument("--all", required=True, help="an `all` output as a file")
     s.add_argument("--docket", help="a `docket` output as a file")
     s.add_argument("--judgement", help="JSON merged over the mechanical blocks")
-    s.add_argument("--kind", default="daily", choices=["daily", "evening", "sitting"])
+    s.add_argument("--kind", default="daily", choices=["daily", "evening", "audit", "sitting"])
     s.add_argument("--front-limit", type=int, default=100)
     return p
 
