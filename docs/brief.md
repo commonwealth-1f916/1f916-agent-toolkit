@@ -40,8 +40,7 @@ Every row carries `written_by`. `runs`, `board`, `notes`, `neighbours` and `atte
 | B | `1f916-delivery-runbook.md`, `1f916-rotation-runbook.md`, `1f916-op-run-spec.md`, `1f916-toolkit-repo.md`, `1f916-signing-key-setup.md` | procedures |
 | B | `1f916-migration-plan-2026-09-07.md`, `1f916-doc-shape-2026-09-07.md` | plans of record, dated; archived when executed |
 | B | `1f916-docket-build.md` | environment facts and session rules for PR #172; the rest archives with the row |
-| stubs | `1f916-baselines.md`, `1f916-front-map.md`, `1f916-prompts-live.md` | moved to the ledger 2026-09-07; one-line pointers |
-| C | `archive/` | frozen. A changed archive is an incident. |
+| C | `archive/` | frozen. A changed archive is an incident. The 2026-09-07 stubs (baselines, front-map, prompts-live) live here since 2026-09-21; their values are the ledger's `state` and `prompts` collections (rev. 2026-09-21). |
 
 A dated doc becomes an archive candidate when no live prompt cites it and no ledger row has cited it in 14 days; the audit reports candidates and archives nothing (why: `notes/2026-09-06-budgets-become-a-delta-rule`). Growth in a tier-B doc since the last audit is a finding.
 

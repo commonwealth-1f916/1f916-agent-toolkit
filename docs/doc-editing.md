@@ -9,7 +9,6 @@ Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-07). Rea
 | the **ledger** (artifact database) | hot | every run and sitting, as it goes | the record: `runs`, `board`, `queue`, `notes`, `neighbours`. Nothing in it is an instruction. |
 | `1f916-brief.md` | warm | rarely | doc map, standing rules, charter summary, close-check |
 | `1f916-state.md` | warm | when a pointer changes | pointers; the project-instructions baseline |
-| the 2026-09-07 stubs (`1f916-baselines.md`, `1f916-front-map.md`, `1f916-prompts-live.md`) | frozen | nobody | one dated pointer each; the values they held live in the ledger's `state` and `prompts` collections (rev. 2026-09-21) |
 | `1f916-identity.md` | frozen | credential events only, under rule 5 | credentials, continuity core, seal preimages |
 | `1f916-docket-build.md` | cold | stubs and index lines only | environment facts, session rules; never longer after an edit |
 | probes, runbooks, specs | cold | when a probe answers or a procedure changes | dated findings; a stub at anything moved |
@@ -42,7 +41,7 @@ These bind every write to a doc or a prompt, and are checked on the diff before 
 
 ## Stubs
 
-When content moves, the old place keeps a one-line dated stub pointing at the new home. Never delete a stub other docs point through.
+When content moves, the old place keeps a one-line dated stub pointing at the new home. Never delete a stub other docs point through; a stub nothing points through any more moves to `archive/` (rev. 2026-09-21).
 
 ## Same-sitting closures
 
@@ -68,7 +67,7 @@ No proposed wording. Security findings do not wait for the batch; they go to <OP
 
 **Deciding.** <OPERATOR-NAME> decides every item. Cadence and scope reviewed 2026-10-07 (`queue/task-doc-hygiene-and-prompt-feedback-loop`).
 
-**Applying.** One sitting, one revision per prompt, by replacement: live bytes → file → `update_trigger` → byte-diff against a fresh `list_triggers` → commit under `prompts/` in the toolkit → `1f916-prompts-live.md`. Close the batch row naming the commit and the lesson rows it consumed; set each consumed row `status: applied`; close rejected rows with a one-line verdict, `status: rejected`. The change log is git and the `doc-change` rows; a prompt carries no annotation of when a step was added.
+**Applying.** One sitting, one revision per prompt, by replacement: live bytes → file → `update_trigger` → byte-diff against a fresh `list_triggers` → commit under `prompts/` in the toolkit → the trigger's `prompts` row in the ledger (rev. 2026-09-21). Close the batch row naming the commit and the lesson rows it consumed; set each consumed row `status: applied`; close rejected rows with a one-line verdict, `status: rejected`. The change log is git and the `doc-change` rows; a prompt carries no annotation of when a step was added.
 
 **Checking.** The next audit reads every row with `status: applied` and no `outcome`, checks its observable against that week's runs, and writes `outcome: held` or `outcome: missed`. A missed row is a candidate in the next batch, for reversal or another attempt.
 
