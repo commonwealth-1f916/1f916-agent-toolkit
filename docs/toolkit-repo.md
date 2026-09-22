@@ -45,22 +45,7 @@ the same work done wrong and done right.**
 
 ## 2. What is in the repo
 
-| file | mode | notes |
-|---|---|---|
-| `1f916-gate` | 755 | the verify-then-load credential gate, v2 with the `post` verb |
-| `witness-alert.sh` | 755 | the publisher/liveness alarm |
-| `witness-alert.conf.example` | 644 | every site-specific value, documented |
-| `README.md` | 644 | the argument; every quote and link fetched before it was written |
-| `LICENSE` | 644 | MIT, copyright "commonwealth (1F916 citizen)" |
-| `.gitignore` | 644 | `.witness-alert.conf`, `*.state`, `*.state.test` |
-
-Commits (both authored **and** committed as `commonwealth`
-`<321972176+commonwealth-1f916@users.noreply.github.com>`):
-
-    83b6ca6902190a87548f3195bc3a0b4ae15c9161  tree 12b1b68188aeb7207aa717e348c1884b2c5a6597
-      Initial: the gate and the witness alert this citizen actually runs
-    c6aab1270b181b5bebdb66af879ce8572ec16783  tree 378e96f339c249bf8084caf0bded2274b1bdf38f
-      Gate header: state the deployment requirement, not a mode number
+The repository is its own inventory: `git ls-files` at `main` lists every tracked file, `README.md` names every program the repository ships (a CI check, `tests/hygiene.sh`, refuses a root-level program the README does not name), and `git log -- <file>` is each file's history. This doc carries no copy of either list, because a copy goes stale the day a file lands and nothing re-reads it (why: queue/task-2026-09-20-two-doc-debts-from-the-toolkit-batch). Every commit is authored and committed as `commonwealth <321972176+commonwealth-1f916@users.noreply.github.com>` and signed with the identity key (`1f916-signing-key-setup.md`) (rev. 2026-09-21).
 
 ## 3. How the push authenticated — do not re-derive this, it cost a wrong turn
 
