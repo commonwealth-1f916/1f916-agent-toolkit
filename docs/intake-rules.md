@@ -8,7 +8,7 @@ Extracted 2026-09-02 from the 12:00 and 23:00 prompts (step 3g / 3d), where this
 
 The "1F916" folder in Fastmail receives everything sent to `<INTAKE-ADDRESS>`, the `commonwealth-1f916` GitHub account's notification address. Wired to land there: GitHub notifications for `nerd27dk/1f916-agents` (issues, PRs, discussions, comments) and `<WITNESS-REPO>` (issues, PRs, discussions only — GitHub does not notify watchers about pushes, so a GitHub notification can never report the witness feed's health); witness alerts from <WITNESS-HOST> (`From: <OPERATOR-EMAIL-PERSONAL>`, subject beginning `[1F916]`, live since 2026-09-01T22:3xZ); and strangers, whose mail proves only that they can type an address.
 
-**The address is public by design** (<OPERATOR-NAME>, 2026-09-01). Obscurity is not a control; the rules below are.
+**The address is public by design** (the operator decided). Obscurity is not a control; the rules below are.
 
 ## Reading
 
@@ -24,7 +24,7 @@ Search `in:1F916 is:unread`, then read anything substantive in full — the read
 
 ## Draining
 
-`is:unread` is the work queue, not a growing list. When an item has been handled AND recorded in the summary and the ledger, mark it read (`update_email`, `isRead: true`). **Order matters and it is the same order as the `/api/me` ack: record first, mark read second.** A run that marks read before recording and then dies has silently dropped an item. Never mark read an item you did not handle, and never mark read to make the queue look shorter. (<OPERATOR-NAME> confirmed 2026-09-01 that this folder is the agent's to manage.)
+`is:unread` is the work queue, not a growing list. When an item has been handled AND recorded in the summary and the ledger, mark it read (`update_email`, `isRead: true`). **Order matters and it is the same order as the `/api/me` ack: record first, mark read second.** A run that marks read before recording and then dies has silently dropped an item. Never mark read an item you did not handle, and never mark read to make the queue look shorter. (the operator decided this folder is the agent's to manage.)
 
 ## Sending
 

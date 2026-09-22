@@ -2,7 +2,7 @@
 
 Status: `queue/task-2026-09-20-toolkit-batch-1-pinned` (rev. 2026-09-20).
 
-**Created 2026-09-02T02:3x–02:5xZ by the live Cowork session bridged to the Mac, at <OPERATOR-NAME>'s
+**Created 2026-09-02T02:3x–02:5xZ by the live Cowork session bridged to the Mac, at the operator's
 instruction ("I think we should publish the code we're using to repos on the commonwealth-1f916
 GitHub account... first, modify the code to abstract out any identifying information"), followed by
 his follow-up instruction that changes be made **out of a GitHub clone so `git status` shows what
@@ -16,7 +16,7 @@ The repo is now a **deployment source**, not an archive. Two machines symlink li
 this doc records the things a future session must not re-derive: what is deployed where, why the
 config was externalised rather than redacted, what was verified, and what is still owed.
 
-## 1. THE CENTRAL PROPERTY, and every rule below follows from it
+## 1. The central property, and every rule below follows from it
 
 **The deployed file and the repo file are BYTE-IDENTICAL, structurally — because the deployed path
 is a symlink into the clone, not a copy of it.**
@@ -62,7 +62,7 @@ Commits (both authored **and** committed as `commonwealth`
     c6aab1270b181b5bebdb66af879ce8572ec16783  tree 378e96f339c249bf8084caf0bded2274b1bdf38f
       Gate header: state the deployment requirement, not a mode number
 
-## 3. HOW THE PUSH AUTHENTICATED — do not re-derive this, it cost a wrong turn
+## 3. How the push authenticated — do not re-derive this, it cost a wrong turn
 
 **`gh` on the Mac holds TWO accounts in the keyring: `<OPERATOR-GITHUB-LOGIN>` (active) and `commonwealth-1f916`
 (inactive), both with `repo` scope.** *(Dated 2026-09-07: this line was undated for five days.
@@ -104,12 +104,12 @@ auth; all six digests matched the local ones.
   receives"* is byte-exact in the post body.
 - `c24243` is @holdfast on post #1002, and *"signing my seal preimage 50 times produces 1 distinct
   signature, byte-identical to the one already published"* is byte-exact.
-- ⚠ **A CREDIT WAS WRONG AND WAS DROPPED RATHER THAN GUESSED AT.** A prior session's note said to
+- ⚠ **A credit was wrong and was dropped rather than guessed at.** A prior session's note said to
   credit "@unspent c3044". **c3044 is @pi-agent, on post #484, about the constant-as-mechanism
   trap** — a different author on a different subject. There is no way to know which comment was
   meant, so the credit was removed. If the intended @unspent comment is identified later it can be
   added.
-- ⚠ **THE BOARD HAS NO PUBLIC `/thread/` OR `/post/` WEB URLS.** `https://1f916.ai/thread/827`,
+- ⚠ **The board has no public `/thread/` or `/post/` web URLs.** `https://1f916.ai/thread/827`,
   `/post/827` and `/p/827` all 404. Only `/api/post/:id` and `/api/comment/:id` answer 200. **Any
   future artifact that links to the board must use the `/api/` paths**, and the README says so.
 
@@ -121,7 +121,7 @@ credentials → exit 2 MISMATCH against the live `989856af…`, no authenticated
 **Alert acceptance on <WITNESS-HOST>, ending in a real delivery.** Forced exercise with
 `WITNESS_ALERT_TEST=1 WITNESS_STALE_HOURS=0` against the real repo produced
 `[1F916][TEST] witness #6 needs attention on <WITNESS-HOST>`, **received in the Fastmail `1F916` folder at
-2026-09-02T02:45:26Z** with the FORCED EXERCISE banner. The **real** state file was never written
+2026-09-02** with the FORCED EXERCISE banner. The **real** state file was never written
 (only `.state.test`, since removed); a normal run afterwards was silent and exited 0; and
 `WITNESS_ALERT_CONF=/nonexistent` still exits 3. **The crontab was not touched** — the symlink keeps
 `12 * * * * <RUN-HOME>/bin/witness-alert.sh` byte-identical, and `run-witness.sh` and the sealed
