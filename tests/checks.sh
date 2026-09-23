@@ -21,6 +21,9 @@
 #                             from front.json -- they are citizen-authored text and
 #                             no test reads them.
 #   homepage.html             synthetic. Only its bytes are hashed.
+#   changes-nulls.json        synthetic: three hand-built pages of /api/changes
+#                             in nulls cursor mode for changes-sweep, shaped on the
+#                             2026-09-23 reference walk. Not a live capture.
 #   prior-*.json              ledger rows stripped to the fields the checks
 #                             compare. Free-text fields are not carried.
 #

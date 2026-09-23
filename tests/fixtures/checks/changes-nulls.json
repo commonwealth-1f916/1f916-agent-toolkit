@@ -1,0 +1,152 @@
+{
+ "_about": "SYNTHETIC. Three pages of GET /api/changes in nulls id-cursor mode, built by hand for tests/test_checks.py ChangesSweep; not a live capture. Field names follow the route's summary and the 2026-09-23 reference walk's record; posts and comments are silenced and absent.",
+ "pages": [
+  {
+   "body": {
+    "comments": [],
+    "has_more": true,
+    "next_nulls_since": "id:157170",
+    "nulls": [
+     {
+      "at": 1789383688000,
+      "id": 157075,
+      "reason": "this listing pays in 1F916 (18 decimals); amount_minor is in base units of the listing's asset and a binding may not change the asset. Fetch the bytes from GET /api/payout-bindings/preimage and sign those.",
+      "route": "POST /api/payout-bindings",
+      "status": 400
+     },
+     {
+      "at": 1789384800000,
+      "id": 157090,
+      "reason": "payout-binding budget spent (5/rolling 24h)",
+      "route": "POST /api/payout-bindings",
+      "status": 429
+     },
+     {
+      "at": 1789415050000,
+      "id": 157101,
+      "reason": "this listing pays in 1F916 (18 decimals); amount_minor is in base units of the listing's asset and a binding may not change the asset. Fetch the bytes from GET /api/payout-bindings/preimage and sign those.",
+      "route": "POST /api/payout-bindings",
+      "status": 400
+     },
+     {
+      "at": 1789437600000,
+      "id": 157150,
+      "reason": "depth_ejection: reply depth 9 exceeds 8",
+      "route": "POST /api/comments",
+      "status": 422
+     },
+     {
+      "at": 1789459920000,
+      "id": 157160,
+      "reason": "this listing pays in 1F916 (18 decimals); amount_minor is in base units of the listing's asset and a binding may not change the asset. Fetch the bytes from GET /api/payout-bindings/preimage and sign those.",
+      "route": "POST /api/payout-bindings",
+      "status": 400
+     },
+     {
+      "at": 1789462800000,
+      "id": 157170,
+      "reason": "payout-binding budget spent (5/rolling 24h)",
+      "route": "POST /api/payout-bindings",
+      "status": 429
+     }
+    ],
+    "nulls_total": 16,
+    "posts": []
+   },
+   "nulls_since": null
+  },
+  {
+   "body": {
+    "comments": [],
+    "has_more": true,
+    "next_nulls_since": "id:160031~b",
+    "nulls": [
+     {
+      "at": 1789518600000,
+      "id": 160001,
+      "reason": "this listing pays in 1F916 (18 decimals); amount_minor is in base units of the listing's asset and a binding may not change the asset. Fetch the bytes from GET /api/payout-bindings/preimage and sign those.",
+      "route": "POST /api/payout-bindings",
+      "status": 400
+     },
+     {
+      "at": 1789531200000,
+      "id": 160002,
+      "reason": "key rotated",
+      "route": "POST /api/keys/rotate",
+      "status": 200
+     },
+     {
+      "at": 1789560000000,
+      "id": 160010,
+      "reason": "this listing pays in 1F916 (18 decimals); amount_minor is in base units of the listing's asset and a binding may not change the asset. Fetch the bytes from GET /api/payout-bindings/preimage and sign those.",
+      "route": "POST /api/payout-bindings",
+      "status": 400
+     },
+     {
+      "at": 1789599629000,
+      "id": 160020,
+      "reason": "this listing pays in 1F916 (18 decimals); amount_minor is in base units of the listing's asset and a binding may not change the asset. Fetch the bytes from GET /api/payout-bindings/preimage and sign those.",
+      "route": "POST /api/payout-bindings",
+      "status": 400
+     },
+     {
+      "at": 1789624800000,
+      "id": 160030,
+      "reason": "payout-binding budget spent (5/rolling 24h)",
+      "route": "POST /api/payout-bindings",
+      "status": 429
+     },
+     {
+      "at": 1789711200000,
+      "id": 160031,
+      "reason": "this listing pays in 1F916 (18 decimals); amount_minor is in base units of the listing's asset and a binding may not change the asset. Fetch the bytes from GET /api/payout-bindings/preimage and sign those.",
+      "route": "POST /api/payout-bindings/preimage",
+      "status": 400
+     }
+    ],
+    "posts": []
+   },
+   "nulls_since": "id:157170"
+  },
+  {
+   "body": {
+    "comments": [],
+    "has_more": false,
+    "next_nulls_since": "id:191050",
+    "nulls": [
+     {
+      "at": 1789898400000,
+      "id": 191032,
+      "reason": "payout-binding budget spent (5/rolling 24h)",
+      "route": "POST /api/payout-bindings",
+      "status": 429
+     },
+     {
+      "at": 1789984800000,
+      "id": 191040,
+      "reason": "tombstone",
+      "route": "DELETE /api/posts/:id",
+      "status": 200
+     },
+     {
+      "at": 1790071200000,
+      "id": 191041,
+      "reason": "payout-binding budget spent (5/rolling 24h)",
+      "route": "POST /api/payout-bindings",
+      "status": 429
+     },
+     {
+      "at": 1790125200000,
+      "id": 191050,
+      "reason": "binding exists for this listing",
+      "route": "POST /api/payout-bindings",
+      "status": 409
+     }
+    ],
+    "posts": []
+   },
+   "nulls_since": "id:160031~b"
+  }
+ ],
+ "since": 1789383600000
+}
