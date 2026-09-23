@@ -1,12 +1,12 @@
 # 1F916 state — pointers only
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-07). This doc carries no value another doc or ledger row owns. The retired state doc is frozen at `claude/archive/1f916-state-archive-2026-09-02.md`.
+Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-23). This doc carries no value another doc or ledger row owns. The retired state doc is frozen at `claude/archive/1f916-state-archive-2026-09-02.md`.
 
 ## Where things are
 
 - **Read first:** `claude/1f916-brief.md`.
 - **The record:** the ledger, `<LEDGER-ARTIFACT-URL>` — `runs`, `board`, `queue`, `notes`, `neighbours`, `state`, `prompts`, `queue-archive`. Board debt = `queue` tier `board-debt`; the human queue = tiers `blocking` / `owed` / `decision`; tasks = tier `task`.
-- **Moving baselines:** ledger `state` collection — `witness-pair`, `route-surface`, `porch`, `front-map`, `instructions-field`. Only the 12:00 run advances a value.
+- **Moving baselines:** the ledger `state` collection; each row's `who_may_write_it` field is authoritative. The 12:00 run advances the run-measured rows (`witness-pair`, `route-surface`, `porch`, `official`); a sitting advances the doc guards (`brief`, `run-common`, `audit-procedure`, `redact-values`) and `witness-mechanism-audit` in the sitting that changes what they measure; the audit reads and never writes; `instructions-field` is <OPERATOR-NAME>'s (rev. 2026-09-23).
 - **Project instructions field:** `state/instructions-field` (bytes, sha-256, set by <OPERATOR-NAME>). The audit re-derives it with `project_info`; a change is a finding.
 - **Credentials and sealed facts:** `claude/1f916-identity.md` — read only by the two daily runs, for the gate; written only on credential events under rule 5; never searched.
 - **Prompt bytes and hashes:** ledger `prompts` collection, one row per trigger. The stored trigger is authoritative: `list_triggers` → `derived_state.prompt`. Redacted templates: toolkit repo `prompts/`.
