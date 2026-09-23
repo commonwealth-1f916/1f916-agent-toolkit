@@ -902,6 +902,119 @@ class Cost(Base):
 
 
 # ---------------------------------------------------------------------------
+class Manifest(Base):
+    """`manifest` verifies a set of documents against the digests a file claims.
+
+    The property under test is that every way the set can disagree with the
+    manifest is a NAMED list, never a silent pass: a changed file, a file the
+    manifest names that is not there, a file that is there and unnamed, and a
+    manifest that names nothing at all.
+    """
+
+    def make_set(self, files):
+        d = os.path.join(self.tmp, "docs")
+        os.makedirs(d, exist_ok=True)
+        lines = []
+        for name, body in sorted(files.items()):
+            self.write(os.path.join("docs", name), body)
+            lines.append("%s  %s" % (sha(body.encode("utf-8")), name))
+        manifest = self.write(os.path.join("docs", "MANIFEST"), "\n".join(lines) + "\n")
+        return d, manifest
+
+    def test_dir_all_match_and_computed_equals_the_manifest(self):
+        d, m = self.make_set({"a.md": "alpha\n", "b.md": "beta\n"})
+        out = self.run_checks("manifest", "--manifest", m, "--dir", d)
+        self.assertTrue(out["all_match"])
+        self.assertEqual(out["matched"], ["a.md", "b.md"])
+        self.assertEqual((out["mismatched"], out["missing"], out["extra"]), ([], [], []))
+        self.assertEqual(out["entries"], 2)
+        self.assertEqual(out["mode"], "dir")
+        rendered = "".join("%s  %s\n" % (c["sha256"], c["path"]) for c in out["computed"])
+        with open(m) as fh:
+            self.assertEqual(rendered, fh.read())
+        self.assertEqual(out["manifest_sha256"], sha(rendered.encode("utf-8")))
+
+    def test_dir_changed_missing_and_extra_are_named_apart(self):
+        d, m = self.make_set({"a.md": "alpha\n", "b.md": "beta\n", "c.md": "gamma\n"})
+        self.write(os.path.join("docs", "b.md"), "beta changed\n")
+        os.remove(os.path.join(d, "c.md"))
+        self.write(os.path.join("docs", "d.md"), "unmanifested\n")
+        out = self.run_checks("manifest", "--manifest", m, "--dir", d)
+        self.assertFalse(out["all_match"])
+        self.assertEqual(out["matched"], ["a.md"])
+        self.assertEqual([x["path"] for x in out["mismatched"]], ["b.md"])
+        self.assertEqual(out["mismatched"][0]["expected"], sha(b"beta\n"))
+        self.assertEqual(out["mismatched"][0]["actual"], sha(b"beta changed\n"))
+        self.assertEqual(out["missing"], ["c.md"])
+        self.assertEqual(out["extra"], ["d.md"])
+
+    def test_dir_an_extra_file_alone_fails_all_match(self):
+        d, m = self.make_set({"a.md": "alpha\n"})
+        self.write(os.path.join("docs", "z.md"), "new\n")
+        out = self.run_checks("manifest", "--manifest", m, "--dir", d)
+        self.assertFalse(out["all_match"])
+        self.assertEqual(out["extra"], ["z.md"])
+        self.assertEqual(out["matched"], ["a.md"])
+
+    def test_dir_ignores_files_outside_the_suffix(self):
+        d, m = self.make_set({"a.md": "alpha\n"})
+        self.write(os.path.join("docs", "notes.txt"), "not a member\n")
+        out = self.run_checks("manifest", "--manifest", m, "--dir", d)
+        self.assertTrue(out["all_match"])
+        self.assertEqual(out["extra"], [])
+
+    def test_base_fetches_each_entry_and_404_is_missing(self):
+        d, m = self.make_set({"a.md": "alpha\n", "b.md": "beta\n"})
+        base = "https://raw.example/repo/abc123/docs"
+        self.serve(base + "/a.md", b"alpha\n")
+        self.serve(base + "/b.md", b"beta drifted\n")
+        out = self.run_checks("manifest", "--manifest", m, "--base", base + "/")
+        self.assertFalse(out["all_match"])
+        self.assertEqual(out["mode"], "base")
+        self.assertEqual(out["matched"], ["a.md"])
+        self.assertEqual([x["path"] for x in out["mismatched"]], ["b.md"])
+        self.assertNotIn("computed", out)
+        urls = [u["url"] for u in out["inputs"]["urls"]]
+        self.assertEqual(urls, [base + "/a.md", base + "/b.md"])
+
+    def test_base_a_fetch_that_fails_is_could_not_run(self):
+        d, m = self.make_set({"a.md": "alpha\n"})
+        out = self.run_checks("manifest", "--manifest", m, "--base", "https://raw.example/x", want=3)
+        self.assertNotIn("all_match", out)
+        self.assertIn("fetch failed", out["reason"])
+
+    def test_empty_manifest_is_could_not_run(self):
+        d, m = self.make_set({"a.md": "alpha\n"})
+        self.write(os.path.join("docs", "MANIFEST"), "# nothing here\n\n")
+        out = self.run_checks("manifest", "--manifest", m, "--dir", d, want=3)
+        self.assertNotIn("all_match", out)
+        self.assertIn("no entries", out["reason"])
+
+    def test_malformed_duplicate_and_escaping_lines_are_could_not_run(self):
+        d, m = self.make_set({"a.md": "alpha\n"})
+        good = "%s  a.md\n" % sha(b"alpha\n")
+        for bad, needle in (
+            ("abc  a.md\n", "not `<sha256>  <path>`"),
+            (good + good, "twice"),
+            ("%s  ../a.md\n" % sha(b"alpha\n"), "outside the set"),
+            ("%s  /etc/a.md\n" % sha(b"alpha\n"), "outside the set"),
+        ):
+            self.write(os.path.join("docs", "MANIFEST"), bad)
+            out = self.run_checks("manifest", "--manifest", m, "--dir", d, want=3)
+            self.assertIn(needle, out["reason"])
+
+    def test_missing_manifest_file_is_could_not_run(self):
+        d, m = self.make_set({"a.md": "alpha\n"})
+        out = self.run_checks("manifest", "--manifest", os.path.join(self.tmp, "nope"), "--dir", d, want=3)
+        self.assertIn("unreadable", out["reason"])
+
+    def test_dir_and_base_together_or_neither_is_a_usage_error(self):
+        d, m = self.make_set({"a.md": "alpha\n"})
+        self.run_checks("manifest", "--manifest", m, "--dir", d, "--base", "https://x", want=64)
+        self.run_checks("manifest", "--manifest", m, want=64)
+
+
+# ---------------------------------------------------------------------------
 class All(Base):
     """`all` runs several checks in one process.
 

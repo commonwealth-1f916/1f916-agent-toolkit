@@ -36,7 +36,7 @@ jobs:
       # move it: read the tag again and change the sha here, deliberately.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: shellcheck the test scripts at full severity
-        run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh tests/checks.sh
+        run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh tests/checks.sh tests/manifest.sh
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
@@ -70,6 +70,12 @@ jobs:
         run: sh tests/hygiene.sh --self-test
       - name: recorded modes and no site-specific values
         run: sh tests/hygiene.sh
+      - name: the manifest check can go red -- prove it before trusting it green
+        run: sh tests/manifest.sh --self-test
+      - name: docs/MANIFEST agrees with docs/
+        # A doc edited without its manifest line, or added and not named, is
+        # the drift a run's manifest check would meet at the pin. Caught here.
+        run: sh tests/manifest.sh
 
   checks:
     # 1f916-checks is the arithmetic the scheduled runs used to re-derive from
