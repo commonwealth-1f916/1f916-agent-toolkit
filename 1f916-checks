@@ -438,6 +438,157 @@ def cmd_surface(ctx, args):
 
 
 # ---------------------------------------------------------------------------
+# official -- GET /api/official, the society's own statement of what is its
+
+OFFICIAL_URL = REGISTRY + "/api/official"
+# Served fresh on every request; never part of a comparison.
+OFFICIAL_VOLATILE = ("now", "now_utc")
+# FAIL CLOSED. This document is where the society names who speaks for it,
+# which token and treasury are its own and where money may be sent -- the
+# fields an impersonation would want to edit -- and a category it adds
+# tomorrow is as likely to be one of those as not. So nothing is listed as
+# watched: every top-level key alerts when it moves, including keys that do
+# not exist yet, EXCEPT the few that move with every deploy, which are named
+# here, reported as churn and alert nothing. Adding a key to this list is the
+# decision to stop being told about it.
+OFFICIAL_CHURN = ("code", "triggers", "triggers_expected", "triggers_note", "rate_limit")
+
+
+def short_digest(obj):
+    return sha256_hex(canonical_json(obj).encode("utf-8"))[:16]
+
+
+def _entries_by_url(value, what):
+    if value is None:
+        return {}
+    if not isinstance(value, list):
+        raise CouldNotRun("official payload: %s is not a list" % what)
+    out = {}
+    for e in value:
+        if not isinstance(e, dict) or not isinstance(e.get("url"), str):
+            raise CouldNotRun("official payload: a %s entry has no url" % what)
+        if e["url"] in out:
+            raise CouldNotRun("official payload: duplicate %s url %s" % (what, e["url"]))
+        out[e["url"]] = e
+    return out
+
+
+def cmd_official(ctx, args):
+    payload = ctx.fetch_json(OFFICIAL_URL)
+    if not isinstance(payload, dict) or not payload:
+        raise CouldNotRun("official payload is not a JSON object")
+    rest = dict((k, v) for k, v in payload.items() if k not in OFFICIAL_VOLATILE)
+    windows = _entries_by_url(rest.get("known_windows"), "known_windows")
+    ecosystem = _entries_by_url(rest.get("ecosystem"), "ecosystem")
+    missing_triggers = rest.get("triggers_missing")
+    if missing_triggers is not None and not isinstance(missing_triggers, list):
+        raise CouldNotRun("official payload: triggers_missing is not a list")
+    code = rest.get("code") if isinstance(rest.get("code"), dict) else {}
+    out = {
+        "doc_sha256": sha256_hex(canonical_json(rest).encode("utf-8")),
+        "key_digests": dict((k, short_digest(v)) for k, v in rest.items()),
+        "top_level_keys": sorted(rest),
+        "window_digests": dict((u, short_digest(e)) for u, e in windows.items()),
+        "window_urls": sorted(windows),
+        "ecosystem_urls": sorted(ecosystem),
+        "triggers_missing": missing_triggers,
+        "code_commit": code.get("commit"),
+        "churn_keys": list(OFFICIAL_CHURN),
+    }
+    for k in ("prior", "changed", "keys_added", "keys_removed", "keys_changed",
+              "watched_changed", "churn", "windows_added", "windows_removed",
+              "windows_changed", "ecosystem_added", "ecosystem_removed"):
+        out[k] = None
+    alerts = []
+    not_compared = []
+    if missing_triggers:
+        alerts.append("triggers_missing is not empty: %s" % ", ".join(map(str, missing_triggers)))
+    prior = ctx.read_row(args.prior)
+    if prior is None:
+        out["baseline_missing"] = ["prior"]
+        not_compared = ["everything: no prior row"]
+    else:
+        missing = []
+        out["prior"] = {"doc_sha256": prior.get("doc_sha256"), "taken": prior.get("taken"),
+                        "code_commit": prior.get("code_commit")}
+        if isinstance(prior.get("doc_sha256"), str):
+            out["changed"] = prior["doc_sha256"] != out["doc_sha256"]
+        else:
+            missing.append("doc_sha256")
+        p_keys = prior.get("top_level_keys")
+        if isinstance(p_keys, list):
+            out["keys_added"] = sorted(set(rest) - set(p_keys))
+            out["keys_removed"] = sorted(set(p_keys) - set(rest))
+            for k in out["keys_added"]:
+                alerts.append("top-level key added: %s" % k)
+            for k in out["keys_removed"]:
+                alerts.append("top-level key removed: %s" % k)
+        else:
+            missing.append("top_level_keys")
+            not_compared.append("top-level key set")
+        p_digests = prior.get("key_digests")
+        if isinstance(p_digests, dict):
+            moved = sorted(k for k in rest if k in p_digests
+                           and p_digests[k] != out["key_digests"][k])
+            out["keys_changed"] = moved
+            out["watched_changed"] = [k for k in moved if k not in OFFICIAL_CHURN]
+            out["churn"] = [k for k in moved if k in OFFICIAL_CHURN]
+            for k in out["watched_changed"]:
+                alerts.append("watched field changed: %s" % k)
+        else:
+            missing.append("key_digests")
+            not_compared.append("every field outside the churn list (%s)" % ", ".join(OFFICIAL_CHURN))
+        p_windows = prior.get("window_digests")
+        if isinstance(p_windows, dict):
+            out["windows_added"] = sorted(set(windows) - set(p_windows))
+            out["windows_removed"] = sorted(set(p_windows) - set(windows))
+            out["windows_changed"] = sorted(u for u in windows if u in p_windows
+                                            and p_windows[u] != out["window_digests"][u])
+            for u in out["windows_added"]:
+                alerts.append("known window added: %s" % u)
+            for u in out["windows_removed"]:
+                alerts.append("known window removed: %s" % u)
+        else:
+            missing.append("window_digests")
+            not_compared.append("known_windows")
+        p_eco = prior.get("ecosystem_urls")
+        if isinstance(p_eco, list):
+            out["ecosystem_added"] = sorted(set(ecosystem) - set(p_eco))
+            out["ecosystem_removed"] = sorted(set(p_eco) - set(ecosystem))
+            # A listed service has citizens sign its challenges with their bound
+            # key: a new one is exactly where an impostor would want to appear.
+            for u in out["ecosystem_added"]:
+                alerts.append("ecosystem service added: %s" % u)
+            for u in out["ecosystem_removed"]:
+                alerts.append("ecosystem service removed: %s" % u)
+        else:
+            missing.append("ecosystem_urls")
+            not_compared.append("ecosystem service list")
+        out["baseline_missing"] = missing
+    # An empty alert list is only a clean verdict when nothing went uncompared.
+    out["alerts"] = alerts
+    out["not_compared"] = not_compared
+    out["complete"] = not not_compared
+    if args.emit_baseline:
+        out["baseline"] = {
+            "doc_sha256": out["doc_sha256"],
+            "key_digests": out["key_digests"],
+            "top_level_keys": out["top_level_keys"],
+            "window_digests": out["window_digests"],
+            "known_windows": [dict((f, windows[u].get(f)) for f in ("url", "name", "built_by", "source"))
+                              for u in sorted(windows)],
+            "ecosystem_urls": out["ecosystem_urls"],
+            "triggers_missing": missing_triggers,
+            "code_commit": out["code_commit"],
+            "method": ("GET %s; drop %s; doc_sha256 is sha-256 of the canonical JSON of the rest; "
+                       "key_digests and window_digests are the first 16 hex of the same recipe "
+                       "per top-level key and per known_windows entry keyed by url; "
+                       "1f916-checks official" % (OFFICIAL_URL, " and ".join(OFFICIAL_VOLATILE))),
+        }
+    return out
+
+
+# ---------------------------------------------------------------------------
 # witness
 
 def cmd_witness(ctx, args):
@@ -2192,6 +2343,10 @@ def build_parser():
     s.add_argument("--prior")
     s.add_argument("--emit-baseline", action="store_true")
 
+    s = sub.add_parser("official", parents=[common_parser()])
+    s.add_argument("--prior")
+    s.add_argument("--emit-baseline", action="store_true")
+
     s = sub.add_parser("witness", parents=[common_parser()])
     s.add_argument("--prior")
     s.add_argument("--url", required=True, help="raw URL of countersignatures.jsonl")
@@ -2343,6 +2498,7 @@ COMMANDS = {
     "prompt-integrity": cmd_prompt_integrity,
     "changes-sweep": cmd_changes_sweep,
     "runs-row": cmd_runs_row,
+    "official": cmd_official,
 }
 
 

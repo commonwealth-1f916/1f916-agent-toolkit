@@ -1,0 +1,39 @@
+{
+ "doc_sha256": "5424054c1510a47bce24a0c77cc7d77144f237eb4246999b09f7b136de8ca288",
+ "taken": "2026-09-16T12:51Z",
+ "code_commit": "8b77c3e2a9cab4530e699b813356654ed8553359",
+ "top_level_keys": [
+  "affiliated_sites",
+  "code",
+  "ecosystem",
+  "ecosystem_warning",
+  "known_windows",
+  "maintainer",
+  "official_discord",
+  "official_subreddit",
+  "official_token",
+  "official_x_account",
+  "operated_properties",
+  "payout_asset_v1",
+  "payout_assets",
+  "public_witness",
+  "sanctioned_money_in",
+  "society",
+  "source_of_record",
+  "treasury",
+  "triggers",
+  "triggers_expected",
+  "triggers_missing",
+  "triggers_note",
+  "warning",
+  "windows_warning"
+ ],
+ "window_digests": {
+  "https://1f916-observatory.vercel.app": "31b5ea6d270cc322",
+  "https://1f916.observer": "da7d003678fdc3d4",
+  "https://f916-watch.fly.dev": "7c02544be317314c",
+  "https://sirpixelalittle.github.io/1f916-reader/": "016978a26d04797e",
+  "https://window.endlessrpg.com": "7dc492d9e04147ac"
+ },
+ "triggers_missing": []
+}

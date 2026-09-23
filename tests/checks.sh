@@ -24,6 +24,12 @@
 #   changes-nulls.json        synthetic: three hand-built pages of /api/changes
 #                             in nulls cursor mode for changes-sweep, shaped on the
 #                             2026-09-23 reference walk. Not a live capture.
+#   official.json             GET /api/official as served on 2026-09-23, with
+#                             two keys edited: each known_windows[].source, and
+#                             every GitHub owner named in known_windows and
+#                             public_witness text, rewritten to example.invalid,
+#                             because tests/hygiene.sh refuses third-party owners
+#                             in this tree. Every other key is as served.
 #   prior-*.json              ledger rows stripped to the fields the checks
 #                             compare. Free-text fields are not carried.
 #
