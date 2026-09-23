@@ -1474,6 +1474,278 @@ class PromptIntegrity(Base):
 
 
 # ---------------------------------------------------------------------------
+class ChangesSweep(Base):
+    """changes-sweep against tests/fixtures/checks/changes-nulls.json.
+
+    The fixture is SYNTHETIC -- three hand-built pages, not a live capture --
+    and the literals below are counted by hand from it, not by the code under
+    test. PB_DECIMALS is the shape of the 2026-09-23 reference question: the
+    decimals refusals on POST /api/payout-bindings either side of listing
+    #23's expiry.
+    """
+
+    ROUTE = "POST /api/payout-bindings"
+    CUTOFF = "2026-09-16T23:59:00Z"
+
+    def setUp(self):
+        Base.setUp(self)
+        self.fx = fixture_json("changes-nulls.json")
+        self.urls = []
+        for page in self.fx["pages"]:
+            url = self.page_url(page["nulls_since"])
+            self.urls.append(url)
+            self.serve(url, page["body"])
+
+    def page_url(self, cursor):
+        url = ("https://1f916.ai/api/changes?since=%d&posts_since=done&comments_since=done"
+               % self.fx["since"])
+        if cursor is not None:
+            url += "&nulls_since=" + cursor
+        return url
+
+    def offline_path(self, url):
+        return os.path.join(self.offline, sha(url.encode("utf-8")))
+
+    def sweep(self, *extra, **kw):
+        args = ["changes-sweep", "--since", str(self.fx["since"]), "--route", self.ROUTE,
+                "--pace", "0", "--backoff", "0"] + list(extra)
+        return self.run_checks(*args, **kw)
+
+    def decimals(self, *extra, **kw):
+        return self.sweep("--status", "400", "--reason-prefix", "this listing pays",
+                          "--cutoff", self.CUTOFF, *extra, **kw)
+
+    def assert_reference(self, out):
+        self.assertEqual(out["pages"], 3)
+        self.assertEqual(out["rows_read"], 16)
+        self.assertEqual(out["first_page_nulls_total"], 16)
+        self.assertIs(out["complete"], True)
+        self.assertEqual(out["counts_are"], "totals")
+        self.assertEqual(out["matched"], 6)
+        self.assertEqual(out["by_day_utc"], {"2026-09-14": 2, "2026-09-15": 1, "2026-09-16": 3})
+        self.assertEqual(out["first_ts"], "2026-09-14T11:01:28Z")
+        self.assertEqual(out["last_ts"], "2026-09-16T23:00:29Z")
+        self.assertEqual((out["before_cutoff"], out["after_cutoff"]), (6, 0))
+        self.assertEqual(list(out["reasons"].values()), [6])
+        self.assertEqual(len(list(out["reasons"])[0]), 80)
+        self.assertIsNone(out["stopped_early"])
+
+    def test_reference_question_reproduces(self):
+        out = self.decimals()
+        self.assert_reference(out)
+        self.assertEqual(out["http429"], 0)
+
+    def test_cursor_is_carried_verbatim_and_never_reinitialised(self):
+        out = self.decimals()
+        # Exactly the three served URLs, in order: page 2 carries page 1's
+        # next_nulls_since and page 3 carries page 2's opaque "id:160031~b",
+        # never a cursor rebuilt from a row id and never a fresh ?since walk.
+        self.assertEqual([u["url"] for u in out["inputs"]["urls"]], self.urls)
+        self.assertEqual(out["cursor_end"], "id:160031~b")
+
+    def test_has_more_true_at_the_end_is_a_floor(self):
+        os.remove(self.offline_path(self.urls[2]))
+        out = self.decimals(status="degraded")
+        self.assertIs(out["complete"], False)
+        self.assertEqual(out["counts_are"], "floors")
+        self.assertEqual(out["pages"], 2)
+        self.assertIs(out["has_more_at_end"], True)
+        self.assertIn("page 3", out["stopped_early"])
+        self.assertIn("page 3", out["reason"])
+
+    def test_an_empty_page_with_has_more_true_is_a_floor(self):
+        # nulls_total lowered to the rows read, so has_more is the ONLY thing
+        # standing between this walk and "totals".
+        body = copy.deepcopy(self.fx["pages"][0]["body"])
+        body["nulls_total"] = 12
+        self.serve(self.urls[0], body)
+        self.serve(self.urls[2], {"has_more": True, "next_nulls_since": "id:191050", "nulls": []})
+        out = self.decimals(status="degraded")
+        self.assertEqual(out["rows_read"], 12)
+        self.assertIs(out["complete"], False)
+        self.assertEqual(out["counts_are"], "floors")
+        self.assertIsNone(out["stopped_early"])
+        self.assertIn("has_more true", out["reason"])
+
+    def test_rows_short_of_nulls_total_is_a_floor(self):
+        body = copy.deepcopy(self.fx["pages"][0]["body"])
+        body["nulls_total"] = 17
+        self.serve(self.urls[0], body)
+        out = self.decimals(status="degraded")
+        self.assertIs(out["complete"], False)
+        self.assertEqual(out["counts_are"], "floors")
+        self.assertIn("nulls_total", out["reason"])
+
+    def test_a_429_page_is_retried_and_counted_not_skipped(self):
+        with open(self.offline_path(self.urls[1]) + ".status", "w") as fh:
+            fh.write("429 0\n429\n")
+        out = self.decimals()
+        self.assertEqual(out["http429"], 2)
+        self.assert_reference(out)
+        self.assertEqual([u["status"] for u in out["inputs"]["urls"]], [200, 429, 429, 200, 200])
+
+    def test_429_until_the_retries_run_out_stops_early(self):
+        with open(self.offline_path(self.urls[1]) + ".status", "w") as fh:
+            fh.write("429 0\n429 0\n")
+        out = self.decimals("--max-429", "1", status="degraded")
+        self.assertEqual(out["http429"], 2)
+        self.assertIn("429", out["stopped_early"])
+        self.assertEqual(out["counts_are"], "floors")
+
+    def test_retry_after_is_honoured_then_backoff_doubles(self):
+        mod = load_module()
+        with open(self.offline_path(self.urls[1]) + ".status", "w") as fh:
+            fh.write("429 7\n429\n429\n")
+        slept = []
+        real_sleep = mod.time.sleep
+        mod.time.sleep = slept.append
+        try:
+            import io
+            buf = io.StringIO()
+            real_stdout, sys.stdout = sys.stdout, buf
+            try:
+                code = mod.main(["changes-sweep", "--since", str(self.fx["since"]),
+                                 "--route", self.ROUTE, "--offline-dir", self.offline])
+            finally:
+                sys.stdout = real_stdout
+        finally:
+            mod.time.sleep = real_sleep
+        self.assertEqual(code, 0)
+        # 1.5 s pace before page 2; Retry-After 7; no header -> 2.0 * 2**1, 2.0 * 2**2;
+        # 1.5 s pace before page 3.
+        self.assertEqual(slept, [1.5, 7.0, 4.0, 8.0, 1.5])
+        self.assertEqual(json.loads(buf.getvalue())["http429"], 3)
+
+    def test_by_day_and_cutoff_split_sum_to_matched(self):
+        out = self.sweep("--cutoff", self.CUTOFF)
+        self.assertEqual(out["matched"], 12)
+        self.assertEqual(sum(out["by_day_utc"].values()), out["matched"])
+        self.assertEqual(out["before_cutoff"] + out["after_cutoff"], out["matched"])
+        self.assertEqual((out["before_cutoff"], out["after_cutoff"]), (8, 4))
+        self.assertEqual(sum(out["reasons"].values()), out["matched"])
+
+    def test_no_cutoff_means_no_split(self):
+        out = self.sweep()
+        self.assertIsNone(out["before_cutoff"])
+        self.assertIsNone(out["after_cutoff"])
+
+    def test_an_empty_first_page_could_not_run(self):
+        self.serve(self.urls[0], {"has_more": False, "nulls_total": 0, "nulls": []})
+        out = self.decimals(want=3)
+        self.assertIn("no nulls rows", out["reason"])
+        self.assertNotIn("matched", out)
+
+    def test_a_first_page_that_fails_could_not_run(self):
+        os.remove(self.offline_path(self.urls[0]))
+        self.decimals(want=3)
+
+    def test_route_is_required(self):
+        self.run_checks("changes-sweep", "--since", "0", want=64)
+        self.run_checks("changes-sweep", "--since", "0", "--route", " ", want=64)
+
+    def test_a_row_of_unknown_shape_could_not_run(self):
+        body = copy.deepcopy(self.fx["pages"][0]["body"])
+        body["nulls"][0] = {"id": 1, "what": "no route here"}
+        self.serve(self.urls[0], body)
+        out = self.decimals(want=3)
+        self.assertIn("no timestamp", out["reason"])
+
+    def test_never_prints_a_row_body(self):
+        cmd = [sys.executable, SCRIPT, "changes-sweep", "--since", str(self.fx["since"]),
+               "--route", self.ROUTE, "--pace", "0", "--offline-dir", self.offline]
+        stdout = subprocess.run(cmd, stdout=subprocess.PIPE, check=True).stdout.decode()
+        for page in self.fx["pages"]:
+            for row in page["body"]["nulls"]:
+                self.assertNotIn(row["reason"], stdout if len(row["reason"]) > 80 else "")
+                self.assertNotIn('"id": %d' % row["id"], stdout)
+
+    def test_out_holds_exactly_the_matched_rows(self):
+        path = os.path.join(self.tmp, "rows.jsonl")
+        out = self.decimals("--out", path)
+        with open(path) as fh:
+            rows = [json.loads(line) for line in fh]
+        self.assertEqual(len(rows), out["matched"])
+        self.assertEqual([r["id"] for r in rows], [157075, 157101, 157160, 160001, 160010, 160020])
+
+    def test_a_dead_walk_resumes_from_its_state(self):
+        state = os.path.join(self.tmp, "state.json")
+        path = os.path.join(self.tmp, "rows.jsonl")
+        page3 = self.offline_path(self.urls[2])
+        os.rename(page3, page3 + ".held")
+        first = self.decimals("--state", state, "--out", path, status="degraded")
+        self.assertEqual(first["pages"], 2)
+        # Bytes a dying walk appended after its last committed page are dropped.
+        with open(path, "a") as fh:
+            fh.write('{"half": "a page"}\n')
+        os.rename(page3 + ".held", page3)
+        os.remove(self.offline_path(self.urls[0]))
+        os.remove(self.offline_path(self.urls[1]))
+        out = self.decimals("--state", state, "--out", path)
+        self.assert_reference(out)
+        fetched = [u["url"] for u in out["inputs"]["urls"]]
+        self.assertEqual(fetched, [self.urls[2]])
+        with open(path) as fh:
+            self.assertEqual(len(fh.read().splitlines()), 6)
+
+    def test_a_state_from_another_walk_is_refused(self):
+        state = os.path.join(self.tmp, "state.json")
+        self.decimals("--state", state)
+        out = self.sweep("--state", state, want=3)
+        self.assertIn("different walk", out["reason"])
+
+
+class ChangesSweepRealPage(Base):
+    """changes-sweep against a LIVE capture: the first page of the 2026-09-23
+    reference walk, fetched anonymously on 2026-09-23 (sha-256
+    1f564ee4d84d9e3f31b817fc7d8f25ebc93cf38480586f820a476ad2ce4e20e3, 66,483
+    bytes). The synthetic fixture proves the arithmetic; this one proves the
+    parser against what the registry actually serves -- created_at in ms, the
+    `route` string, the note fields, a 200-row saturated page with
+    nulls_total 60,662 and has_more true. One page only, so every count is a
+    floor. The literals are counted by hand from the file.
+    """
+
+    SINCE = 1789383600000
+    URL = ("https://1f916.ai/api/changes?since=%d&posts_since=done&comments_since=done"
+           % SINCE)
+    ROUTE = "POST /api/payout-bindings"
+
+    def setUp(self):
+        Base.setUp(self)
+        self.serve(self.URL, fixture_bytes("changes-nulls-real-page1.json"))
+
+    def sweep(self, *extra, **kw):
+        return self.run_checks("changes-sweep", "--since", str(self.SINCE), "--route", self.ROUTE,
+                               "--pace", "0", "--backoff", "0", "--max-pages", "1",
+                               *extra, **kw)
+
+    def test_the_served_shape_parses_and_one_page_is_a_floor(self):
+        out = self.sweep("--status", "400", "--reason-prefix", "this listing pays",
+                         status="degraded")
+        self.assertEqual(out["pages"], 1)
+        self.assertEqual(out["rows_read"], 200)
+        self.assertEqual(out["first_page_nulls_total"], 60662)
+        self.assertIs(out["has_more_at_end"], True)
+        self.assertIs(out["complete"], False)
+        self.assertEqual(out["counts_are"], "floors")
+        self.assertEqual(out["matched"], 33)
+        self.assertEqual(out["by_day_utc"], {"2026-09-14": 33})
+        self.assertEqual(out["cursor_end"], "id:157272")
+        # Row 157146 is a depth_ejection with route null: walked past, counted.
+        self.assertEqual(out["skipped_by_kind"], {"depth_ejection": 1})
+        self.assertIn("max-pages 1", out["stopped_early"])
+        self.assertEqual([u["url"] for u in out["inputs"]["urls"]], [self.URL])
+
+    def test_all_statuses_on_the_route(self):
+        out = self.sweep(status="degraded")
+        self.assertEqual(out["matched"], 40)
+        self.assertEqual(sum(out["reasons"].values()), 40)
+
+    def test_a_cutoff_before_the_page_puts_every_row_after_it(self):
+        out = self.sweep("--cutoff", "2026-09-14T00:00:00Z", status="degraded")
+        self.assertEqual((out["before_cutoff"], out["after_cutoff"]), (0, 40))
+
+
 class SubparserDefaults(unittest.TestCase):
     """A default set on one subcommand stays on that subcommand.
 
