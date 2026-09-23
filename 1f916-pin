@@ -1,0 +1,545 @@
+#!/usr/bin/env python3
+"""1f916-pin -- verify a signed pin file before trusting what it names.
+
+The scheduled runs fetch four programs at a PINNED commit and compare each
+against a sha-256 before executing anything. Today the commit and the digests
+are copied into every prompt that fetches them, because a stored prompt is the
+one channel an unattended run cannot write. This program is the other half of
+a proposal to keep that value in ONE place instead: a file, `pin/PIN`, beside a
+detached SSH signature, `pin/PIN.sig`. A caller that holds only a key
+fingerprint (which changes on key rotation and nowhere else) can then check
+the file, and only after that believe the commit and the digests it names.
+
+The control is the KEY, not the file or where it is stored. Anyone who can
+write the file can replace it; only a holder of the signing key can make a
+replacement verify. So the signing key must be one the unattended runs never
+hold. This program cannot check that, and says so here rather than let a
+PASS read as more than it is: it proves the file was signed by the key whose
+fingerprint the caller supplied, and nothing about who held that key.
+
+What it refuses to do, by construction:
+  - touch the network. The caller fetches the file, the signature and the key
+    and passes them in as files.
+  - trust a key it was not told to trust. The key inside the signature must
+    equal the trusted key, and the trusted key's fingerprint must equal the
+    one on the command line. Either key source works: the registry's own key
+    document (GET /api/keys/<handle>) or an OpenSSH public key line.
+  - print what it has not verified. The pin's contents appear in the output
+    only when the verdict is PASS.
+  - depend on anything outside the standard library. Ed25519 verification is
+    done here, in pure python, from RFC 8032; `self-test` checks it against the
+    RFC's own test vectors and requires it to reject a tampered one.
+
+The file format, strict: LF line endings, a final newline, and exactly
+
+    1f916-pin v1
+    serial <positive integer>
+    commit <40 lowercase hex>
+    tag <git tag name>
+    file <name> <64 lowercase hex>        (one or more, sorted by name, unique)
+
+The signature is `ssh-keygen -Y sign -n 1f916-pin` over those bytes. The
+namespace is not `git`, so a signature made for a commit or a tag can never be
+replayed as a pin signature, nor the other way round.
+
+Usage:
+  1f916-pin verify --pin PIN --sig PIN.sig (--key-json F | --pubkey F)
+                   --fingerprint SHA256:... [--dir DIR] [--min-serial N]
+      --dir DIR     also hash DIR/<name> for every `file` line and compare
+      --min-serial  FAIL a pin whose serial is lower (a rollback)
+  1f916-pin fingerprint (--key-json F | --pubkey F)
+  1f916-pin self-test
+
+Prints ONE JSON object on stdout. Exit codes: 0 PASS; 2 FAIL (the check ran
+and the answer is no); 3 COULD_NOT_RUN (an input was missing or unreadable, so
+nothing was decided); 64 usage error. 2 and 3 are never folded together.
+"""
+
+import base64
+import hashlib
+import json
+import re
+import struct
+import sys
+
+NAMESPACE = b"1f916-pin"
+MAGIC = b"SSHSIG"
+
+# --------------------------------------------------------------------------
+# Ed25519 verification, RFC 8032 section 5.1.7, pure python.
+
+_P = 2 ** 255 - 19
+_L = 2 ** 252 + 27742317777372353535851937790883648493
+_D = -121665 * pow(121666, _P - 2, _P) % _P
+_SQRT_M1 = pow(2, (_P - 1) // 4, _P)
+
+
+def _inv(x):
+    return pow(x, _P - 2, _P)
+
+
+def _recover_x(y, sign):
+    if y >= _P:
+        return None
+    x2 = (y * y - 1) * _inv(_D * y * y + 1) % _P
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (_P + 3) // 8, _P)
+    if (x * x - x2) % _P != 0:
+        x = x * _SQRT_M1 % _P
+    if (x * x - x2) % _P != 0:
+        return None
+    if (x & 1) != sign:
+        x = _P - x
+    return x
+
+
+_GY = 4 * _inv(5) % _P
+_GX = _recover_x(_GY, 0)
+_G = (_GX, _GY, 1, _GX * _GY % _P)
+
+
+def _add(p, q):
+    a = (p[1] - p[0]) * (q[1] - q[0]) % _P
+    b = (p[1] + p[0]) * (q[1] + q[0]) % _P
+    c = 2 * p[3] * q[3] * _D % _P
+    d = 2 * p[2] * q[2] % _P
+    e, f, g, h = b - a, d - c, d + c, b + a
+    return (e * f % _P, g * h % _P, f * g % _P, e * h % _P)
+
+
+def _mul(s, p):
+    q = (0, 1, 1, 0)
+    while s > 0:
+        if s & 1:
+            q = _add(q, p)
+        p = _add(p, p)
+        s >>= 1
+    return q
+
+
+def _equal(p, q):
+    return ((p[0] * q[2] - q[0] * p[2]) % _P == 0
+            and (p[1] * q[2] - q[1] * p[2]) % _P == 0)
+
+
+def _decompress(s):
+    if len(s) != 32:
+        return None
+    y = int.from_bytes(s, "little")
+    sign = y >> 255
+    y &= (1 << 255) - 1
+    x = _recover_x(y, sign)
+    if x is None:
+        return None
+    return (x, y, 1, x * y % _P)
+
+
+def ed25519_verify(public, message, signature):
+    """True only for a valid signature; any malformed input is False."""
+    if len(public) != 32 or len(signature) != 64:
+        return False
+    a = _decompress(public)
+    if a is None:
+        return False
+    r = _decompress(signature[:32])
+    if r is None:
+        return False
+    s = int.from_bytes(signature[32:], "little")
+    if s >= _L:
+        return False
+    h = int.from_bytes(hashlib.sha512(signature[:32] + public + message).digest(),
+                       "little") % _L
+    return _equal(_mul(s, _G), _add(r, _mul(h, a)))
+
+
+# --------------------------------------------------------------------------
+# SSH wire format, keys and SSHSIG.
+
+class Refused(Exception):
+    """The check ran and the answer is no (exit 2)."""
+
+
+class CouldNotRun(Exception):
+    """An input was missing or unusable; nothing was decided (exit 3)."""
+
+
+def _string(b):
+    return struct.pack(">I", len(b)) + b
+
+
+class _Reader:
+    def __init__(self, data):
+        self.data = data
+        self.pos = 0
+
+    def take(self, n):
+        if self.pos + n > len(self.data):
+            raise Refused("signature blob is truncated")
+        out = self.data[self.pos:self.pos + n]
+        self.pos += n
+        return out
+
+    def uint32(self):
+        return struct.unpack(">I", self.take(4))[0]
+
+    def string(self):
+        return self.take(self.uint32())
+
+    def done(self):
+        return self.pos == len(self.data)
+
+
+def key_blob(raw32):
+    return _string(b"ssh-ed25519") + _string(raw32)
+
+
+def fingerprint(raw32):
+    digest = hashlib.sha256(key_blob(raw32)).digest()
+    return "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
+
+
+def _read_bytes(path, what):
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as exc:
+        raise CouldNotRun("%s unreadable: %s" % (what, exc.strerror or exc))
+    if not data:
+        raise CouldNotRun("%s is empty: %s" % (what, path))
+    return data
+
+
+def keys_from_key_json(path):
+    """Every ACTIVE Ed25519 key in a registry key document, as raw bytes."""
+    try:
+        doc = json.loads(_read_bytes(path, "key document").decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        raise CouldNotRun("key document is not JSON: %s" % path)
+    entries = doc.get("keys") if isinstance(doc, dict) and "keys" in doc else [doc]
+    out = []
+    for k in entries if isinstance(entries, list) else []:
+        if not isinstance(k, dict):
+            continue
+        if k.get("crv") != "Ed25519" or k.get("status", "active") != "active":
+            continue
+        x = k.get("x")
+        if not isinstance(x, str):
+            continue
+        try:
+            raw = base64.urlsafe_b64decode(x + "=" * (-len(x) % 4))
+        except (ValueError, TypeError):
+            continue
+        if len(raw) == 32:
+            out.append(raw)
+    if not out:
+        raise CouldNotRun("key document holds no active Ed25519 key: %s" % path)
+    return out
+
+
+def keys_from_pubkey(path):
+    text = _read_bytes(path, "public key").decode("utf-8", "replace").split()
+    if len(text) < 2 or text[0] != "ssh-ed25519":
+        raise CouldNotRun("not an ssh-ed25519 public key line: %s" % path)
+    try:
+        blob = base64.b64decode(text[1], validate=True)
+    except ValueError:
+        raise CouldNotRun("public key is not base64: %s" % path)
+    r = _Reader(blob)
+    try:
+        if r.string() != b"ssh-ed25519":
+            raise CouldNotRun("public key blob is not ssh-ed25519: %s" % path)
+        raw = r.string()
+    except Refused:
+        raise CouldNotRun("public key blob is truncated: %s" % path)
+    if len(raw) != 32 or not r.done():
+        raise CouldNotRun("public key blob is malformed: %s" % path)
+    return [raw]
+
+
+def parse_sshsig(armored):
+    text = armored.decode("ascii", "replace").strip().splitlines()
+    if (len(text) < 3 or text[0] != "-----BEGIN SSH SIGNATURE-----"
+            or text[-1] != "-----END SSH SIGNATURE-----"):
+        raise Refused("signature is not an armored SSH SIGNATURE")
+    try:
+        blob = base64.b64decode("".join(text[1:-1]), validate=True)
+    except ValueError:
+        raise Refused("signature body is not base64")
+    r = _Reader(blob)
+    if r.take(6) != MAGIC:
+        raise Refused("signature magic is not SSHSIG")
+    if r.uint32() != 1:
+        raise Refused("unsupported SSHSIG version")
+    pub = _Reader(r.string())
+    if pub.string() != b"ssh-ed25519":
+        raise Refused("signature key is not ssh-ed25519")
+    pub_raw = pub.string()
+    if len(pub_raw) != 32 or not pub.done():
+        raise Refused("signature public key is malformed")
+    namespace = r.string()
+    reserved = r.string()
+    hash_alg = r.string()
+    sig = _Reader(r.string())
+    if sig.string() != b"ssh-ed25519":
+        raise Refused("signature algorithm is not ssh-ed25519")
+    sig_raw = sig.string()
+    if len(sig_raw) != 64 or not sig.done():
+        raise Refused("signature value is malformed")
+    if not r.done():
+        raise Refused("trailing bytes after the signature")
+    return {"pub": pub_raw, "namespace": namespace, "reserved": reserved,
+            "hash_alg": hash_alg, "sig": sig_raw}
+
+
+def signed_data(namespace, reserved, hash_alg, message):
+    h = {b"sha512": hashlib.sha512, b"sha256": hashlib.sha256}[hash_alg](message)
+    return (MAGIC + _string(namespace) + _string(reserved) + _string(hash_alg)
+            + _string(h.digest()))
+
+
+# --------------------------------------------------------------------------
+# The pin file.
+
+_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+_LINE = {
+    "serial": re.compile(r"serial ([1-9][0-9]{0,17})"),
+    "commit": re.compile(r"commit ([0-9a-f]{40})"),
+    "tag": re.compile(r"tag (" + _NAME + r")"),
+    "file": re.compile(r"file (" + _NAME + r") ([0-9a-f]{64})"),
+}
+
+
+def parse_pin(data):
+    try:
+        text = data.decode("ascii")
+    except UnicodeDecodeError:
+        raise Refused("pin is not ASCII")
+    if "\r" in text:
+        raise Refused("pin has CR line endings")
+    if not text.endswith("\n"):
+        raise Refused("pin does not end with a newline")
+    lines = text[:-1].split("\n")
+    if lines[0] != "1f916-pin v1":
+        raise Refused("pin header is not '1f916-pin v1'")
+    want = ["serial", "commit", "tag"]
+    if len(lines) < 5:
+        raise Refused("pin names no file")
+    out = {"files": {}}
+    for i, key in enumerate(want, start=1):
+        m = _LINE[key].fullmatch(lines[i])
+        if not m:
+            raise Refused("pin line %d is not a valid '%s' line" % (i + 1, key))
+        out[key] = int(m.group(1)) if key == "serial" else m.group(1)
+    names = []
+    for n, line in enumerate(lines[4:], start=5):
+        m = _LINE["file"].fullmatch(line)
+        if not m:
+            raise Refused("pin line %d is not a valid 'file' line" % n)
+        names.append(m.group(1))
+        out["files"][m.group(1)] = m.group(2)
+    if names != sorted(set(names)):
+        raise Refused("pin file lines are not sorted and unique")
+    return out
+
+
+def _sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+# --------------------------------------------------------------------------
+
+def trusted_keys(args):
+    if bool(args.get("key_json")) == bool(args.get("pubkey")):
+        raise Usage("give exactly one of --key-json or --pubkey")
+    if args.get("key_json"):
+        return keys_from_key_json(args["key_json"])
+    return keys_from_pubkey(args["pubkey"])
+
+
+def verify(args):
+    result = {"verdict": None, "reasons": []}
+    expected = args.get("fingerprint")
+    if not expected or not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", expected):
+        raise Usage("--fingerprint SHA256:<43 base64 characters> is required")
+    pin_bytes = _read_bytes(args["pin"], "pin")
+    sig_bytes = _read_bytes(args["sig"], "signature")
+    keys = trusted_keys(args)
+
+    trusted = [k for k in keys if fingerprint(k) == expected]
+    result["trusted_key_fingerprints"] = [fingerprint(k) for k in keys]
+    if not trusted:
+        raise Refused("no trusted key has the expected fingerprint %s" % expected)
+
+    s = parse_sshsig(sig_bytes)
+    result["signature_key_fingerprint"] = fingerprint(s["pub"])
+    if s["pub"] not in trusted:
+        raise Refused("the signature was made by a key that is not the trusted one")
+    if s["namespace"] != NAMESPACE:
+        raise Refused("signature namespace is %r, not %r"
+                      % (s["namespace"].decode("ascii", "replace"), NAMESPACE.decode()))
+    if s["hash_alg"] not in (b"sha512", b"sha256"):
+        raise Refused("unsupported hash algorithm in the signature")
+    msg = signed_data(s["namespace"], s["reserved"], s["hash_alg"], pin_bytes)
+    if not ed25519_verify(s["pub"], msg, s["sig"]):
+        raise Refused("the Ed25519 signature does not verify over the pin")
+
+    pin = parse_pin(pin_bytes)
+    if args.get("min_serial") is not None and pin["serial"] < args["min_serial"]:
+        raise Refused("pin serial %d is below the minimum %d (a rollback?)"
+                      % (pin["serial"], args["min_serial"]))
+
+    if args.get("dir"):
+        checked = {}
+        for name, want in pin["files"].items():
+            path = args["dir"].rstrip("/") + "/" + name
+            try:
+                got = _sha256_file(path)
+            except OSError as exc:
+                raise CouldNotRun("pinned file unreadable: %s (%s)"
+                                  % (path, exc.strerror or exc))
+            checked[name] = {"expected": want, "actual": got, "match": got == want}
+        result["files_checked"] = checked
+        bad = sorted(n for n, c in checked.items() if not c["match"])
+        if bad:
+            raise Refused("digest mismatch: %s" % ", ".join(bad))
+
+    result["verdict"] = "PASS"
+    result["pin"] = pin
+    return result
+
+
+# --------------------------------------------------------------------------
+# Self-test: the verifier against RFC 8032's own vectors, and the controls
+# that prove it can say no.
+
+_RFC8032 = [
+    # (public key, message, signature) -- RFC 8032 section 7.1, TESTS 1-3.
+    ("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a", "",
+     "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
+     "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"),
+    ("3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c", "72",
+     "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da"
+     "085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"),
+    ("fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025", "af82",
+     "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac"
+     "18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a"),
+]
+
+
+def self_test():
+    checks = []
+
+    def check(name, ok):
+        checks.append({"name": name, "ok": bool(ok)})
+
+    for i, (pk, msg, sig) in enumerate(_RFC8032, start=1):
+        pk, msg, sig = bytes.fromhex(pk), bytes.fromhex(msg), bytes.fromhex(sig)
+        check("rfc8032 test %d verifies" % i, ed25519_verify(pk, msg, sig))
+        tampered = bytearray(sig)
+        tampered[0] ^= 0x01
+        check("rfc8032 test %d: the tampered signature differs" % i,
+              bytes(tampered) != sig)
+        check("rfc8032 test %d: a flipped signature bit is rejected" % i,
+              not ed25519_verify(pk, msg, bytes(tampered)))
+        other = msg + b"x"
+        check("rfc8032 test %d: a changed message is rejected" % i,
+              not ed25519_verify(pk, other, sig))
+    pk1, _, sig1 = (bytes.fromhex(v) for v in _RFC8032[0])
+    high_s = sig1[:32] + (int.from_bytes(sig1[32:], "little") + _L).to_bytes(32, "little")
+    check("a non-canonical s (s + L) is rejected", not ed25519_verify(pk1, b"", high_s))
+    check("a known key's fingerprint is reproduced",
+          fingerprint(bytes.fromhex(_RFC8032[0][0])).startswith("SHA256:"))
+    good = b"1f916-pin v1\nserial 1\ncommit " + b"0" * 40 + b"\ntag v1\nfile a " + b"0" * 64 + b"\n"
+    try:
+        parse_pin(good)
+        check("a well-formed pin parses", True)
+    except Refused:
+        check("a well-formed pin parses", False)
+    for label, bad in [("CRLF", good.replace(b"\n", b"\r\n")),
+                       ("no final newline", good[:-1]),
+                       ("unsorted files", good + b"file 0 " + b"0" * 64 + b"\n"),
+                       ("duplicate file", good + b"file a " + b"1" * 64 + b"\n"),
+                       ("uppercase hex", good.replace(b"commit " + b"0" * 40,
+                                                      b"commit " + b"A" * 40))]:
+        check("a pin with %s differs from the good one" % label, bad != good)
+        try:
+            parse_pin(bad)
+            check("a pin with %s is refused" % label, False)
+        except Refused:
+            check("a pin with %s is refused" % label, True)
+    failed = [c["name"] for c in checks if not c["ok"]]
+    return {"verdict": "PASS" if not failed else "FAIL",
+            "checks": len(checks), "failed": failed}
+
+
+# --------------------------------------------------------------------------
+
+class Usage(Exception):
+    pass
+
+
+def _parse(argv):
+    if not argv or argv[0] not in ("verify", "fingerprint", "self-test"):
+        raise Usage("usage: 1f916-pin verify|fingerprint|self-test ... (see the header)")
+    cmd, rest, args = argv[0], argv[1:], {}
+    flags = {"--pin": "pin", "--sig": "sig", "--key-json": "key_json",
+             "--pubkey": "pubkey", "--fingerprint": "fingerprint",
+             "--dir": "dir", "--min-serial": "min_serial"}
+    while rest:
+        flag = rest.pop(0)
+        if flag not in flags or not rest:
+            raise Usage("unknown flag or missing value: %s" % flag)
+        key = flags[flag]
+        if key in args:
+            raise Usage("flag given twice: %s" % flag)
+        args[key] = rest.pop(0)
+    if "min_serial" in args:
+        if not re.fullmatch(r"[0-9]{1,18}", args["min_serial"]):
+            raise Usage("--min-serial takes a non-negative integer")
+        args["min_serial"] = int(args["min_serial"])
+    if cmd == "verify":
+        for need in ("pin", "sig", "fingerprint"):
+            if need not in args:
+                raise Usage("verify needs --%s" % need.replace("_", "-"))
+    elif cmd == "self-test" and args:
+        raise Usage("self-test takes no flags")
+    return cmd, args
+
+
+def main(argv):
+    try:
+        cmd, args = _parse(argv)
+    except Usage as exc:
+        print(json.dumps({"verdict": "USAGE", "reasons": [str(exc)]}))
+        return 64
+    try:
+        if cmd == "self-test":
+            out = self_test()
+            print(json.dumps(out, indent=2, sort_keys=True))
+            return 0 if out["verdict"] == "PASS" else 2
+        if cmd == "fingerprint":
+            keys = trusted_keys(args)
+            print(json.dumps({"fingerprints": [fingerprint(k) for k in keys]}))
+            return 0
+        out = verify(args)
+        print(json.dumps(out, indent=2, sort_keys=True))
+        return 0
+    except Usage as exc:
+        print(json.dumps({"verdict": "USAGE", "reasons": [str(exc)]}))
+        return 64
+    except Refused as exc:
+        print(json.dumps({"verdict": "FAIL", "reasons": [str(exc)]}, sort_keys=True))
+        return 2
+    except CouldNotRun as exc:
+        print(json.dumps({"verdict": "COULD_NOT_RUN", "reasons": [str(exc)]},
+                         sort_keys=True))
+        return 3
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
