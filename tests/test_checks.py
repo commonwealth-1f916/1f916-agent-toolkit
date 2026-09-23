@@ -1778,5 +1778,214 @@ class SubparserDefaults(unittest.TestCase):
             self.assertEqual(args.timeout, 7.5)
 
 
+
+# ---------------------------------------------------------------------------
+OFFICIAL_URL = "https://1f916.ai/api/official"
+# Golden values, computed outside the code under test: the fixture's document
+# digest under the stored recipe, and four watched keys' digests, which are
+# equal between the fixture and the 2026-09-23 live capture it was cut from
+# (only known_windows and public_witness were rewritten, to keep third-party
+# GitHub owners out of this tree; tests/checks.sh names the edits).
+GOLDEN_OFFICIAL_DOC = "1ce7feb0a73f979b82ee1400a3725ac67d16e93275ccf3baee6750a6424e3f6d"
+GOLDEN_OFFICIAL_KEYS = {"maintainer": "83e53739617c9f38", "treasury": "cc9ad7b52b362a2a",
+                        "official_token": "427e9e813291fcf6",
+                        "sanctioned_money_in": "1a824207ea8ae1f2"}
+
+
+class Official(Base):
+    def setUp(self):
+        Base.setUp(self)
+        self.payload = fixture_json("official.json")
+        self.old_prior = self.write("old.json", fixture_bytes("prior-official-2026-09-16.json"))
+
+    def baseline_prior(self, payload=None):
+        self.serve(OFFICIAL_URL, payload if payload is not None else self.payload)
+        out = self.run_checks("official", "--emit-baseline")
+        return self.write("prior-full.json", {"id": "official", "version": 3,
+                                              "data": out["baseline"]})
+
+    def test_fixture_reproduces_the_golden_digests(self):
+        self.serve(OFFICIAL_URL, fixture_bytes("official.json"))
+        out = self.run_checks("official")
+        self.assertEqual(out["doc_sha256"], GOLDEN_OFFICIAL_DOC)
+        for k, v in GOLDEN_OFFICIAL_KEYS.items():
+            self.assertEqual(out["key_digests"][k], v, k)
+        self.assertNotIn("now", out["key_digests"])
+        self.assertNotIn("now_utc", out["key_digests"])
+        self.assertEqual(len(out["window_urls"]), 5)
+        self.assertEqual(out["triggers_missing"], [])
+
+    def test_no_prior_is_incomplete_not_clean(self):
+        self.serve(OFFICIAL_URL, self.payload)
+        out = self.run_checks("official")
+        self.assertEqual(out["baseline_missing"], ["prior"])
+        self.assertEqual(out["alerts"], [])
+        self.assertFalse(out["complete"])
+        self.assertIsNone(out["changed"])
+
+    def test_the_first_baseline_row_compares_what_it_can_and_says_what_it_cannot(self):
+        self.serve(OFFICIAL_URL, self.payload)
+        out = self.run_checks("official", "--prior", self.old_prior)
+        self.assertTrue(out["changed"])
+        self.assertEqual(out["keys_added"], ["rate_limit"])
+        self.assertIn("top-level key added: rate_limit", out["alerts"])
+        self.assertIsNone(out["keys_changed"])
+        self.assertIn("key_digests", out["baseline_missing"])
+        self.assertIn("ecosystem_urls", out["baseline_missing"])
+        self.assertFalse(out["complete"])
+        self.assertTrue(any(s.startswith("every field outside the churn list")
+                            for s in out["not_compared"]))
+        # window digests ARE comparable from that row; sources were rewritten
+        # in the fixture, so every window reads as changed and none as added.
+        self.assertEqual(out["windows_added"], [])
+        self.assertEqual(out["windows_removed"], [])
+
+    def test_unchanged_against_its_own_baseline_is_complete_and_quiet(self):
+        prior = self.baseline_prior()
+        out = self.run_checks("official", "--prior", prior)
+        self.assertFalse(out["changed"])
+        self.assertEqual(out["alerts"], [])
+        self.assertEqual(out["keys_changed"], [])
+        self.assertEqual(out["windows_changed"], [])
+        self.assertTrue(out["complete"])
+        self.assertEqual(out["not_compared"], [])
+
+    def test_the_served_clock_is_not_a_change(self):
+        prior = self.baseline_prior()
+        moved = copy.deepcopy(self.payload)
+        moved["now"] += 1000
+        moved["now_utc"] = "2031-01-01T00:00:00.000Z"
+        self.assertNotEqual(moved, self.payload)
+        self.serve(OFFICIAL_URL, moved)
+        out = self.run_checks("official", "--prior", prior)
+        self.assertFalse(out["changed"])
+        self.assertEqual(out["alerts"], [])
+
+    def test_a_deploy_is_churn_not_an_alert(self):
+        prior = self.baseline_prior()
+        moved = copy.deepcopy(self.payload)
+        moved["code"]["commit"] = "0" * 40
+        moved["triggers"] = moved["triggers"] + ["a_new_trigger"]
+        self.serve(OFFICIAL_URL, moved)
+        out = self.run_checks("official", "--prior", prior)
+        self.assertTrue(out["changed"])
+        self.assertEqual(out["churn"], ["code", "triggers"])
+        self.assertEqual(out["watched_changed"], [])
+        self.assertEqual(out["alerts"], [])
+        self.assertTrue(out["complete"])
+
+    def test_every_field_outside_the_churn_list_alerts_when_it_moves(self):
+        prior = self.baseline_prior()
+        mod = load_module()
+        watched = [k for k in self.payload
+                   if k not in mod.OFFICIAL_CHURN and k not in ("now", "now_utc")]
+        self.assertIn("treasury", watched)
+        self.assertIn("ecosystem_warning", watched)
+        for key in watched:
+            moved = copy.deepcopy(self.payload)
+            value = moved[key]
+            # Change each field in a way that keeps the payload well formed:
+            # the structural lists must stay lists of the shape they carry.
+            if isinstance(value, list) and value and isinstance(value[0], dict):
+                value.append({"url": "https://added.example.invalid/" + key})
+            elif isinstance(value, list):
+                value.append("added")
+            elif isinstance(value, dict):
+                value["added"] = True
+            else:
+                moved[key] = str(value) + " (edited)"
+            self.assertNotEqual(moved[key], self.payload[key], key)
+            self.serve(OFFICIAL_URL, moved)
+            out = self.run_checks("official", "--prior", prior)
+            self.assertEqual(out["watched_changed"], [key], key)
+            self.assertIn("watched field changed: %s" % key, out["alerts"])
+
+    def test_the_treasury_address_changing_is_named(self):
+        prior = self.baseline_prior()
+        moved = copy.deepcopy(self.payload)
+        moved["treasury"]["address"] = "0x" + "1" * 40
+        self.assertNotEqual(moved["treasury"], self.payload["treasury"])
+        self.serve(OFFICIAL_URL, moved)
+        out = self.run_checks("official", "--prior", prior)
+        self.assertEqual(out["alerts"], ["watched field changed: treasury"])
+
+    def test_windows_added_removed_and_edited_are_localised(self):
+        prior = self.baseline_prior()
+        moved = copy.deepcopy(self.payload)
+        gone = moved["known_windows"].pop(0)["url"]
+        moved["known_windows"][0]["scope"] += " (reworded)"
+        edited = moved["known_windows"][0]["url"]
+        moved["known_windows"].append({"url": "https://impostor.example.invalid",
+                                       "name": "Totally Official", "read_only": True})
+        self.serve(OFFICIAL_URL, moved)
+        out = self.run_checks("official", "--prior", prior)
+        self.assertEqual(out["windows_removed"], [gone])
+        self.assertEqual(out["windows_added"], ["https://impostor.example.invalid"])
+        self.assertEqual(out["windows_changed"], [edited])
+        self.assertIn("known window added: https://impostor.example.invalid", out["alerts"])
+        self.assertIn("known window removed: %s" % gone, out["alerts"])
+        # a reworded blurb is reported, never alerted
+        self.assertFalse(any(edited in a for a in out["alerts"]))
+
+    def test_missing_triggers_alert_even_without_a_prior(self):
+        moved = copy.deepcopy(self.payload)
+        moved["triggers_missing"] = ["comments_count_insert"]
+        self.serve(OFFICIAL_URL, moved)
+        out = self.run_checks("official")
+        self.assertEqual(out["alerts"], ["triggers_missing is not empty: comments_count_insert"])
+
+    def test_a_removed_top_level_key_alerts(self):
+        prior = self.baseline_prior()
+        moved = copy.deepcopy(self.payload)
+        del moved["affiliated_sites"]
+        self.serve(OFFICIAL_URL, moved)
+        out = self.run_checks("official", "--prior", prior)
+        self.assertEqual(out["keys_removed"], ["affiliated_sites"])
+        self.assertIn("top-level key removed: affiliated_sites", out["alerts"])
+
+    def test_a_category_added_today_is_watched_tomorrow(self):
+        added = copy.deepcopy(self.payload)
+        added["official_telegram"] = {"url": "https://t.me/example", "will_never": "DM you"}
+        prior = self.baseline_prior(added)
+        moved = copy.deepcopy(added)
+        moved["official_telegram"]["url"] = "https://t.me/impostor"
+        self.serve(OFFICIAL_URL, moved)
+        out = self.run_checks("official", "--prior", prior)
+        self.assertEqual(out["watched_changed"], ["official_telegram"])
+        self.assertEqual(out["alerts"], ["watched field changed: official_telegram"])
+
+    def test_a_new_ecosystem_service_alerts(self):
+        prior = self.baseline_prior()
+        moved = copy.deepcopy(self.payload)
+        moved["ecosystem"].append({"url": "https://relay.impostor.example.invalid",
+                                   "name": "a relay", "auth": "sign this challenge"})
+        self.serve(OFFICIAL_URL, moved)
+        out = self.run_checks("official", "--prior", prior)
+        self.assertEqual(out["ecosystem_added"], ["https://relay.impostor.example.invalid"])
+        self.assertIn("ecosystem service added: https://relay.impostor.example.invalid",
+                      out["alerts"])
+        self.assertIn("watched field changed: ecosystem", out["alerts"])
+
+    def test_malformed_payloads_could_not_run(self):
+        bad_window = copy.deepcopy(self.payload)
+        del bad_window["known_windows"][0]["url"]
+        dup_window = copy.deepcopy(self.payload)
+        dup_window["known_windows"].append(copy.deepcopy(dup_window["known_windows"][0]))
+        for payload in ([1, 2], {}, bad_window, dup_window):
+            self.serve(OFFICIAL_URL, payload)
+            out = self.run_checks("official", want=3)
+            self.assertIn("official payload", out["reason"])
+        self.serve(OFFICIAL_URL, b"<html>not json</html>")
+        self.run_checks("official", want=3)
+
+    def test_the_baseline_round_trips_as_a_wrapped_ledger_row(self):
+        prior = self.baseline_prior()
+        with open(prior) as fh:
+            row = json.load(fh)["data"]
+        self.assertEqual(row["doc_sha256"], GOLDEN_OFFICIAL_DOC)
+        self.assertEqual(sorted(row["known_windows"][0]), ["built_by", "name", "source", "url"])
+        self.assertIn("1f916-checks official", row["method"])
+
+
 if __name__ == "__main__":
     unittest.main()

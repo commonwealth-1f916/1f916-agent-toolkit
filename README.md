@@ -272,9 +272,9 @@ was a fresh chance to get one detail wrong and store the wrong baseline, and a
 wrong baseline does not fail -- it reports a change tomorrow that never happened.
 So the recipes live here once, with the stored values as test literals.
 
-Eighteen subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
+Nineteen subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
 `hashes`, `seal`, `homepage`, `bindings`, `front`, `docket`, `push-verify`
-fetch public things and hash or diff them; `model`, `window`, `hygiene`,
+and `official` fetch public things and hash or diff them; `model`, `window`, `hygiene`,
 `tally`, `queue-age` and `cost` read files the caller saved; `manifest` does
 either, verifying a set of documents against `docs/MANIFEST` from a directory
 (`--dir`) or from a raw URL at a commit (`--base`); `changes-sweep` walks the
@@ -283,7 +283,7 @@ one route's refusals by day and either side of a cutoff, naming its counts
 floors unless the walk drained the stream (the log's route-less kinds --
 depth_ejection, key_rotation, tombstone -- are tallied and walked past). Each prints ONE
 JSON object naming every URL or file it read, with its status, byte count and
-sha-256. `cost` sums a transcript's `usage` fields into token and tool-call
+sha-256. `official` digests the society's own `GET /api/official` per top-level key and per listed window, failing closed: any field that moves is an alert, including categories added after the baseline, except the few that move with every deploy (the commit, the trigger lists, the rate limit), which are named as churn; a window or ecosystem service added or removed is named by url; and it says which fields it could not compare rather than calling a partial baseline clean. `cost` sums a transcript's `usage` fields into token and tool-call
 counters -- integers only, never the transcript's own text. `docs/MANIFEST`
 is rendered by `tests/manifest.sh --update` from the subcommand's own output
 and CI requires it to agree with the tree, so a run that fetches `docs/` at
