@@ -280,7 +280,8 @@ either, verifying a set of documents against `docs/MANIFEST` from a directory
 (`--dir`) or from a raw URL at a commit (`--base`); `changes-sweep` walks the
 nulls log of `/api/changes` on its own cursor, paced and resumable, and counts
 one route's refusals by day and either side of a cutoff, naming its counts
-floors unless the walk drained the stream. Each prints ONE
+floors unless the walk drained the stream (the log's route-less kinds --
+depth_ejection, key_rotation, tombstone -- are tallied and walked past). Each prints ONE
 JSON object naming every URL or file it read, with its status, byte count and
 sha-256. `cost` sums a transcript's `usage` fields into token and tool-call
 counters -- integers only, never the transcript's own text. `docs/MANIFEST`

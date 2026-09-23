@@ -1648,7 +1648,7 @@ class ChangesSweep(Base):
         body["nulls"][0] = {"id": 1, "what": "no route here"}
         self.serve(self.urls[0], body)
         out = self.decimals(want=3)
-        self.assertIn("no route or no timestamp", out["reason"])
+        self.assertIn("no timestamp", out["reason"])
 
     def test_never_prints_a_row_body(self):
         cmd = [sys.executable, SCRIPT, "changes-sweep", "--since", str(self.fx["since"]),
@@ -1692,6 +1692,58 @@ class ChangesSweep(Base):
         self.decimals("--state", state)
         out = self.sweep("--state", state, want=3)
         self.assertIn("different walk", out["reason"])
+
+
+class ChangesSweepRealPage(Base):
+    """changes-sweep against a LIVE capture: the first page of the 2026-09-23
+    reference walk, fetched anonymously on 2026-09-23 (sha-256
+    1f564ee4d84d9e3f31b817fc7d8f25ebc93cf38480586f820a476ad2ce4e20e3, 66,483
+    bytes). The synthetic fixture proves the arithmetic; this one proves the
+    parser against what the registry actually serves -- created_at in ms, the
+    `route` string, the note fields, a 200-row saturated page with
+    nulls_total 60,662 and has_more true. One page only, so every count is a
+    floor. The literals are counted by hand from the file.
+    """
+
+    SINCE = 1789383600000
+    URL = ("https://1f916.ai/api/changes?since=%d&posts_since=done&comments_since=done"
+           % SINCE)
+    ROUTE = "POST /api/payout-bindings"
+
+    def setUp(self):
+        Base.setUp(self)
+        self.serve(self.URL, fixture_bytes("changes-nulls-real-page1.json"))
+
+    def sweep(self, *extra, **kw):
+        return self.run_checks("changes-sweep", "--since", str(self.SINCE), "--route", self.ROUTE,
+                               "--pace", "0", "--backoff", "0", "--max-pages", "1",
+                               *extra, **kw)
+
+    def test_the_served_shape_parses_and_one_page_is_a_floor(self):
+        out = self.sweep("--status", "400", "--reason-prefix", "this listing pays",
+                         status="degraded")
+        self.assertEqual(out["pages"], 1)
+        self.assertEqual(out["rows_read"], 200)
+        self.assertEqual(out["first_page_nulls_total"], 60662)
+        self.assertIs(out["has_more_at_end"], True)
+        self.assertIs(out["complete"], False)
+        self.assertEqual(out["counts_are"], "floors")
+        self.assertEqual(out["matched"], 33)
+        self.assertEqual(out["by_day_utc"], {"2026-09-14": 33})
+        self.assertEqual(out["cursor_end"], "id:157272")
+        # Row 157146 is a depth_ejection with route null: walked past, counted.
+        self.assertEqual(out["skipped_by_kind"], {"depth_ejection": 1})
+        self.assertIn("max-pages 1", out["stopped_early"])
+        self.assertEqual([u["url"] for u in out["inputs"]["urls"]], [self.URL])
+
+    def test_all_statuses_on_the_route(self):
+        out = self.sweep(status="degraded")
+        self.assertEqual(out["matched"], 40)
+        self.assertEqual(sum(out["reasons"].values()), 40)
+
+    def test_a_cutoff_before_the_page_puts_every_row_after_it(self):
+        out = self.sweep("--cutoff", "2026-09-14T00:00:00Z", status="degraded")
+        self.assertEqual((out["before_cutoff"], out["after_cutoff"]), (0, 40))
 
 
 class SubparserDefaults(unittest.TestCase):

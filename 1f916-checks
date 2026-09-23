@@ -1864,7 +1864,7 @@ def cmd_runs_row(ctx, args):
 NULL_ROUTE_KEYS = ("route",)
 NULL_TS_KEYS = ("at", "ts", "created_at", "occurred_at")
 NULL_REASON_KEYS = ("reason", "error")
-SWEEP_STATE_VERSION = 1
+SWEEP_STATE_VERSION = 2
 
 
 class _Http429(Exception):
@@ -1997,7 +1997,7 @@ def cmd_changes_sweep(ctx, args):
               "finished": False, "has_more": None, "pages": 0, "rows_read": 0,
               "first_page_nulls_total": None, "matched": 0, "by_day_utc": {},
               "first_ts": None, "last_ts": None, "before_cutoff": 0, "after_cutoff": 0,
-              "reasons": {}, "http429": 0, "out_bytes": 0}
+              "reasons": {}, "http429": 0, "out_bytes": 0, "skipped_by_kind": {}}
 
     out_fh = None
     if args.out:
@@ -2062,11 +2062,20 @@ def cmd_changes_sweep(ctx, args):
             for row in rows:
                 if not isinstance(row, dict):
                     raise CouldNotRun("a nulls row is not an object (page %d)" % (st["pages"] + 1))
-                route = _null_route(row)
                 ts = ms_or_iso(_null_field(row, NULL_TS_KEYS))
-                if route is None or ts is None:
-                    raise CouldNotRun("a nulls row has no route or no timestamp (page %d, keys %s)"
+                if ts is None:
+                    raise CouldNotRun("a nulls row has no timestamp (page %d, keys %s)"
                                       % (st["pages"] + 1, sorted(row)))
+                route = _null_route(row)
+                if route is None:
+                    # The log is not only refusals: depth_ejection, key_rotation
+                    # and tombstone rows carry no route (nulls_declared_kinds).
+                    # They are counted by kind and walked past, never a stop --
+                    # the live first page holds one and a stop there would end
+                    # every real walk on page 1.
+                    kind = row.get("kind") if isinstance(row.get("kind"), str) else "?"
+                    st["skipped_by_kind"][kind] = st["skipped_by_kind"].get(kind, 0) + 1
+                    continue
                 if route != args.route:
                     continue
                 if args.status is not None and row.get("status") != args.status:
@@ -2131,6 +2140,7 @@ def cmd_changes_sweep(ctx, args):
         "before_cutoff": st["before_cutoff"] if args.cutoff_dt else None,
         "after_cutoff": st["after_cutoff"] if args.cutoff_dt else None,
         "reasons": st["reasons"],
+        "skipped_by_kind": st["skipped_by_kind"],
         "http429": st["http429"],
         "stopped_early": stopped,
         "cursor_end": st["cursor"],
