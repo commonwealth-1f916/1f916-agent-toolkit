@@ -18,7 +18,8 @@ What it refuses to do, by construction:
     caller may store.
   - judge. A changed hash is exit 0 with the change in the output. What the
     change means is the caller's decision.
-  - write outside its --workdir (default: a fresh temp dir it deletes).
+  - write outside its --workdir (default: a fresh temp dir it deletes), save
+    for the --out and --state files changes-sweep is explicitly handed.
 
 Exit codes: 0 status ok (whatever the values say), 3 could_not_run (the JSON is
 still printed, with a reason, and no partial result), 64 usage error.
@@ -1846,6 +1847,306 @@ def cmd_runs_row(ctx, args):
     return out
 
 
+# ---------------------------------------------------------------------------
+# changes-sweep: the nulls walk, pinned
+#
+# GET /api/changes carries the registry's nulls log (refused writes,
+# depth-ejections, rotations, tombstones) on its own row-id cursor. The walk
+# silences the posts and comments streams, starts at ?since=<ms> and then sends
+# back next_nulls_since EXACTLY as served -- the cursor is opaque here and is
+# never rebuilt from a row id or re-initialised from --since. It stops when a
+# page says has_more is false or carries no rows.
+#
+# The counts are totals only when the walk drained the stream: has_more false
+# at the end AND at least as many rows read as the first page's nulls_total.
+# Anything short of that is a floor, and `counts_are` says which.
+
+NULL_ROUTE_KEYS = ("route",)
+NULL_TS_KEYS = ("at", "ts", "created_at", "occurred_at")
+NULL_REASON_KEYS = ("reason", "error")
+SWEEP_STATE_VERSION = 1
+
+
+class _Http429(Exception):
+    def __init__(self, retry_after):
+        Exception.__init__(self, "HTTP 429")
+        self.retry_after = retry_after
+
+
+def _retry_after_seconds(value):
+    if value is None:
+        return None
+    try:
+        return max(0.0, float(str(value).strip()))
+    except ValueError:
+        return None
+
+
+def _sweep_fetch(ctx, url):
+    """One GET of one page. Raises _Http429 on a 429, CouldNotRun otherwise.
+
+    Offline (tests): DIR/<sha256 of url> is the body; DIR/<sha256>.status, when
+    present, holds lines `429 <retry-after>` served in order before the body,
+    once each per process."""
+    rec = {"url": url, "status": None, "bytes": None, "sha256": None}
+    ctx.inputs["urls"].append(rec)
+    if ctx.offline_dir:
+        stem = os.path.join(ctx.offline_dir, sha256_hex(url.encode("utf-8")))
+        queue = getattr(ctx, "_offline_status", {})
+        ctx._offline_status = queue
+        if stem not in queue:
+            try:
+                with open(stem + ".status", "r") as fh:
+                    queue[stem] = [ln.split() for ln in fh.read().splitlines() if ln.strip()]
+            except OSError:
+                queue[stem] = []
+        if queue[stem]:
+            parts = queue[stem].pop(0)
+            rec["status"] = int(parts[0])
+            if rec["status"] == 429:
+                raise _Http429(_retry_after_seconds(parts[1] if len(parts) > 1 else None))
+            raise CouldNotRun("fetch failed: HTTP %d from %s" % (rec["status"], url))
+        try:
+            with open(stem, "rb") as fh:
+                body = fh.read()
+        except OSError:
+            raise CouldNotRun("fetch failed: %s (offline file absent)" % url)
+        rec.update(status=200, bytes=len(body), sha256=sha256_hex(body))
+        return body
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=ctx.timeout) as resp:
+            body = resp.read()
+            status = resp.status
+    except urllib.error.HTTPError as e:
+        rec["status"] = e.code
+        if e.code == 429:
+            raise _Http429(_retry_after_seconds(e.headers.get("Retry-After") if e.headers else None))
+        raise CouldNotRun("fetch failed: HTTP %d from %s" % (e.code, url))
+    except (urllib.error.URLError, OSError) as e:
+        raise CouldNotRun("fetch failed: %s from %s" % (getattr(e, "reason", e), url))
+    rec.update(status=status, bytes=len(body), sha256=sha256_hex(body))
+    if not 200 <= status < 300:
+        raise CouldNotRun("fetch failed: HTTP %d from %s" % (status, url))
+    return body
+
+
+def _null_field(row, keys):
+    for k in keys:
+        if row.get(k) is not None:
+            return row[k]
+    return None
+
+
+def _null_route(row):
+    route = _null_field(row, NULL_ROUTE_KEYS)
+    if isinstance(route, str):
+        return route
+    method, path = row.get("method"), row.get("path")
+    if isinstance(method, str) and isinstance(path, str):
+        return "%s %s" % (method, path)
+    return None
+
+
+def _sweep_page_url(args, cursor):
+    url = "%s/api/changes?since=%d&posts_since=done&comments_since=done" % (REGISTRY, args.since_ms)
+    if cursor is not None:
+        url += "&nulls_since=" + urllib.parse.quote(str(cursor), safe=":")
+    return url
+
+
+def _sweep_query(args):
+    return {"since_ms": args.since_ms, "route": args.route, "status": args.status,
+            "reason_prefix": args.reason_prefix,
+            "cutoff": iso(args.cutoff_dt) if args.cutoff_dt else None}
+
+
+def _write_json_atomic(path, obj):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(obj, fh, sort_keys=True)
+        fh.write("\n")
+    os.replace(tmp, path)
+
+
+def cmd_changes_sweep(ctx, args):
+    if not args.route or not args.route.strip():
+        raise UsageError("--route is required and may not be empty")
+    since_dt = ms_or_iso(int(args.since)) if re.match(r"^\d+$", args.since) else parse_iso(args.since)
+    if since_dt is None:
+        raise UsageError("--since wants epoch ms or ISO 8601, got %r" % args.since)
+    args.since_ms = int(args.since) if re.match(r"^\d+$", args.since) else int(
+        round(since_dt.timestamp() * 1000))
+    args.cutoff_dt = None
+    if args.cutoff:
+        args.cutoff_dt = parse_iso(args.cutoff)
+        if args.cutoff_dt is None:
+            raise UsageError("--cutoff is not ISO 8601: %r" % args.cutoff)
+    query = _sweep_query(args)
+
+    st = None
+    if args.state and os.path.exists(args.state):
+        st = ctx.read_json(args.state, "state")
+        if not isinstance(st, dict) or st.get("version") != SWEEP_STATE_VERSION:
+            raise CouldNotRun("state file is not a changes-sweep state: %s" % args.state)
+        if st.get("query") != query:
+            raise CouldNotRun("state file belongs to a different walk (%s); "
+                              "name a new --state to start this one" % json.dumps(st.get("query")))
+    if st is None:
+        st = {"version": SWEEP_STATE_VERSION, "query": query, "cursor": None, "started": False,
+              "finished": False, "has_more": None, "pages": 0, "rows_read": 0,
+              "first_page_nulls_total": None, "matched": 0, "by_day_utc": {},
+              "first_ts": None, "last_ts": None, "before_cutoff": 0, "after_cutoff": 0,
+              "reasons": {}, "http429": 0, "out_bytes": 0}
+
+    out_fh = None
+    if args.out:
+        # Resume discards whatever the dead walk appended after its last
+        # committed page, so a page is never in the file twice.
+        mode = "r+b" if (st["started"] and os.path.exists(args.out)) else "wb"
+        out_fh = open(args.out, mode)
+        out_fh.seek(st["out_bytes"] if mode == "r+b" else 0)
+        out_fh.truncate()
+
+    stopped = None
+    try:
+        while not st["finished"]:
+            if st["pages"] >= args.max_pages:
+                stopped = "max-pages %d reached" % args.max_pages
+                break
+            if st["started"] and args.pace > 0:
+                time.sleep(args.pace)
+            url = _sweep_page_url(args, st["cursor"])
+            body = None
+            for attempt in range(args.max_429 + 1):
+                try:
+                    body = _sweep_fetch(ctx, url)
+                    break
+                except _Http429 as e:
+                    st["http429"] += 1
+                    if attempt == args.max_429:
+                        break
+                    wait = e.retry_after
+                    if wait is None:
+                        wait = args.backoff * (2 ** attempt)
+                    time.sleep(min(wait, 300.0))
+                except CouldNotRun:
+                    if not st["started"]:
+                        raise
+                    stopped = "page %d: %s" % (st["pages"] + 1, ctx.inputs["urls"][-1]["url"])
+                    break
+            if stopped:
+                break
+            if body is None:
+                if not st["started"]:
+                    raise CouldNotRun("first page answered 429 %d times" % (args.max_429 + 1))
+                stopped = "page %d: 429 %d times running" % (st["pages"] + 1, args.max_429 + 1)
+                break
+            try:
+                page = json.loads(body.decode("utf-8"))
+            except ValueError as e:
+                if not st["started"]:
+                    raise CouldNotRun("unparseable JSON from %s: %s" % (url, e))
+                stopped = "page %d: unparseable JSON" % (st["pages"] + 1)
+                break
+            if not isinstance(page, dict) or not isinstance(page.get("nulls"), list):
+                raise CouldNotRun("page %d has no nulls[] list" % (st["pages"] + 1))
+            rows = page["nulls"]
+            if not st["started"]:
+                if not rows:
+                    raise CouldNotRun("the first page carried no nulls rows; nothing was walked")
+                total = page.get("nulls_total")
+                if isinstance(total, int) and not isinstance(total, bool):
+                    st["first_page_nulls_total"] = total
+            matched_rows = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    raise CouldNotRun("a nulls row is not an object (page %d)" % (st["pages"] + 1))
+                route = _null_route(row)
+                ts = ms_or_iso(_null_field(row, NULL_TS_KEYS))
+                if route is None or ts is None:
+                    raise CouldNotRun("a nulls row has no route or no timestamp (page %d, keys %s)"
+                                      % (st["pages"] + 1, sorted(row)))
+                if route != args.route:
+                    continue
+                if args.status is not None and row.get("status") != args.status:
+                    continue
+                reason = _null_field(row, NULL_REASON_KEYS)
+                reason = reason if isinstance(reason, str) else ""
+                if args.reason_prefix is not None and not reason.startswith(args.reason_prefix):
+                    continue
+                matched_rows.append(row)
+                st["matched"] += 1
+                day = ts.strftime("%Y-%m-%d")
+                st["by_day_utc"][day] = st["by_day_utc"].get(day, 0) + 1
+                stamp = iso(ts)
+                if st["first_ts"] is None or stamp < st["first_ts"]:
+                    st["first_ts"] = stamp
+                if st["last_ts"] is None or stamp > st["last_ts"]:
+                    st["last_ts"] = stamp
+                if args.cutoff_dt is not None:
+                    st["before_cutoff" if ts < args.cutoff_dt else "after_cutoff"] += 1
+                key = reason[:80]
+                st["reasons"][key] = st["reasons"].get(key, 0) + 1
+            if out_fh is not None:
+                for row in matched_rows:
+                    out_fh.write((json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
+                out_fh.flush()
+                st["out_bytes"] = out_fh.tell()
+            st["started"] = True
+            st["pages"] += 1
+            st["rows_read"] += len(rows)
+            st["has_more"] = page.get("has_more") is True
+            nxt = page.get("next_nulls_since")
+            if not rows or not st["has_more"]:
+                st["finished"] = True
+            elif nxt is None or nxt == st["cursor"]:
+                stopped = "page %d: has_more true but %s" % (
+                    st["pages"], "no next_nulls_since" if nxt is None else "the cursor did not advance")
+            else:
+                st["cursor"] = nxt
+            if args.state:
+                _write_json_atomic(args.state, st)
+            if stopped:
+                break
+    finally:
+        if out_fh is not None:
+            out_fh.close()
+
+    complete = bool(st["finished"] and st["has_more"] is False
+                    and st["first_page_nulls_total"] is not None
+                    and st["rows_read"] >= st["first_page_nulls_total"])
+    out = {
+        "query": query,
+        "pages": st["pages"],
+        "rows_read": st["rows_read"],
+        "first_page_nulls_total": st["first_page_nulls_total"],
+        "has_more_at_end": st["has_more"],
+        "complete": complete,
+        "counts_are": "totals" if complete else "floors",
+        "matched": st["matched"],
+        "by_day_utc": dict(sorted(st["by_day_utc"].items())),
+        "first_ts": st["first_ts"],
+        "last_ts": st["last_ts"],
+        "before_cutoff": st["before_cutoff"] if args.cutoff_dt else None,
+        "after_cutoff": st["after_cutoff"] if args.cutoff_dt else None,
+        "reasons": st["reasons"],
+        "http429": st["http429"],
+        "stopped_early": stopped,
+        "cursor_end": st["cursor"],
+        "out": args.out,
+        "state": args.state,
+    }
+    if not complete:
+        # A partial walk HAS a partial result, which exit 3 promises it has not.
+        out["status_override"] = "degraded"
+        out["reason_override"] = stopped or (
+            "walk ended with has_more true" if st["has_more"] else
+            "rows_read %d is below the first page's nulls_total %s"
+            % (st["rows_read"], st["first_page_nulls_total"]))
+    return out
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         self.print_usage(sys.stderr)
@@ -2000,6 +2301,20 @@ def build_parser():
     s.add_argument("--expect", action="append", metavar="NAME=SHA256")
     s.add_argument("--cache-bust", action="append", metavar="NAME")
 
+    s = sub.add_parser("changes-sweep", parents=[common_parser()])
+    s.add_argument("--since", required=True, help="window start: epoch ms or ISO 8601")
+    s.add_argument("--route", required=True, help="exact null route, e.g. 'POST /api/payout-bindings'")
+    s.add_argument("--status", type=int)
+    s.add_argument("--reason-prefix")
+    s.add_argument("--cutoff", help="ISO 8601; splits matched rows into before/after")
+    s.add_argument("--out", help="append matched rows here as JSONL (never printed)")
+    s.add_argument("--state", help="resumable walk state; an existing file is continued")
+    s.add_argument("--pace", type=float, default=1.5, help="seconds between pages (default 1.5)")
+    s.add_argument("--backoff", type=float, default=2.0,
+                   help="429 backoff base when no Retry-After is served (doubles per retry)")
+    s.add_argument("--max-429", type=int, default=6, help="429 retries per page before stopping")
+    s.add_argument("--max-pages", type=int, default=2000)
+
     s = sub.add_parser("runs-row", parents=[common_parser()])
     s.add_argument("--all", required=True, help="an `all` output as a file")
     s.add_argument("--docket", help="a `docket` output as a file")
@@ -2016,6 +2331,7 @@ COMMANDS = {
     "witness-gaps": cmd_witness_gaps, "hygiene": cmd_hygiene, "tally": cmd_tally,
     "queue-age": cmd_queue_age, "cost": cmd_cost, "manifest": cmd_manifest, "all": cmd_all,
     "prompt-integrity": cmd_prompt_integrity,
+    "changes-sweep": cmd_changes_sweep,
     "runs-row": cmd_runs_row,
 }
 

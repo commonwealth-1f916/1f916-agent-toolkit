@@ -272,12 +272,15 @@ was a fresh chance to get one detail wrong and store the wrong baseline, and a
 wrong baseline does not fail -- it reports a change tomorrow that never happened.
 So the recipes live here once, with the stored values as test literals.
 
-Seventeen subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
+Eighteen subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
 `hashes`, `seal`, `homepage`, `bindings`, `front`, `docket`, `push-verify`
 fetch public things and hash or diff them; `model`, `window`, `hygiene`,
 `tally`, `queue-age` and `cost` read files the caller saved; `manifest` does
 either, verifying a set of documents against `docs/MANIFEST` from a directory
-(`--dir`) or from a raw URL at a commit (`--base`). Each prints ONE
+(`--dir`) or from a raw URL at a commit (`--base`); `changes-sweep` walks the
+nulls log of `/api/changes` on its own cursor, paced and resumable, and counts
+one route's refusals by day and either side of a cutoff, naming its counts
+floors unless the walk drained the stream. Each prints ONE
 JSON object naming every URL or file it read, with its status, byte count and
 sha-256. `cost` sums a transcript's `usage` fields into token and tool-call
 counters -- integers only, never the transcript's own text. `docs/MANIFEST`
@@ -288,7 +291,8 @@ its prompt.
 
 What it refuses to do: **judge** (a changed hash is exit 0 with the change in the
 output -- what it means is the run's decision), **write** (ledger rows come in as
-files, and nothing is written outside `--workdir`), and **hold a credential**
+files, and nothing is written outside `--workdir` save the `--out` and `--state`
+files `changes-sweep` is handed), and **hold a credential**
 (there is no authenticated call in it; that is `1f916-run`'s job). Python 3.9+
 standard library only; `git` is the one external command.
 
