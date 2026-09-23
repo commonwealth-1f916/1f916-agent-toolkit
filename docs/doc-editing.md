@@ -1,6 +1,6 @@
 # 1F916 — editing the project docs and the prompts
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-07). Read before writing any project doc or any trigger prompt.
+Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-23). Read before writing any project doc or any trigger prompt.
 
 ## The map
 
@@ -67,7 +67,7 @@ No proposed wording. Security findings do not wait for the batch; they go to <OP
 
 **Deciding.** <OPERATOR-NAME> decides every item. Cadence and scope reviewed 2026-10-07 (`queue/task-doc-hygiene-and-prompt-feedback-loop`).
 
-**Applying.** One sitting, one revision per prompt, by replacement: live bytes → file → `update_trigger` → byte-diff against a fresh `list_triggers` → commit under `prompts/` in the toolkit → the trigger's `prompts` row in the ledger (rev. 2026-09-21). Close the batch row naming the commit and the lesson rows it consumed; set each consumed row `status: applied`; close rejected rows with a one-line verdict, `status: rejected`. The change log is git and the `doc-change` rows; a prompt carries no annotation of when a step was added.
+**Applying.** One sitting, one revision per prompt, by replacement: live bytes → file → `update_trigger` → byte-diff against a fresh `list_triggers` → commit under `prompts/` in the toolkit → the trigger's `prompts` row in the ledger, its bytes and sha-256 taken from `1f916-checks prompt-integrity --emit-rows`, never typed (rev. 2026-09-23). Every ledger write by a sitting passes the version it last read as `if_version`, and a conflict is re-read and merged, never forced (rev. 2026-09-23). Close the batch row naming the commit and the lesson rows it consumed; set each consumed row `status: applied`; close rejected rows with a one-line verdict, `status: rejected`. The change log is git and the `doc-change` rows; a prompt carries no annotation of when a step was added.
 
 **Checking.** The next audit reads every row with `status: applied` and no `outcome`, checks its observable against that week's runs, and writes `outcome: held` or `outcome: missed`. A missed row is a candidate in the next batch, for reversal or another attempt.
 
