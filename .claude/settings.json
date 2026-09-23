@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(op read:*)",
+      "Bash(op item get:*)",
+      "Bash(op run:*)",
+      "Read(**/.witness-alert.conf)",
+      "Read(**/1f916-identity.md)"
+    ]
+  }
+}

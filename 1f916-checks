@@ -1208,6 +1208,113 @@ def cmd_cost(ctx, args):
 
 
 # ---------------------------------------------------------------------------
+# manifest -- a set of documents against the digests a manifest claims for them
+
+MANIFEST_LINE_RE = re.compile(r"^([0-9a-f]{64})  (\S.*)$")
+
+
+def parse_manifest(text):
+    """[(path, sha256)] from `<sha256>  <path>` lines; blank and # lines skipped.
+
+    Refuses rather than tolerates: a malformed line, a duplicate path, an
+    absolute or parent-relative path, or no entries at all. A manifest that
+    verifies nothing must not print a clean result.
+    """
+    entries = []
+    seen = set()
+    for n, line in enumerate(text.split("\n"), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        m = MANIFEST_LINE_RE.match(line)
+        if not m:
+            raise CouldNotRun("manifest line %d is not `<sha256>  <path>`" % n)
+        digest, path = m.group(1), m.group(2)
+        if path.startswith("/") or path.startswith("../") or "/../" in path or path == "..":
+            raise CouldNotRun("manifest line %d names a path outside the set: %s" % (n, path))
+        if path in seen:
+            raise CouldNotRun("manifest names %s twice" % path)
+        seen.add(path)
+        entries.append((path, digest))
+    if not entries:
+        raise CouldNotRun("manifest has no entries; it verifies nothing")
+    return entries
+
+
+def cmd_manifest(ctx, args):
+    """Verify every file a manifest names, from a directory or from a base URL.
+
+    Two modes, exactly one of them: --dir hashes local files and also reports
+    files the directory holds that the manifest does not name (`extra`);
+    --base fetches `<base>/<path>` for each entry the way a scheduled run
+    fetches its docs at a pinned commit. Either way the output is the four
+    disjoint lists and `all_match`, which is true only when every entry
+    matched and nothing is missing -- `extra` files do not fail a fetch-mode
+    check because a fetch cannot see them, and do fail a --dir check because
+    an unmanifested doc beside the manifested ones is the drift this exists
+    to catch. `computed` (--dir only) is the manifest the directory would
+    produce, so a caller can regenerate the file from this one recipe.
+    """
+    if bool(args.dir) == bool(args.base):
+        raise UsageError("give exactly one of --dir or --base")
+    text = ctx.read_file(args.manifest, "manifest").decode("utf-8", "replace")
+    manifest_sha = ctx.inputs["files"][-1]["sha256"]
+    entries = parse_manifest(text)
+    matched, mismatched, missing, extra, computed = [], [], [], [], []
+    if args.dir:
+        if not os.path.isdir(args.dir):
+            raise CouldNotRun("--dir is not a directory: %s" % args.dir)
+        present = {}
+        for root, dirs, files in os.walk(args.dir):
+            dirs.sort()
+            for name in sorted(files):
+                full = os.path.join(root, name)
+                rel = os.path.relpath(full, args.dir).replace(os.sep, "/")
+                if os.path.abspath(full) == os.path.abspath(args.manifest):
+                    continue
+                if not name.endswith(args.suffix):
+                    continue
+                with open(full, "rb") as fh:
+                    present[rel] = sha256_hex(fh.read())
+        for rel in sorted(present):
+            computed.append({"path": rel, "sha256": present[rel]})
+        named = set()
+        for path, want in entries:
+            named.add(path)
+            got = present.get(path)
+            if got is None:
+                missing.append(path)
+            elif got == want:
+                matched.append(path)
+            else:
+                mismatched.append({"path": path, "expected": want, "actual": got})
+        extra = sorted(p for p in present if p not in named)
+    else:
+        base = args.base.rstrip("/")
+        for path, want in entries:
+            url = base + "/" + path
+            try:
+                body = ctx.fetch(url)
+            except CouldNotRun as e:
+                rec = ctx.inputs["urls"][-1] if ctx.inputs["urls"] else {}
+                if rec.get("url") == url and rec.get("status") == 404:
+                    missing.append(path)
+                    continue
+                raise
+            got = sha256_hex(body)
+            if got == want:
+                matched.append(path)
+            else:
+                mismatched.append({"path": path, "expected": want, "actual": got})
+    all_match = (not mismatched and not missing and (not args.dir or not extra))
+    out = {"manifest_sha256": manifest_sha, "entries": len(entries), "mode": "dir" if args.dir else "base",
+           "matched": matched, "mismatched": mismatched, "missing": missing, "extra": extra,
+           "all_match": all_match}
+    if args.dir:
+        out["computed"] = computed
+    return out
+
+
+# ---------------------------------------------------------------------------
 # prompt-integrity -- the stored prompts against the ledger rows that describe them
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -1854,6 +1961,13 @@ def build_parser():
     s.add_argument("--transcript", required=True,
                     help="path to a session's .jsonl transcript (read, never printed)")
 
+    s = sub.add_parser("manifest", parents=[common_parser()])
+    s.add_argument("--manifest", required=True, help="the `<sha256>  <path>` file")
+    s.add_argument("--dir", help="verify local files under this directory")
+    s.add_argument("--base", help="or fetch <base>/<path> for each entry (a raw URL at a commit)")
+    s.add_argument("--suffix", default=".md",
+                    help="--dir only: files that count as members of the set (default .md)")
+
     s = sub.add_parser("queue-age", parents=[common_parser()])
     s.add_argument("--dir", required=True)
     s.add_argument("--collection", default="queue")
@@ -1900,7 +2014,7 @@ COMMANDS = {
     "homepage": cmd_homepage, "bindings": cmd_bindings, "model": cmd_model, "front": cmd_front,
     "docket": cmd_docket, "push-verify": cmd_push_verify, "window": cmd_window,
     "witness-gaps": cmd_witness_gaps, "hygiene": cmd_hygiene, "tally": cmd_tally,
-    "queue-age": cmd_queue_age, "cost": cmd_cost, "all": cmd_all,
+    "queue-age": cmd_queue_age, "cost": cmd_cost, "manifest": cmd_manifest, "all": cmd_all,
     "prompt-integrity": cmd_prompt_integrity,
     "runs-row": cmd_runs_row,
 }
