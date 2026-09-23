@@ -1,6 +1,6 @@
 # 1F916 delivery runbook — the human steps
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-17).
+Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-23).
 
 **NEW ROUTE 2026-09-04 — git bundle over the desktop bridge, for everything the Mac pushes (toolkit, homepage, third-party repos at the operator's go).** Proven end to end on two repos the day it was adopted (`notes/2026-09-04-bundle-over-the-bridge-is-the-route`; PRs toolkit #8 fix-up, #11, #12 and homepage #1 all travelled this way). It replaces every earlier container→Mac transfer — tarball+sha, base64 through osascript, gzipped diff with chunk hashes, patch in a doc — all of which shared the one property that made them lossy: **the bytes passed through the model's output** (`notes/2026-09-04-base64-through-me-is-a-lossy-channel`). The bridge file tools do not; git's object hashes are the integrity check; the SHA the session built is the SHA that lands. Mechanics in §3. Scheduled runs never use it — they have no bridge — and keep the connector route below for `<OPERATOR-FORK>`.
 
@@ -184,9 +184,15 @@ What the session does, and what you should see it report, in this order:
   it and the commit is recreated unsigned in the container before anything goes further (rev.
   2026-09-13) → **RE-SIGN (since 2026-09-05; written here 2026-09-06 after being skipped once):**
   `git worktree add /tmp/1f916-<YYYY-MM-DD>/<repo>-wt <branch>` so the deployment clone stays on `main` throughout, then
-  in the worktree `git rebase --exec 'git commit --amend --no-edit --reset-author -S' main` (why:
-  `notes/2026-09-16-lesson-resign-must-reset-the-author`) (rev. 2026-09-17), then **assert the tree
-  AGAIN** (it must be unchanged) and **expect the tip SHA to differ**; `git log -1 --format=%G?` must
+  in the worktree `git rebase --exec 'git commit --amend --no-edit --reset-author -S' <base>`, where
+  `<base>` is the bundle's recorded base after `git rev-parse origin/main` has been asserted equal to
+  it in the same command, never the word `main`: the deployment clone's local `main` can lag `origin`,
+  and a rebase onto a stale one replays every commit between them, which the tree assertion cannot see
+  because a replayed merged commit reproduces its tree (why:
+  `notes/lesson-2026-09-21-the-tree-assertion-cannot-see-a-rebase-onto-a-stale-base`;
+  `notes/2026-09-16-lesson-resign-must-reset-the-author`) (rev. 2026-09-23), then **assert the tree
+  AGAIN** (it must be unchanged), **assert the parent equals `<base>` and `git rev-list --count
+  <base>..<branch>` equals the number of commits built** (rev. 2026-09-23), and **expect the tip SHA to differ**; `git log -1 --format=%G?` must
   read `G`. Signing happens only when a commit object is CREATED on the Mac — a bundle carries the
   container's objects exactly, which is its virtue, so without this step the commit lands
   Unverified beside the operator's signed merges (homepage PR #2's `039568fa`, the specimen). First
@@ -240,7 +246,11 @@ the Mac is expected to be identical to the container's, and — since the re-sig
 author and committer `commonwealth <321972176+commonwealth-1f916@users.noreply.github.com>` (the
 re-sign resets both to the configured identity), `%G?` = `G`. An identical pushed SHA means the
 re-sign was skipped; a different tree, or any other author or committer, is the finding (rev.
-2026-09-17). On `<OPERATOR-FORK>` there is no re-sign step
+2026-09-17). The tree is necessary and not sufficient: the verification also reports the parent,
+which must equal the queued base, and the commit count above that base, which must equal the number
+built, because a rebase onto a stale base replays already-merged commits with their trees intact
+(why: `notes/lesson-2026-09-21-the-tree-assertion-cannot-see-a-rebase-onto-a-stale-base`) (rev.
+2026-09-23). On `<OPERATOR-FORK>` there is no re-sign step
 and the pushed `%G?` is `N`; a `U` there is the container's signer and a finding (rev. 2026-09-13).
 If the tree does *not* match, nothing else about the run matters — stop and say so.
 

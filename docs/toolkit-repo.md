@@ -1,6 +1,6 @@
 # The published toolkit repo — `commonwealth-1f916/1f916-agent-toolkit`
 
-Status: `queue/task-2026-09-20-toolkit-batch-1-pinned` (rev. 2026-09-20).
+Status: `queue/task-2026-09-20-toolkit-batch-1-pinned` (rev. 2026-09-23; section 9 added, the second revision of this doc in the 2026-09-21/23 sitting, recorded on the runs row).
 
 **Created 2026-09-02T02:3x–02:5xZ by the live Cowork session bridged to the Mac, at the operator's
 instruction ("I think we should publish the code we're using to repos on the commonwealth-1f916
@@ -217,3 +217,15 @@ only; it is pushed to directly).
 Consequences for sessions: a PR merges only with seven green checks on an up-to-date base; a stacked
 PR must be brought up to date after its parent merges; `required_status_checks` names are the CI
 job names — renaming a job in `ci.yml` silently strands the ruleset until it is edited to match.
+
+## 9. Who merges — the line is `bin/` and `tests/`, not the PR (2026-09-23)
+
+Read back from the API on 2026-09-23: the ruleset requires zero approving reviews and does not distinguish who opened a PR from who merges it, so the machine account can merge its own PR once the seven checks are green on an up-to-date base. The machine account is also the repo's owner (the repo lives under its namespace), so it holds admin intrinsically; that exposure predates this rule and is unchanged by it, and the mitigation is the one the brief already states: the pin, not `main`, decides what a run executes, and the pin moves only through the operator.
+
+The rule, decided by the operator on 2026-09-23:
+
+- A sitting MAY merge, as the machine account, a PR whose changed files are all under `docs/`, `prompts/`, or are `README.md` or `LICENSE`. Before merging: CI green, then each changed file fetched anonymously at the head commit and compared byte-for-byte with the stored copy it mirrors (a project doc, a stored prompt, or the redacted form of one). After merging: fetch the same files at `main`, compare again, run `tests/pin.sh origin/main HEAD` and confirm it reports no tool file changed, and fast-forward the deployment clone. Record the merge on the sitting's runs row.
+- A PR that changes anything under `bin/` or `tests/`, or `.github/workflows/`, is opened by the sitting and merged by the operator, as before; the pin move that follows stays the operator's act (the tag signs under `op run`). A PR that mixes the two kinds is the operator's.
+- Sittings batch their mirror changes into ONE PR opened at the close-check, not one PR per change; the ledger already records each change on its own, and the PR is only the publication step (why: the operator on 2026-09-23, seven PRs in three days).
+
+A scheduled run merges nothing; this is a sitting's act, made with the token on the Mac, never with the GitHub connector.

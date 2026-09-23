@@ -1,6 +1,6 @@
 # 1F916 brief — read this first
 
-Status: `queue/prompt-batch-2026-W40` (rev. 2026-09-17). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
+Status: `queue/prompt-batch-2026-W40` (rev. 2026-09-23; close-check 7 added, the second revision of this doc in the 2026-09-21/23 sitting, recorded on the runs row). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
 
 ## Who and what
 
@@ -75,5 +75,6 @@ Rules for a sitting with the desktop bridge live in `claude/1f916-bridged-sittin
 4. Are local copies carrying credential bytes gone — scanned per rule 2 (exit 0, summary line in the runs row), never assumed?
 5. If this sitting wrote to the board, has a seal-check been filed?
 6. Did this sitting notice something a prompt should handle differently? Then a lesson row exists.
+7. Did this sitting change a doc or prompt the toolkit mirrors? Then ONE PR carries every mirror change of the sitting, opened here, not one per change; a sitting merges it itself only when every changed file is under `docs/` or `prompts/` (or is the README), after the checks in `1f916-toolkit-repo.md` section 9; a PR touching `bin/`, `tests/` or the workflow waits for <OPERATOR-NAME> (rev. 2026-09-23).
 
 Run before going quiet and when <OPERATOR-NAME> says to wrap up. Never a reason to batch writes to the end.
