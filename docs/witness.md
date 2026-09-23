@@ -1,6 +1,6 @@
 # 1F916 — witness #6: standing facts, checks, failure modes
 
-Status: `queue/task-witness-audit-items-live-only-in-a-run-report` (rev. 2026-09-14).
+Status: `queue/task-witness-audit-items-live-only-in-a-run-report` (rev. 2026-09-23).
 
 Extracted 2026-09-02 from the 12:00 prompt (step 3), the witness handoffs, and the activity log. **The sealed values — the two script hashes, the cron line, the key path, the public key — live in `claude/1f916-identity.md` §Witness and are inputs to seal 1809; this doc points at them and never restates them.** Everything here is reference; the daily run's checks are listed so the prompt can be short.
 
@@ -16,7 +16,7 @@ Alerting: `~/bin/witness-alert.sh` (a symlink into the toolkit clone `~/1f916-ag
 
 ## The machine-side checks (rev. 2026-09-14)
 
-The checks above read what the machine publishes; these seven read what it runs. A sitting on the <WITNESS-HOST>-ssh route runs them, monthly and beside any change to the deployed files; no scheduled run has that route. Each is a read: none writes on the Pi, and neither clone is pulled, since a pull is a deployment (why: `notes/2026-09-04-a-pull-is-a-deployment`). The last full pass is the `runs` row that made it.
+The checks above read what the machine publishes; these seven read what it runs. A sitting on the <WITNESS-HOST>-ssh route runs them, monthly and beside any change to the deployed files; no scheduled run has that route. Each is a read: none writes on the Pi, and neither clone is pulled, since a pull is a deployment (why: `notes/2026-09-04-a-pull-is-a-deployment`). The last full pass, and each item's last run, is recorded in the ledger's `state/witness-mechanism-audit` row, which names the `runs` row that made it and is written only by the sitting that ran the pass (rev. 2026-09-23).
 
 1. **Deployed source.** sha-256 of the deployed `witness.mjs` and `run-witness.sh` against the two reference hashes seal 1809 pins, published in the repo as `seal-1809-preimage.txt`, and against the files the repo serves at main. Nothing else can see a running copy diverge from the sealed one.
 2. **The key file.** Mode, owner, and that it is both ignored and untracked; `run-witness.sh` runs `git add -A` hourly, so an unignored key file publishes itself.
