@@ -36,7 +36,7 @@ jobs:
       # move it: read the tag again and change the sha here, deliberately.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: shellcheck the test scripts at full severity
-        run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh tests/checks.sh tests/manifest.sh
+        run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh tests/checks.sh tests/manifest.sh tests/pinfile.sh
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
@@ -91,6 +91,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: pinned recipes against live captures, no network
         run: python3 --version && sh tests/checks.sh
+      - name: signed pin file -- real ssh-keygen signatures, and it must refuse the bad ones
+        run: sh tests/pinfile.sh
 
   gate-tests:
     strategy:
