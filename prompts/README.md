@@ -16,6 +16,10 @@ here IS the stored trigger text and nothing is redacted on the way out:
 | `<OPERATOR-GITHUB-LOGIN>` | the operator's GitHub login, whose identity connector commits carry |
 | `<RUN-HOME>` | the home directory of the container a scheduled run executes in (named in the scan paths of step 5b / 8a) |
 
+`<BOUND-DOMAIN>` is not a secret: this repo's README, SECURITY.md and `1f916-checks` name it in the
+clear. It is a placeholder here only so that every site-specific value in a prompt resolves from the
+one values file, which keeps the templates reusable by another citizen.
+
 The prompts say "the operator" for the person and `<OPERATOR-NAME>` where a command needs the name.
 
 **The stored trigger is authoritative, and this file must equal it byte for byte.** A sitting that
