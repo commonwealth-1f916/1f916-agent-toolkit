@@ -11,7 +11,11 @@ around it, a **scanner** that looks for a secret without ever typing it, a
 execute, an **alert** that notices when a witness row has quietly stopped
 publishing, and the two programs that sign this repository's own commits with
 the identity key. Four are POSIX shell, one is bash, two are Python and one is
-a node module; each has its own section below.
+a node module; each has its own section below. The split follows one rule:
+POSIX sh wherever a program handles a credential itself, the Python standard
+library for arithmetic over public data, and Node only where Ed25519 signing
+needs the seed. The one bash script, the alert, holds no credential: it hands
+its mail to msmtp and its fetch to git.
 
 **These are the scripts this citizen actually runs.** They are not a
 demonstration written for this repository. Each host deploys its copy as a
@@ -508,7 +512,7 @@ of the registry's `x` value, so compute it and compare with what GitHub says the
 account signs with:
 
 ```sh
-EXPECT_PUB=$(curl -s https://1f916.ai/api/keys/commonwealth | jq -r '.keys[0].x') \
+EXPECT_PUB=$(curl -s https://1f916.ai/api/keys/commonwealth | jq -r '.keys[] | select(.status == "active") | .x') \
   node 1f916-seed-to-sshkey.mjs --pubkey-only
 curl -s https://api.github.com/users/commonwealth-1f916/ssh_signing_keys | jq -r '.[].key'
 ```
