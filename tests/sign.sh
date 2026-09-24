@@ -18,9 +18,10 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 # runs a suite against a mutated COPY, and a suite that can only ever run
 # against the file beside it cannot be pointed at one.
 #
-# Usage: tests/sign.sh [path-to-1f916-ssh-sign] [path-to-1f916-seed-to-sshkey.mjs]
+# Usage: tests/sign.sh [path-to-1f916-ssh-sign] [path-to-1f916-seed-to-sshkey.mjs] [path-to-1f916-gate]
 SIGN="${1:-$HERE/1f916-ssh-sign}"
 TOOL="${2:-$HERE/1f916-seed-to-sshkey.mjs}"
+GATE="${3:-$HERE/1f916-gate}"
 
 for t in node ssh-keygen ssh-agent ssh-add git; do
   command -v "$t" >/dev/null 2>&1 || { printf '# no %s: skipping the signing test\n' "$t"; exit 0; }
@@ -202,6 +203,47 @@ else ok "4e. a key the agent refuses yields NO commit"; fi
 if grep -qi 'error loading key\|invalid format\|libcrypto' "$W/err4e"
 then ok "4e. and ssh-add's own reason reaches the operator"
 else nok "4e. and ssh-add's own reason reaches the operator" "stderr: $(tr '\n' ' ' < "$W/err4e" | cut -c1-200)"; fi
+
+# --- 5. the two copies of the seed-to-key derivation agree (review item 12h) ---
+# The PKCS#8 wrapping that turns a raw seed into a key exists twice by design:
+# inline in 1f916-gate's sign_preimage (the gate is one file, so the pin is one
+# digest) and in 1f916-seed-to-sshkey.mjs. Nothing compared them. Here the
+# gate's OWN node program -- extracted from the gate file, not retyped -- signs
+# a fixed message with the throwaway seed, and the signature must verify under
+# the public key the seed tool publishes for the same seed. If either copy
+# drifts, the key the gate signs seals with and the key git signs with are two
+# keys, and every gate test would still pass.
+sed -n "/^sign_preimage() {$/,/^}$/p" "$GATE" > "$W/signfn"
+if grep -q 'node -e' "$W/signfn"; then ok "5. the gate's sign_preimage was found in $GATE"
+else nok "5. the gate's sign_preimage was found in $GATE"; fi
+MSG='1f916 fixture preimage: seed-to-key agreement'
+# shellcheck source=/dev/null
+GSIG=$( (. "$W/signfn"; ED25519_PRIV="$SEED" sign_preimage "$MSG") 2>/dev/null)
+# $W/k.pub is ssh-keygen's own reading of the PEM the seed tool emitted in 1.
+TOOLPUB=$(cut -d' ' -f2 "$W/k.pub")
+if [ -n "$GSIG" ] && [ -n "$TOOLPUB" ] && node -e '
+  const c = require("crypto");
+  const blob = Buffer.from(process.argv[1], "base64");
+  const raw = blob.subarray(blob.length - 32);
+  const spki = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), raw]);
+  const key = c.createPublicKey({ key: spki, format: "der", type: "spki" });
+  process.exit(c.verify(null, Buffer.from(process.argv[2], "utf8"), key,
+                        Buffer.from(process.argv[3], "base64url")) ? 0 : 1);
+' "$TOOLPUB" "$MSG" "$GSIG"
+then ok "5. a signature made by the gate's derivation verifies under the seed tool's key"
+else nok "5. a signature made by the gate's derivation verifies under the seed tool's key" "gate sig bytes=${#GSIG} tool pub bytes=${#TOOLPUB}"; fi
+BADSIG=$(printf '%s' "$GSIG" | sed 's/^./A/;t;s/^/A/')
+[ "$BADSIG" = "$GSIG" ] && BADSIG=$(printf '%s' "$GSIG" | sed 's/^./B/')
+if [ "$BADSIG" != "$GSIG" ] && ! node -e '
+  const c = require("crypto");
+  const blob = Buffer.from(process.argv[1], "base64");
+  const spki = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), blob.subarray(blob.length - 32)]);
+  const key = c.createPublicKey({ key: spki, format: "der", type: "spki" });
+  process.exit(c.verify(null, Buffer.from(process.argv[2], "utf8"), key,
+                        Buffer.from(process.argv[3], "base64url")) ? 0 : 1);
+' "$TOOLPUB" "$MSG" "$BADSIG" 2>/dev/null
+then ok "5. negative control: a changed signature differs and is rejected"
+else nok "5. negative control: a changed signature differs and is rejected"; fi
 
 printf '# %d tests, %d passed, %d failed\n' "$n" "$pass" "$fail"
 [ "$fail" = 0 ] || exit 1

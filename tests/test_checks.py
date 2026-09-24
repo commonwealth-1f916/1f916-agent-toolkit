@@ -629,6 +629,38 @@ class PushVerify(GitBase):
         self.assertFalse(out["all_match"])
 
 
+    def test_dot_segments_are_refused(self):
+        # review 12e: '..' passed the OWNER/NAME pattern and was left to URL
+        # normalisation. A dot-only segment is a usage error, before any fetch.
+        for bad in ("../fixture-repo", "commonwealth-1f916/..", "./x", "a/."):
+            self.run_checks("push-verify", "--repo", bad, "--ref", "main",
+                            "--file", "tool=" + self.write("l", b"x"), want=64)
+
+
+class FetchCap(unittest.TestCase):
+    # review 12b: a body is read in bounded chunks and refused past the cap,
+    # never truncated and returned as if whole.
+    class Resp(object):
+        def __init__(self, data):
+            self.data, self.pos = data, 0
+
+        def read(self, n=-1):
+            if n is None or n < 0:
+                n = len(self.data) - self.pos
+            out = self.data[self.pos:self.pos + n]
+            self.pos += len(out)
+            return out
+
+    def test_under_the_cap_is_whole_and_over_it_is_could_not_run(self):
+        mod = load_module()
+        body = b"x" * (3 * 1024 + 17)
+        self.assertEqual(mod._read_capped(self.Resp(body), len(body), "u"), body)
+        with self.assertRaises(mod.CouldNotRun) as cm:
+            mod._read_capped(self.Resp(body + b"y"), len(body), "u")
+        self.assertIn("exceeds", str(cm.exception))
+        self.assertGreater(mod.MAX_FETCH_BYTES, 16 * 1024 * 1024)
+
+
 class WitnessGaps(GitBase):
     def test_committer_clock_gap_and_non_append(self):
         repo = self.new_repo("witness")
@@ -656,6 +688,33 @@ class WitnessGaps(GitBase):
         out = self.run_checks("witness-gaps", "--repo", self.url(repo), "--gap-minutes", "100000")
         self.assertEqual(out["commits"], 5)
         self.assertEqual(out["gaps_over"], [])
+
+    def test_non_append_walk_is_one_process_not_one_per_commit(self):
+        # review 12a: the per-commit `git diff --numstat` became one `git log
+        # --numstat`. A git shim counts invocations; the answer must not change.
+        repo = self.new_repo("witness")
+        path = "witness-state/countersignatures.jsonl"
+        body = ""
+        for i in range(8):
+            body += "%d\n" % i
+            self.commit_file(repo, path, body, when="2026-09-10T%02d:00:00Z" % (10 + i))
+        self.commit_file(repo, path, "0\nONE\n", when="2026-09-10T19:00:00Z")
+        real_git = shutil.which("git")
+        count = os.path.join(self.tmp, "git-calls")
+        shim_dir = os.path.join(self.tmp, "shim")
+        os.mkdir(shim_dir)
+        shim = os.path.join(shim_dir, "git")
+        with open(shim, "w") as fh:
+            fh.write("#!/bin/sh\necho x >> '%s'\nexec '%s' \"$@\"\n" % (count, real_git))
+        os.chmod(shim, 0o755)
+        out = self.run_checks("witness-gaps", "--repo", self.url(repo),
+                              env_extra={"PATH": shim_dir + os.pathsep + os.environ.get("PATH", "")})
+        self.assertEqual(out["commits"], 9)
+        self.assertEqual([c["at"] for c in out["non_append_commits"]], ["2026-09-10T19:00:00Z"])
+        self.assertEqual(out["non_append_commits"][0]["deletions"], "7")
+        with open(count) as fh:
+            calls = len(fh.read().splitlines())
+        self.assertLessEqual(calls, 3, "git ran %d times for 9 commits" % calls)
 
     def hourly(self, repo, stamps):
         path = "witness-state/countersignatures.jsonl"

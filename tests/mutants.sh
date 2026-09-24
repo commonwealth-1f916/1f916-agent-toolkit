@@ -26,7 +26,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 killed=0; survived=0
 
-mutant() {  # mutant <name> <sed-expression> [gate|run|scan|sign|seed|alert]
+mutant() {  # mutant <name> <sed-expression> [gate|run|scan|sign|seed|gatekey|alert]
   name="$1"; expr="$2"; kind="${3:-gate}"
   second=""
   case "$kind" in
@@ -35,6 +35,7 @@ mutant() {  # mutant <name> <sed-expression> [gate|run|scan|sign|seed|alert]
     scan)  src="$SCANTOOL"; suite="$here/scan.sh" ;;
     sign)  src="$SIGNTOOL"; suite="$here/sign.sh" ;;
     seed)  src="$SEEDTOOL"; suite="$here/sign.sh"; second="$SIGNTOOL" ;;
+    gatekey) src="$GATE"; suite="$here/sign.sh" ;;
     *)     src="$GATE";  suite="$here/gate.sh"  ;;
   esac
   cp "$src" "$WORK/subject"
@@ -50,6 +51,7 @@ mutant() {  # mutant <name> <sed-expression> [gate|run|scan|sign|seed|alert]
   case "$kind" in
     sign) set -- "$WORK/subject" "$SEEDTOOL" ;;
     seed) set -- "$second" "$WORK/subject" ;;
+    gatekey) set -- "$SIGNTOOL" "$SEEDTOOL" "$WORK/subject" ;;
     *)    set -- "$WORK/subject" ;;
   esac
   if sh "$suite" "$@" >/dev/null 2>&1; then
@@ -174,6 +176,9 @@ if command -v ssh-keygen >/dev/null 2>&1 && command -v ssh-agent >/dev/null 2>&1
   mutant 'the key command stderr is lost'  's|ssh-add -q -t 30 -|ssh-add -q -t 30 - 2>/dev/null|'  sign
   mutant 'HANDLE is not required by the wrapper' 's|^  \[ -n "\${HANDLE:-}" \].*$||'                sign
   mutant 'HANDLE is defaulted again'       's|^const HANDLE = process.env.HANDLE;$|const HANDLE = process.env.HANDLE \|\| "commonwealth";|' seed
+  # Review item 12h: the gate's inline PKCS#8 prefix drifting from the seed
+  # tool's. tests/gate.sh cannot see it (its node is a double); sign.sh 5 can.
+  mutant "the gate's seed-to-key prefix drifts" 's|"302e020100300506032b657004220420"|"302e020100300506032b657004220421"|' gatekey
 else
   printf '# no ssh-keygen/ssh-agent: signing mutants skipped, not passed\n'
 fi

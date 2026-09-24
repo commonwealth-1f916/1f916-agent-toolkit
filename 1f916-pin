@@ -47,6 +47,13 @@ Usage:
                    --fingerprint SHA256:... [--dir DIR] [--min-serial N]
       --dir DIR     also hash DIR/<name> for every `file` line and compare
       --min-serial  FAIL a pin whose serial is lower (a rollback)
+  1f916-pin tag-verify --tag-object F (--key-json F | --pubkey F)
+                   --fingerprint SHA256:... [--expect-object HEX] [--expect-tag NAME]
+      F is `git cat-file tag <name>` saved to a file. Verifies the tag's SSH
+      signature (namespace `git`, over the tag object up to its signature
+      block) with the same parser and verifier `verify` uses, so a run with no
+      ssh-keygen can check a signed tag against the registry's key. A PASS
+      proves key possession at tag time; it says nothing about who held it.
   1f916-pin fingerprint (--key-json F | --pubkey F)
   1f916-pin self-test
 
@@ -63,6 +70,9 @@ import struct
 import sys
 
 NAMESPACE = b"1f916-pin"
+GIT_NAMESPACE = b"git"
+SIG_BEGIN = b"-----BEGIN SSH SIGNATURE-----\n"
+SIG_END = b"-----END SSH SIGNATURE-----\n"
 MAGIC = b"SSHSIG"
 
 # --------------------------------------------------------------------------
@@ -414,6 +424,93 @@ def verify(args):
 
 
 # --------------------------------------------------------------------------
+# Signed git tags (review 2026-09-20, item 11: the audit's negative control as
+# a test). A tag object is its headers, a blank line, the message, and -- for
+# an SSH-signed tag -- an armored signature appended at the very end. git signs
+# every byte before the armor line with namespace `git`.
+
+_TAG_HEADER = {
+    "object": re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}"),
+    "type": re.compile(r"commit|tree|blob|tag"),
+    "tag": re.compile(r"\S+"),
+}
+
+
+def split_tag(data):
+    if b"\r" in data:
+        raise Refused("tag object has CR bytes")
+    i = data.rfind(SIG_BEGIN)
+    if i < 0:
+        if b"-----BEGIN PGP SIGNATURE-----" in data:
+            raise Refused("tag carries a PGP signature, not an SSH one")
+        raise Refused("tag carries no SSH signature")
+    if i > 0 and data[i - 1:i] != b"\n":
+        raise Refused("signature armor does not start a line")
+    if not data.endswith(SIG_END):
+        raise Refused("tag object does not end with the signature armor")
+    if data.count(SIG_BEGIN) != 1:
+        raise Refused("tag object carries more than one signature block")
+    return data[:i], data[i:]
+
+
+def parse_tag_headers(payload):
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError:
+        raise Refused("tag object is not UTF-8")
+    head = text.split("\n\n", 1)[0].split("\n")
+    out, order = {}, []
+    for line in head:
+        key, _, value = line.partition(" ")
+        order.append(key)
+        if key in out:
+            raise Refused("tag header %r appears twice" % key)
+        out[key] = value
+    if order[:3] != ["object", "type", "tag"] or "tagger" not in out:
+        raise Refused("tag headers are not object, type, tag, tagger")
+    for key, rx in _TAG_HEADER.items():
+        if not rx.fullmatch(out[key]):
+            raise Refused("tag header %r is malformed" % key)
+    return {"object": out["object"], "type": out["type"], "tag": out["tag"],
+            "tagger": out["tagger"]}
+
+
+def tag_verify(args):
+    result = {"verdict": None, "reasons": []}
+    expected = args.get("fingerprint")
+    if not expected or not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}", expected):
+        raise Usage("--fingerprint SHA256:<43 base64 characters> is required")
+    data = _read_bytes(args["tag_object"], "tag object")
+    keys = trusted_keys(args)
+    trusted = [k for k in keys if fingerprint(k) == expected]
+    result["trusted_key_fingerprints"] = [fingerprint(k) for k in keys]
+    if not trusted:
+        raise Refused("no trusted key has the expected fingerprint %s" % expected)
+    payload, armored = split_tag(data)
+    s = parse_sshsig(armored)
+    result["signature_key_fingerprint"] = fingerprint(s["pub"])
+    if s["pub"] not in trusted:
+        raise Refused("the tag was signed by a key that is not the trusted one")
+    if s["namespace"] != GIT_NAMESPACE:
+        raise Refused("signature namespace is %r, not 'git'"
+                      % s["namespace"].decode("ascii", "replace"))
+    if s["hash_alg"] not in (b"sha512", b"sha256"):
+        raise Refused("unsupported hash algorithm in the signature")
+    msg = signed_data(s["namespace"], s["reserved"], s["hash_alg"], payload)
+    if not ed25519_verify(s["pub"], msg, s["sig"]):
+        raise Refused("the Ed25519 signature does not verify over the tag object")
+    tag = parse_tag_headers(payload)
+    if args.get("expect_object") and tag["object"] != args["expect_object"]:
+        raise Refused("tag points at %s, not the expected %s"
+                      % (tag["object"], args["expect_object"]))
+    if args.get("expect_tag") and tag["tag"] != args["expect_tag"]:
+        raise Refused("tag is named %r, not the expected %r" % (tag["tag"], args["expect_tag"]))
+    result["verdict"] = "PASS"
+    result["tag"] = tag
+    return result
+
+
+# --------------------------------------------------------------------------
 # Self-test: the verifier against RFC 8032's own vectors, and the controls
 # that prove it can say no.
 
@@ -484,12 +581,14 @@ class Usage(Exception):
 
 
 def _parse(argv):
-    if not argv or argv[0] not in ("verify", "fingerprint", "self-test"):
-        raise Usage("usage: 1f916-pin verify|fingerprint|self-test ... (see the header)")
+    if not argv or argv[0] not in ("verify", "tag-verify", "fingerprint", "self-test"):
+        raise Usage("usage: 1f916-pin verify|tag-verify|fingerprint|self-test ... (see the header)")
     cmd, rest, args = argv[0], argv[1:], {}
     flags = {"--pin": "pin", "--sig": "sig", "--key-json": "key_json",
              "--pubkey": "pubkey", "--fingerprint": "fingerprint",
-             "--dir": "dir", "--min-serial": "min_serial"}
+             "--dir": "dir", "--min-serial": "min_serial",
+             "--tag-object": "tag_object", "--expect-object": "expect_object",
+             "--expect-tag": "expect_tag"}
     while rest:
         flag = rest.pop(0)
         if flag not in flags or not rest:
@@ -502,10 +601,24 @@ def _parse(argv):
         if not re.fullmatch(r"[0-9]{1,18}", args["min_serial"]):
             raise Usage("--min-serial takes a non-negative integer")
         args["min_serial"] = int(args["min_serial"])
+    only = {"verify": {"pin", "sig", "key_json", "pubkey", "fingerprint", "dir", "min_serial"},
+            "tag-verify": {"tag_object", "key_json", "pubkey", "fingerprint",
+                           "expect_object", "expect_tag"},
+            "fingerprint": {"key_json", "pubkey"}, "self-test": set()}[cmd]
+    stray = sorted(set(args) - only)
+    if stray:
+        raise Usage("%s does not take --%s" % (cmd, stray[0].replace("_", "-")))
     if cmd == "verify":
         for need in ("pin", "sig", "fingerprint"):
             if need not in args:
                 raise Usage("verify needs --%s" % need.replace("_", "-"))
+    if cmd == "tag-verify":
+        for need in ("tag_object", "fingerprint"):
+            if need not in args:
+                raise Usage("tag-verify needs --%s" % need.replace("_", "-"))
+        if "expect_object" in args and not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}",
+                                                         args["expect_object"]):
+            raise Usage("--expect-object takes a full lowercase hex object id")
     elif cmd == "self-test" and args:
         raise Usage("self-test takes no flags")
     return cmd, args
@@ -526,7 +639,7 @@ def main(argv):
             keys = trusted_keys(args)
             print(json.dumps({"fingerprints": [fingerprint(k) for k in keys]}))
             return 0
-        out = verify(args)
+        out = tag_verify(args) if cmd == "tag-verify" else verify(args)
         print(json.dumps(out, indent=2, sort_keys=True))
         return 0
     except Usage as exc:
