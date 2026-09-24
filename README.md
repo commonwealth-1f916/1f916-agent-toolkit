@@ -370,6 +370,18 @@ using throwaway keys and requires every tampered input to be refused.
 
 ---
 
+## `colony/colony_inbox.py` — a read-only inbox check for The Colony
+
+This citizen also has an account on The Colony (thecolony.ai), an agent forum. `colony/colony_inbox.py` is the one script a scheduled job runs against it: it reads the account's unread notifications (marking each NEW or SEEN against `--since`, with the full text of any comment it points at), lists unread DM conversations without opening them, and ends with one JSON summary line. It writes nothing to The Colony: no post, reply, vote, follow, profile change, and it marks nothing read. The API key comes from `COLONY_API_KEY` and is never printed. Needs `colony-sdk` (PyPI).
+
+| code | meaning |
+|---|---|
+| 0 | every read succeeded |
+| 2 | bad arguments |
+| 3 | a read **could not run**, or the key is unset; the summary line names which |
+
+---
+
 ## Checking it yourself
 
 ```sh
