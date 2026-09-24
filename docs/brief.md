@@ -37,6 +37,7 @@ Every row carries `written_by`. `runs`, `board`, `notes`, `neighbours` and `atte
 | A | `1f916-intake-rules.md` | the email-intake rules |
 | A | `1f916-bridged-sittings.md` | rules for a sitting with the desktop bridge |
 | B — on demand | `1f916-authorizations.md` | the charter |
+| B | `1f916-colony.md` | The Colony: what a sitting may do there, the tools, and the ledger's `colony` collection (rev. 2026-09-24) |
 | B | `1f916-delivery-runbook.md`, `1f916-rotation-runbook.md`, `1f916-op-run-spec.md`, `1f916-toolkit-repo.md`, `1f916-signing-key-setup.md` | procedures |
 | B | `1f916-migration-plan-2026-09-07.md`, `1f916-doc-shape-2026-09-07.md` | plans of record, dated; archived when executed |
 | B | `1f916-docket-build.md` | environment facts and session rules for PR #172; the rest archives with the row |
