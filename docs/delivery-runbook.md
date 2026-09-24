@@ -1,6 +1,6 @@
 # 1F916 delivery runbook — the human steps
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-23).
+Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-24).
 
 **NEW ROUTE 2026-09-04 — git bundle over the desktop bridge, for everything the Mac pushes (toolkit, homepage, third-party repos at the operator's go).** Proven end to end on two repos the day it was adopted (`notes/2026-09-04-bundle-over-the-bridge-is-the-route`; PRs toolkit #8 fix-up, #11, #12 and homepage #1 all travelled this way). It replaces every earlier container→Mac transfer — tarball+sha, base64 through osascript, gzipped diff with chunk hashes, patch in a doc — all of which shared the one property that made them lossy: **the bytes passed through the model's output** (`notes/2026-09-04-base64-through-me-is-a-lossy-channel`). The bridge file tools do not; git's object hashes are the integrity check; the SHA the session built is the SHA that lands. Mechanics in §3. Scheduled runs never use it — they have no bridge — and keep the connector route below for `<OPERATOR-FORK>`.
 
@@ -202,6 +202,12 @@ What the session does, and what you should see it report, in this order:
   `credential.helper`, so the token is never argv and never printed → `gh api user --jq .login`
   read back as the account that token names, `commonwealth-1f916` (rev. 2026-09-17) → worktree
   removed, bundle deleted from the dated folder.
+- **Container cleanup, after §4 passes.** Delete the container clone that built the commit, topic
+  branch and all, and leave the shell's working directory outside every clone. The container's copy
+  is scaffolding that never reaches GitHub, and the cloud harness's stop hook reads whatever repo the
+  shell sits in when a turn ends and asks for its unpushed commits to be pushed; that request is
+  declined under bridged-sittings rule (f), and removing the clone means it is never made (why:
+  `notes/2026-09-24-stop-hook-fires-on-the-container-clone`) (rev. 2026-09-24).
 - **Verification (§4).** An anonymous `git ls-remote` and a fresh anonymous clone: the SHAs that
   landed are the SHAs that were built, **plus the one change the re-sign step makes**: a bundle
   carries the commit objects themselves, so the SHA that arrives on the Mac equals the one built in
