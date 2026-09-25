@@ -152,6 +152,83 @@ mv "$W/tools/tool-a" "$W/tool-a.away"
 run 3 "a pinned file that is missing is could-not-run" verify --pin "$W/PIN" --sig "$W/good.sig" --key-json "$W/keys.json" --fingerprint "$FP" --dir "$W/tools"
 mv "$W/tool-a.away" "$W/tools/tool-a"
 
+# ---- tag-verify: a signed git tag checked with the same verifier ------------
+# The live specimen first: a real signed tag of this repository, as
+# `git cat-file tag` served it, against the key the registry published for the
+# identity. OpenSSH agreed on the same bytes when the fixture was captured
+# (ssh-keygen -Y verify, namespace git); this suite re-checks that where
+# ssh-keygen exists, so the two verifiers are compared on every run.
+FIXT="$ROOT/tests/fixtures/pin"
+REGFP=SHA256:q2yRbCWjFFYblk+Fb2yBiKBpl+PLM1SnhJX/veRUsOs
+run 0 "live tag v2026.09.23.2 verifies against the registry's key" tag-verify --tag-object "$FIXT/tag-v2026.09.23.2" --key-json "$FIXT/keys-commonwealth.json" --fingerprint "$REGFP" --expect-object e0429dcd665ddd5253234d4ae583f207a9bb6823 --expect-tag v2026.09.23.2
+python3 - "$FIXT/keys-commonwealth.json" "$FIXT/tag-v2026.09.23.2" "$W" <<'PY'
+import base64, json, struct, sys
+x = json.load(open(sys.argv[1]))["keys"][0]["x"]
+raw = base64.urlsafe_b64decode(x + "=" * (-len(x) % 4))
+blob = struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 32) + raw
+open(sys.argv[3] + "/reg-allowed", "w").write('c namespaces="git" ssh-ed25519 ' + base64.b64encode(blob).decode() + "\n")
+d = open(sys.argv[2], "rb").read()
+i = d.rindex(b"-----BEGIN SSH SIGNATURE-----")
+open(sys.argv[3] + "/live.payload", "wb").write(d[:i])
+open(sys.argv[3] + "/live.sig", "wb").write(d[i:])
+PY
+if ssh-keygen -Y verify -f "$W/reg-allowed" -I c -n git -s "$W/live.sig" < "$W/live.payload" >/dev/null 2>&1; then
+  ok "OpenSSH agrees: the live tag verifies with ssh-keygen -Y verify too"
+else
+  notok "OpenSSH does not verify the live tag fixture"
+fi
+
+cp "$FIXT/tag-v2026.09.23.2" "$W/live.flip"
+python3 - "$W/live.flip" <<'PY'
+import sys
+p = sys.argv[1]; b = bytearray(open(p, "rb").read())
+i = b.index(b"key possession"); b[i] = ord("K")
+open(p, "wb").write(bytes(b))
+PY
+differs "$FIXT/tag-v2026.09.23.2" "$W/live.flip" "one byte of the live tag's message changed" &&
+run 2 "negative control: the live tag with one changed byte is refused" tag-verify --tag-object "$W/live.flip" --key-json "$FIXT/keys-commonwealth.json" --fingerprint "$REGFP"
+if grep -q '"tag"' "$W/out"; then notok "a FAIL printed tag contents"; else ok "a FAIL prints no tag contents"; fi
+run 2 "the live tag against a commit it does not name is refused" tag-verify --tag-object "$FIXT/tag-v2026.09.23.2" --key-json "$FIXT/keys-commonwealth.json" --fingerprint "$REGFP" --expect-object 0123456789abcdef0123456789abcdef01234567
+run 2 "the live tag under another expected name is refused" tag-verify --tag-object "$FIXT/tag-v2026.09.23.2" --key-json "$FIXT/keys-commonwealth.json" --fingerprint "$REGFP" --expect-tag v2026.09.23.1
+run 2 "the live tag against the throwaway key is refused" tag-verify --tag-object "$FIXT/tag-v2026.09.23.2" --key-json "$W/keys.json" --fingerprint "$FP"
+
+# Tags made here by git itself, signed with the throwaway keys. The operator's
+# own git config is kept out: a global gpg.ssh.program or signing key would
+# sign with something that is not the key under test.
+git init -q "$W/repo"
+( export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  cd "$W/repo" && git config gpg.ssh.program ssh-keygen &&
+  git config user.name tester && git config user.email tester@example.org &&
+  git config gpg.format ssh && git config user.signingkey "$W/trusted" &&
+  git commit -q --allow-empty -m one &&
+  git tag -s -m "signed by the trusted key" good-tag &&
+  git -c user.signingkey="$W/stranger" tag -s -m "signed by a stranger" stranger-tag &&
+  git tag -a -m "annotated, unsigned" plain-tag &&
+  git cat-file tag good-tag > "$W/tag.good" &&
+  git cat-file tag stranger-tag > "$W/tag.stranger" &&
+  git cat-file tag plain-tag > "$W/tag.plain" &&
+  git rev-parse HEAD > "$W/head" ) || notok "could not build the git tag fixtures"
+run 0 "a tag git signed with the trusted key verifies" tag-verify --tag-object "$W/tag.good" --pubkey "$W/trusted.pub" --fingerprint "$FP" --expect-object "$(cat "$W/head")" --expect-tag good-tag
+run 2 "a tag signed by a stranger is refused" tag-verify --tag-object "$W/tag.stranger" --pubkey "$W/trusted.pub" --fingerprint "$FP"
+run 2 "an annotated tag with no signature is refused" tag-verify --tag-object "$W/tag.plain" --pubkey "$W/trusted.pub" --fingerprint "$FP"
+
+# The same payload signed in the pin namespace must not pass as a tag signature.
+python3 - "$W/tag.good" "$W" <<'PY'
+import sys
+d = open(sys.argv[1], "rb").read()
+i = d.rindex(b"-----BEGIN SSH SIGNATURE-----")
+open(sys.argv[2] + "/tag.payload", "wb").write(d[:i])
+PY
+sign "$W/trusted" 1f916-pin "$W/tag.payload"
+cat "$W/tag.payload" "$W/tag.payload.sig" > "$W/tag.pinns"
+differs "$W/tag.good" "$W/tag.pinns" "the tag re-signed in namespace 1f916-pin" &&
+run 2 "a tag signature made in the 1f916-pin namespace is refused" tag-verify --tag-object "$W/tag.pinns" --pubkey "$W/trusted.pub" --fingerprint "$FP"
+run 2 "and a pin signature can never be a tag signature: git namespace refused by verify" verify --pin "$W/tag.payload" --sig "$W/tag.payload.sig" --pubkey "$W/trusted.pub" --fingerprint "$FP"
+
+run 3 "a missing tag object is could-not-run" tag-verify --tag-object "$W/absent.tag" --pubkey "$W/trusted.pub" --fingerprint "$FP"
+run 64 "tag-verify with no fingerprint is a usage error" tag-verify --tag-object "$W/tag.good" --pubkey "$W/trusted.pub"
+run 64 "a flag that belongs to verify is refused by tag-verify" tag-verify --tag-object "$W/tag.good" --pubkey "$W/trusted.pub" --fingerprint "$FP" --dir "$W/tools"
+
 # ---- usage (exit 64)
 run 64 "no fingerprint is a usage error" verify --pin "$W/PIN" --sig "$W/good.sig" --key-json "$W/keys.json"
 run 64 "both key sources at once is a usage error" verify --pin "$W/PIN" --sig "$W/good.sig" --key-json "$W/keys.json" --pubkey "$W/trusted.pub" --fingerprint "$FP"

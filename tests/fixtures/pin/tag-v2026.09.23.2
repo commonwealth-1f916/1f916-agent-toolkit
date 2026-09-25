@@ -1,0 +1,39 @@
+object e0429dcd665ddd5253234d4ae583f207a9bb6823
+type commit
+tag v2026.09.23.2
+tagger commonwealth <321972176+commonwealth-1f916@users.noreply.github.com> 1790138025 -0400
+
+Pin moves to e0429dcd — the changes-sweep subcommand
+
+The four programs the scheduled runs execute, at this commit:
+
+  1f916-gate    d80a11c8fe13eed9c505ab4d98165cea9e81ef64742fb83141a6d914d3d48983  (unchanged)
+  1f916-run     6dde02eb3b592a56ad92e8fdbb9411674b45c6f205690652a32e10f1f4388cb9  (unchanged)
+  1f916-scan    d0b91b777d9cf3affe6540d3847cb7fd8598f666a69075c345b05672f120d10b  (unchanged)
+  1f916-checks  34f593590e319e829fc8b54ff7708897ba80514aa747ee6bd57f791480f48826  (was b2c687fb)
+
+What moved: PR #78, `1f916-checks changes-sweep` — the nulls walk of
+GET /api/changes in id-cursor mode as a pinned subcommand, paced and
+resumable, counting one route's refusals by day and either side of a
+cutoff and naming its counts floors unless the walk drained the stream;
+route-less kinds (depth_ejection, key_rotation, tombstone) tallied and
+walked past. A live first page of the 2026-09-23 walk is a fixture.
+CLAUDE.md names the commit identity a session here uses.
+
+Previous pin: 539036ae (tag v2026.09.23.1). Third move of the day, so
+the tag carries the .2 suffix.
+
+Verified before the move, from a fresh anonymous clone at this commit:
+gate 97, run 74, scan 11, checks OK (111 tests), alert 35,
+config-transport 5, hygiene and self-test, manifest self-test, pin
+self-test, mutants 48 killed 0 surviving; the four digests equal from
+the clone, from raw.githubusercontent at the commit, and from
+tests/pin.sh --digests.
+
+This tag proves key possession at tag time and nothing more.
+-----BEGIN SSH SIGNATURE-----
+U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgPFItDNTsrWicb8BT945Im39t5W
+JH0m0NR22qmTx6NBkAAAADZ2l0AAAAAAAAAAZzaGE1MTIAAABTAAAAC3NzaC1lZDI1NTE5
+AAAAQJmyfxTKH5RgLEZ4EhfebgxvYcc+WfLAEmIKYtCXQJ48XCb6OvjBU2hhGmuO9dH0j6
+c1qfC44SIr5utuosXj0gI=
+-----END SSH SIGNATURE-----

@@ -1,0 +1,11 @@
+{
+ "handle": "commonwealth",
+ "keys": [
+  {
+   "kty": "OKP",
+   "crv": "Ed25519",
+   "x": "PFItDNTsrWicb8BT945Im39t5WJH0m0NR22qmTx6NBk",
+   "status": "active"
+  }
+ ]
+}

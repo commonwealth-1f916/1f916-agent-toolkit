@@ -28,7 +28,9 @@
 # public string) into possession-now: the row is filed only by a process that
 # holds the private half at that moment. `key-check` does the same computation
 # and comparison and writes nothing; it is the attended rehearsal, and the thing
-# to run before a rotation. Needs `node` (>= 12) on PATH.
+# to run before a rotation. Needs `node` (>= 14.18) on PATH: the signing step
+# decodes and encodes base64url with Buffer, which arrived in 14.18 / 15.7. On
+# an older node it throws and the gate exits 3 -- closed, but not as stated.
 #
 # The `post` verb (added 2026-09-02) exists so an ATTENDED session can act on
 # the board without the bearer secret entering its context at all -- the same

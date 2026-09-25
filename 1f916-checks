@@ -57,7 +57,13 @@ HOMEPAGE_LIVE = "https://commonwealth.moxienerve.food/"
 HOMEPAGE_REPO = ("https://raw.githubusercontent.com/commonwealth-1f916/"
                  "commonwealth.moxienerve.food/main/index.html")
 UPSTREAM = "https://github.com/1f916-ai/1f916"
-EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+# Ceiling on one fetched body (review 12b). The largest body any subcommand
+# reads today is a witness feed or a /api/changes page, each under 2 MB; the
+# cap is thirty times that, so it never binds on a real read and stops a
+# misbehaving origin from handing this process gigabytes. Over the cap is
+# could-not-run, never a truncated body treated as whole.
+MAX_FETCH_BYTES = 64 * 1024 * 1024
+FETCH_CHUNK = 1024 * 1024
 
 EXIT_OK = 0
 EXIT_NOT_RUN = 3
@@ -164,10 +170,24 @@ def ms_or_iso(value):
 # ---------------------------------------------------------------------------
 # context: inputs record, network, files, git
 
+def _read_capped(resp, limit, url):
+    """Read a response in bounded chunks; over `limit` bytes is CouldNotRun."""
+    parts, total = [], 0
+    while True:
+        chunk = resp.read(FETCH_CHUNK)
+        if not chunk:
+            return b"".join(parts)
+        total += len(chunk)
+        if total > limit:
+            raise CouldNotRun("fetch failed: body from %s exceeds %d bytes" % (url, limit))
+        parts.append(chunk)
+
+
 class Ctx(object):
     def __init__(self, args):
         self.offline_dir = getattr(args, "offline_dir", None)
         self.timeout = getattr(args, "timeout", 30.0)
+        self.max_bytes = MAX_FETCH_BYTES
         self.inputs = {"urls": [], "files": []}
         now = getattr(args, "now", None)
         if now:
@@ -203,7 +223,7 @@ class Ctx(object):
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                    body = resp.read()
+                    body = _read_capped(resp, self.max_bytes, url)
                     status = resp.status
             except urllib.error.HTTPError as e:
                 rec["status"] = e.code
@@ -989,7 +1009,10 @@ def cmd_docket(ctx, args):
 
 
 def cmd_push_verify(ctx, args):
-    if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", args.repo):
+    # A segment of only dots ('.', '..') is not a GitHub name and would be
+    # normalised away by the URL; refused rather than resolved (review 12e).
+    if (not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", args.repo)
+            or any(set(seg) == {"."} for seg in args.repo.split("/"))):
         raise UsageError("--repo wants OWNER/NAME, got %r" % args.repo)
     pairs = [split_pair(item, "--file") for item in args.file]
     git_url = args.git_base.rstrip("/") + "/" + args.repo
@@ -1056,10 +1079,24 @@ def cmd_witness_gaps(ctx, args):
         "rate": round((positions - len(silent)) / float(positions), 4) if positions else None,
         "silent_examples": silent[:3],
     }
+    # One `git log --numstat` for every commit instead of one `git diff` per
+    # commit (review 12a; the walk was past 580 processes). `-m --first-parent`
+    # diffs a merge against its first parent, which is what the per-commit
+    # `diff <first parent> <sha>` did, and a root commit is diffed against the
+    # empty tree either way. Only the commits kept above are read.
+    stats = ctx.git(["log", "-m", "--first-parent", "--numstat", "--format=@@%H",
+                     "HEAD", "--", args.path], cwd=clone)
+    per_commit = {}
+    current = None
+    for line in stats.splitlines():
+        if line.startswith("@@"):
+            current = line[2:].strip()
+            per_commit.setdefault(current, [])
+        elif current is not None and line.strip():
+            per_commit[current].append(line)
     non_append = []
-    for sha, ct, _at, parent in commits:
-        stat = ctx.git(["diff", "--numstat", parent or EMPTY_TREE, sha, "--", args.path], cwd=clone)
-        for line in stat.splitlines():
+    for sha, ct, _at, _parent in commits:
+        for line in per_commit.get(sha, []):
             cols = line.split("\t")
             if len(cols) >= 3 and (cols[1] == "-" or int(cols[1]) > 0):
                 non_append.append({"sha": sha, "at": epoch_iso(ct), "deletions": cols[1]})

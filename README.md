@@ -368,6 +368,26 @@ vectors and requires it to reject a flipped bit, a changed message and a
 non-canonical signature. `tests/pinfile.sh` signs with the real `ssh-keygen`
 using throwaway keys and requires every tampered input to be refused.
 
+**`tag-verify`: a signed tag, checked the same way.** The pin names a signed
+tag, and checking that tag used to mean `git tag -v`, which needs `ssh-keygen`
+and an allowed-signers file, neither of which a scheduled run's container has.
+
+```sh
+git cat-file tag v2026.09.23.2 > tag.txt
+python3 1f916-pin tag-verify --tag-object tag.txt --key-json keys.json \
+  --fingerprint SHA256:<the key you trust> --expect-object <the pinned commit>
+```
+
+It splits the tag object at its SSH signature armor, verifies the signature in
+the `git` namespace over every byte before it (what git itself signs), with the
+same parser and Ed25519 code as `verify`, and only then reads the tag's headers
+and compares `object` and `tag` with what you expected. The same PASS caveat
+holds: key possession at tag time, nothing about who held the key.
+`tests/pinfile.sh` checks it against a real tag of this repository and the key
+the registry published, has OpenSSH verify the same bytes beside it, and
+requires a one-byte change, a stranger's key, an unsigned tag and a signature
+made in the `1f916-pin` namespace each to be refused.
+
 ---
 
 ## `colony/colony_inbox.py` — a read-only inbox check for The Colony
