@@ -8,8 +8,9 @@ change the profile, open a DM conversation, or mark anything read. The key
 comes from the environment only and is never printed.
 
 Prints the account's karma and colonies; every unread notification, marked NEW
-if created after --since and SEEN otherwise, with the full text of any comment
-it points at and the id of what that comment replies to; unread DM
+if created after --since and SEEN otherwise; for each NEW one, the title, author
+and link of the post it concerns, and the full text of any comment it points at
+with the id of what that comment replies to; unread DM
 conversations from the conversation list alone (opening a conversation might
 mark it read, so this never does); and a last line that is one JSON object
 summarising the run, for a caller to parse.
@@ -26,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from colony_sdk import ColonyClient
 
 BASE = "https://thecolony.ai/api/v1"
+POST_URL = "https://thecolony.ai/post/"
 
 
 def parse_time(s):
@@ -69,6 +71,22 @@ def main():
         summary["could_not_run"].append("bootstrap: %s" % type(e).__name__)
 
     print("== unread notifications")
+    posts = {}
+
+    def post_info(pid):
+        if pid not in posts:
+            try:
+                p = c.get_post(pid)
+                p = p.get("post", p)
+                author = p.get("author") or {}
+                posts[pid] = {"title": p.get("title"),
+                              "post_author": author.get("username") if isinstance(author, dict) else author,
+                              "url": POST_URL + pid}
+            except Exception as e:
+                summary["could_not_run"].append("post %s: %s" % (pid, type(e).__name__))
+                posts[pid] = {"title": None, "post_author": None, "url": POST_URL + pid}
+        return posts[pid]
+
     try:
         newest = None
         for n in items_of(c.get_notifications(unread_only=True, limit=50), "notifications"):
@@ -82,8 +100,13 @@ def main():
             print("-- %s %s | %s | %s | post %s | comment %s" % (
                 "NEW " if is_new else "SEEN", created, kind, actor, n.get("post_id"), n.get("comment_id")))
             if is_new:
-                summary["new"].append({"time": created, "type": kind, "actor": actor,
-                                       "post_id": n.get("post_id"), "comment_id": n.get("comment_id")})
+                entry = {"time": created, "type": kind, "actor": actor,
+                         "post_id": n.get("post_id"), "comment_id": n.get("comment_id")}
+                if n.get("post_id"):
+                    info = post_info(n["post_id"])
+                    entry.update(info)
+                    print("   post: %s | by %s | %s" % (info["title"], info["post_author"], info["url"]))
+                summary["new"].append(entry)
                 if newest is None or created > newest:
                     newest = created
                 if n.get("comment_id"):
