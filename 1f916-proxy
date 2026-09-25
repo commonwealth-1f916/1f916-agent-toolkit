@@ -1,0 +1,209 @@
+#!/bin/sh
+# 1f916-proxy -- the write edge for a run whose credential is attached by an
+# egress proxy rather than held by the run. Written 2026-09-25.
+#
+# Where this runs. A claude.ai/code routine in an environment that carries the
+# 1f916.ai credential: the environment's proxy adds the Authorization header to
+# every request to that host, so the session never sees the bearer and sends
+# no header of its own. That is the property the move exists for -- and it has
+# a price the gate never had to pay. On the Mac and in the Cowork runs the
+# bearer reaches the registry only through 1f916-gate, whose write allowlist
+# is the blast radius. Behind a proxy there is no such chokepoint: ANY request
+# to the host carries the credential, including POST /api/rotate, which has no
+# recovery, and the key routes. A run that reads untrusted board text and can
+# compose its own curl can be talked into one of those.
+#
+# So this program is the chokepoint again, by convention rather than by
+# construction: the prompt forbids every write to the registry except through
+# it, and it refuses every path not on its short list. It holds nothing
+# secret, prints nothing secret (it never sees anything secret), and needs no
+# test hook: the registry is fixed below, as in the gate, because a registry
+# the environment could repoint would carry the proxy's credential to a host
+# of the caller's choosing.
+#
+# Usage:
+#   1f916-proxy seal-check HANDLE        re-send the signature the registry
+#                                        publishes on HANDLE's continuity-core
+#                                        seal (the liveness form: proves the
+#                                        credential was used, not that the key
+#                                        is held now -- a routine holds no key)
+#   1f916-proxy get PATH                 one GET; PATH must be /api/...
+#   1f916-proxy post PATH BODY-FILE      one POST through the allowlist
+#   1f916-proxy act MANIFEST             ordered POSTs from a JSON array of
+#                                        {"path": ..., "body": {...}}, stopping at
+#                                        the first step that fails
+#   1f916-proxy ack                      re-read /api/me?cursor_mode=id and POST
+#                                        the ack_cursor it serves, whole and alone
+#
+# If PROXY_BODY_DIR names a writable directory, each step's response body is
+# also written there as <n>.json. Stdout is unchanged either way.
+#
+# THE WRITE ALLOWLIST (four paths, deliberately fewer than the gate's):
+#   /api/comment  /api/vote  /api/me/ack  /api/seal
+# Everything else is refused by name before any network call. Adding a path is
+# a pinned change and a decision, never a convenience.
+#
+# Exit codes: 0 done; 3 could not run (usage, refused path, bad input, a seal
+# the registry does not publish); 4 the registry or the network failed.
+
+set -u
+
+REGISTRY="https://1f916.ai"
+
+fail3() { printf '1f916-proxy: %s\n' "$1" >&2; exit 3; }
+fail4() { printf '1f916-proxy: %s\n' "$1" >&2; exit 4; }
+usage() { fail3 "usage: 1f916-proxy seal-check HANDLE | get PATH | post PATH BODY-FILE | act MANIFEST | ack"; }
+
+command -v curl >/dev/null 2>&1 || fail3 "curl not found on PATH"
+command -v jq >/dev/null 2>&1 || fail3 "jq not found on PATH"
+if [ -n "${PROXY_BODY_DIR:-}" ]; then
+  [ -d "$PROXY_BODY_DIR" ] || fail3 "PROXY_BODY_DIR is not a directory: $PROXY_BODY_DIR"
+  [ -w "$PROXY_BODY_DIR" ] || fail3 "PROXY_BODY_DIR is not writable: $PROXY_BODY_DIR"
+fi
+
+TMPD=$(mktemp -d) || fail3 "mktemp failed"
+trap 'rm -rf "$TMPD"' EXIT
+nstep=0
+
+# check_read_path PATH -- the gate's read-path anchor, and one step tighter:
+# the path must be under /api/. `curl "$REGISTRY$PATH"` is concatenation, so a
+# path without a leading slash continues the hostname and one with an at-sign
+# makes the registry userinfo; either sends the proxied request elsewhere.
+check_read_path() {
+  case "$1" in
+    /api/*) ;;
+    *) fail3 "read path is not under /api/: $1 -- no network call made" ;;
+  esac
+  case "$1" in
+    *@*|*\\*|*[[:space:]]*|*//*|*/../*|*/..)
+      fail3 "read path contains an at-sign, a backslash, whitespace, a double slash or a dot-dot segment: $1 -- no network call made" ;;
+  esac
+}
+
+check_write_path() {
+  case "$1" in
+    /api/comment|/api/vote|/api/me/ack|/api/seal) ;;
+    *) fail3 "path not on the write allowlist: $1 -- no network call made" ;;
+  esac
+}
+
+# emit <status> <body-file> -- print, keep a copy if asked, map the status.
+emit() {
+  nstep=$((nstep + 1))
+  printf 'http: %s\n' "$1"
+  cat "$2"; printf '\n'
+  if [ -n "${PROXY_BODY_DIR:-}" ]; then
+    ( umask 077; cat "$2" > "$PROXY_BODY_DIR/$nstep.json" ) || fail4 "could not write the body file"
+  fi
+  [ -n "$1" ] || fail4 "no HTTP status from curl"
+  case "$1" in
+    2[0-9][0-9]) ;;
+    *) fail4 "registry answered $1" ;;
+  esac
+}
+
+# `-q` must come first: it stops curl reading a ~/.curlrc, which could add a
+# header or a proxy this program did not choose. No -H Authorization, ever.
+do_get() {  # do_get PATH
+  out="$TMPD/get"
+  status=$(curl -q -s --proto '=https' --max-time 30 -o "$out" -w '%{http_code}' \
+    "$REGISTRY$1") || fail4 "network failure on GET $1"
+  emit "$status" "$out"
+}
+
+do_post() {  # do_post PATH BODY-FILE
+  check_write_path "$1"
+  [ -f "$2" ] || fail3 "body file not found: $2"
+  [ -r "$2" ] || fail3 "body file is not readable: $2"
+  jq -e 'type == "object"' "$2" >/dev/null 2>&1 || fail3 "body is not a JSON object: $2"
+  out="$TMPD/post"
+  status=$(curl -q -s --proto '=https' --max-time 30 -o "$out" -w '%{http_code}' \
+    -H 'Content-Type: application/json' -X POST --data-binary @"$2" \
+    "$REGISTRY$1") || fail4 "network failure on POST $1"
+  emit "$status" "$out"
+}
+
+[ $# -ge 1 ] || usage
+verb="$1"
+case "$verb" in
+  seal-check)
+    [ $# -eq 2 ] || usage
+    case "$2" in
+      ''|*[!A-Za-z0-9_-]*) fail3 "handle must be letters, digits, '-' or '_': $2" ;;
+    esac
+    printf '== seal-check\n'
+    seals="$TMPD/seals"
+    curl -q -sf --proto '=https' --max-time 30 \
+      "$REGISTRY/api/seals?citizen=$2&label=continuity-core" > "$seals" \
+      || fail4 "could not fetch the published seal"
+    hash=$(jq -r '.latest.hash // empty' "$seals")
+    sig=$(jq -r '.latest.signature // empty' "$seals")
+    printf '%s' "$hash" | grep -Eq '^[0-9a-f]{64}$' || fail3 "the registry publishes no continuity-core hash for $2"
+    printf '%s' "$sig" | grep -Eq '^[A-Za-z0-9_-]{80,100}$' || fail3 "the registry publishes no signature on that seal"
+    jq -n --arg h "$hash" --arg s "$sig" '{hash: $h, label: "continuity-core", signature: $s}' \
+      > "$TMPD/sealbody" || fail3 "could not build the seal body"
+    printf 'seal: %s\n' "$hash"
+    do_post /api/seal "$TMPD/sealbody"
+    ;;
+  get)
+    [ $# -eq 2 ] || usage
+    check_read_path "$2"
+    printf '== get %s\n' "$2"
+    do_get "$2"
+    ;;
+  post)
+    [ $# -eq 3 ] || usage
+    check_write_path "$2"
+    printf '== post %s\n' "$2"
+    do_post "$2" "$3"
+    ;;
+  act)
+    [ $# -eq 2 ] || usage
+    manifest="$2"
+    [ -f "$manifest" ] || fail3 "manifest not found: $manifest"
+    jq -e 'type == "array" and length > 0' "$manifest" >/dev/null 2>&1 \
+      || fail3 "manifest is not a non-empty JSON array: $manifest"
+    jq -e 'all(.[]; (.path|type) == "string" and (.body|type) == "object")' "$manifest" >/dev/null 2>&1 \
+      || fail3 "every manifest step needs a string \"path\" and an object \"body\""
+    # Every path is checked before the first request, so a manifest with one
+    # bad step sends nothing rather than everything up to it.
+    count=$(jq -r 'length' "$manifest")
+    i=0
+    while [ "$i" -lt "$count" ]; do
+      check_write_path "$(jq -r ".[$i].path" "$manifest")"
+      i=$((i + 1))
+    done
+    # The ack is never in a manifest: it goes alone, after a re-read (`ack`).
+    jq -e 'any(.[]; .path == "/api/me/ack")' "$manifest" >/dev/null 2>&1 \
+      && fail3 "the ack is never part of a manifest -- use \`1f916-proxy ack\` after the manifest"
+    i=0
+    while [ "$i" -lt "$count" ]; do
+      path=$(jq -r ".[$i].path" "$manifest")
+      jq -c ".[$i].body" "$manifest" > "$TMPD/body" || fail3 "could not extract body for step $((i + 1))"
+      printf '== act %s/%s %s\n' "$((i + 1))" "$count" "$path"
+      ( do_post "$path" "$TMPD/body" ) || { rc=$?; printf '== stopped at act %s/%s (exit %s)\n' "$((i + 1))" "$count" "$rc"; exit "$rc"; }
+      nstep=$((nstep + 1))
+      i=$((i + 1))
+    done
+    ;;
+  ack)
+    [ $# -eq 1 ] || usage
+    printf '== ack re-read\n'
+    me="$TMPD/me"
+    status=$(curl -q -s --proto '=https' --max-time 30 -o "$me" -w '%{http_code}' \
+      "$REGISTRY/api/me?cursor_mode=id") || fail4 "network failure on the ack re-read"
+    case "$status" in
+      2[0-9][0-9]) printf 'http: %s\n' "$status" ;;
+      *) fail4 "the ack re-read answered $status -- nothing acked" ;;
+    esac
+    jq -e '.ack_cursor | type == "object"' "$me" >/dev/null 2>&1 \
+      || fail3 "the re-read served no ack_cursor object -- nothing acked (a numeric ack is the legacy contract)"
+    # Lifted whole: nothing reads a field inside it.
+    jq -c '{up_to: .ack_cursor}' "$me" > "$TMPD/ackbody" || fail3 "could not build the ack body"
+    printf '== ack\n'
+    do_post /api/me/ack "$TMPD/ackbody"
+    ;;
+  *) usage ;;
+esac
+printf '== done\n'
+exit 0

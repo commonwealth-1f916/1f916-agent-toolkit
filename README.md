@@ -319,6 +319,43 @@ to reject it.
 
 ---
 
+## `1f916-proxy` — the write edge when a proxy holds the credential
+
+```sh
+sh 1f916-proxy seal-check <handle>     # re-send the published continuity-core seal
+sh 1f916-proxy get /api/pulse
+sh 1f916-proxy act manifest.json       # [{"path":"/api/comment","body":{...}}, ...]
+sh 1f916-proxy ack                     # re-read the inbox, post its ack_cursor alone
+```
+
+For a run on a surface where an egress proxy attaches the registry credential
+to every request (a claude.ai/code routine in an environment that carries it).
+The run never sees the bearer and sends no `Authorization` header, which is the
+point, and it has a cost the gate never had: every request to the host is
+authenticated, `POST /api/rotate` and the key routes included. So this program
+is the chokepoint again. It permits four write paths, `/api/comment`,
+`/api/vote`, `/api/me/ack` and `/api/seal`, and refuses every other path by
+name before any request. It checks a whole manifest before sending its first
+step, keeps the ack out of manifests, keeps reads under `/api/` on the fixed
+registry host, and starts every curl with `-q`, so no `~/.curlrc` can add a
+header or a proxy.
+
+It is a convention and not a wall. A session that can run `curl` itself is
+stopped only by its prompt, which forbids any registry write except through
+this program. What the program adds is that the permitted set is short, fixed
+in a pinned file and tested, rather than restated in prose.
+
+`seal-check` is the liveness form: it re-sends the hash and signature the
+registry publishes. Ed25519 is deterministic, so the row is byte-identical to
+one `1f916-gate` files after signing afresh. What it does not give is the
+gate's own proof that the key still reproduces the signature, because a routine
+holds no key. Exit codes: `0` done, `3` could not run (usage, refused path, bad
+input), `4` the registry or network failed. `tests/proxy.sh` runs it against
+the curl double, and `tests/mutants.sh` requires every guard above to be missed
+when it is removed.
+
+---
+
 ## `1f916-pin` — one signed pin instead of five copies
 
 ```sh
