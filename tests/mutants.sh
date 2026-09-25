@@ -21,16 +21,18 @@ RUNTOOL="$here/../1f916-run"
 SCANTOOL="$here/../1f916-scan"
 SIGNTOOL="$here/../1f916-ssh-sign"
 SEEDTOOL="$here/../1f916-seed-to-sshkey.mjs"
+PROXYTOOL="$here/../1f916-proxy"
 WORK=$(mktemp -d) || exit 1
 trap 'rm -rf "$WORK"' EXIT
 
 killed=0; survived=0
 
-mutant() {  # mutant <name> <sed-expression> [gate|run|scan|sign|seed|gatekey|alert]
+mutant() {  # mutant <name> <sed-expression> [gate|run|scan|sign|seed|gatekey|proxy|alert]
   name="$1"; expr="$2"; kind="${3:-gate}"
   second=""
   case "$kind" in
     alert) src="$ALERT"; suite="$here/alert.sh" ;;
+    proxy) src="$PROXYTOOL"; suite="$here/proxy.sh" ;;
     run)   src="$RUNTOOL"; suite="$here/run.sh" ;;
     scan)  src="$SCANTOOL"; suite="$here/scan.sh" ;;
     sign)  src="$SIGNTOOL"; suite="$here/sign.sh" ;;
@@ -102,6 +104,20 @@ mutant 'unexpected lines accepted'         's|^    \*) fail3 "gate file has an u
 mutant 'a failed step no longer stops'     's|^    exit "\$rc"$|    :|'                                            run
 mutant 'secret line no longer loaded'      's|^    secret=\*)       BEARER=\${line#secret=} ;;$|    secret=*) ;;|' run
 mutant 'empty manifest reported done'       's|^      .. fail3 "manifest is not a non-empty JSON array: \$manifest"$|      \|\| true|' run
+
+# --- 1f916-proxy ------------------------------------------------------------
+# The write edge for a proxy-attached credential. Each mutant removes one of the
+# properties that make it an edge rather than a pass-through.
+mutant 'the allowlist admits /api/rotate'    's|/api/comment\|/api/vote\|/api/me/ack\|/api/seal) ;;|/api/comment\|/api/vote\|/api/me/ack\|/api/seal\|/api/rotate) ;;|' proxy
+mutant 'the allowlist admits anything'       's|^    \*) fail3 "path not on the write allowlist.*$|    *) ;;|'   proxy
+mutant 'reads may leave /api/'               's|^    \*) fail3 "read path is not under /api/.*$|    *) ;;|'    proxy
+mutant 'reads may carry an at-sign'          's|^      fail3 "read path contains an at-sign.*$|      : ;;|'   proxy
+mutant 'curl reads ~/.curlrc'                's|curl -q -s|curl -s|g'                                        proxy
+mutant 'an Authorization header is sent'     's|-H .Content-Type: application/json.|-H "Authorization: Bearer x" -H "Content-Type: application/json"|' proxy
+mutant 'a manifest is not checked whole'     's|^      check_write_path "\$(jq -r ".\[\$i\].path" "\$manifest")"$|      :|' proxy
+mutant 'the ack may ride in a manifest'      's|^      \&\& fail3 "the ack is never part of a manifest.*$|      \&\& :|' proxy
+mutant 'a failed step no longer stops'       's|exit "\$rc"; }$|:; }|'                                        proxy
+mutant 'a numeric ack is accepted'           's|.ack_cursor \| type == "object"|.ack_cursor \| type != "null"|' proxy
 
 # --- 1f916-scan ------------------------------------------------------------
 # Until 2026-09-14 this tool had no mutants at all, while tests/scan.sh ran on
