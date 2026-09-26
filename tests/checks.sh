@@ -30,6 +30,11 @@
 #                             public_witness text, rewritten to example.invalid,
 #                             because tests/hygiene.sh refuses third-party owners
 #                             in this tree. Every other key is as served.
+#   (witness-compare)         no fixture file: the tests generate witness keys
+#                             from fixed seeds and sign every feed line in the
+#                             test, so a feed can disagree, be forged or go
+#                             missing on purpose. The signing half is checked
+#                             against RFC 8032 TEST 1 as a literal.
 #   prior-*.json              ledger rows stripped to the fields the checks
 #                             compare. Free-text fields are not carried.
 #

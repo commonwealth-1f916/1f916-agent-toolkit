@@ -35,6 +35,7 @@ docket, push-verify and witness-gaps use it.
 """
 
 import argparse
+import base64
 import datetime
 import hashlib
 import json
@@ -1114,6 +1115,429 @@ def cmd_witness_gaps(ctx, args):
         "non_append_commits": non_append,
         "author_clock_max_gap_minutes": max_a,
     }
+
+
+# ---------------------------------------------------------------------------
+# witness-compare: every directory witness against every other, at shared heads
+#
+# The registry's witness directory (GET /api/witnesses) lists who countersigns
+# its checkpoints and with which key. Each countersignature signs
+# "1f916.witness.v1:<registry>:<log>:<tree_size>:<root>". Two witnesses that
+# both signed the same (registry, log, tree_size) must have signed the same
+# root; two different roots at one size is a split view -- the registry showed
+# two histories -- and is the loudest thing this file can report.
+#
+# What it cannot see, and says so in `scope`: sizes no two witnesses share,
+# and keys it did not get from the registry being audited.
+#
+# Ed25519 below is 1f916-pin's pure-python RFC 8032 verifier, copied line for
+# line (tests hold the two to the same answers), plus the signing half, which
+# is used for one thing: the in-run control. The control builds a feed signed
+# with a throwaway key that disagrees with the reference witness at a real
+# shared head, and pushes it through the same parse, verify, index and compare
+# code as the real feeds. A result is printed only if that control is caught.
+
+_P = 2 ** 255 - 19
+_L = 2 ** 252 + 27742317777372353535851937790883648493
+_D = -121665 * pow(121666, _P - 2, _P) % _P
+_SQRT_M1 = pow(2, (_P - 1) // 4, _P)
+
+
+def _inv(x):
+    return pow(x, _P - 2, _P)
+
+
+def _recover_x(y, sign):
+    if y >= _P:
+        return None
+    x2 = (y * y - 1) * _inv(_D * y * y + 1) % _P
+    if x2 == 0:
+        return None if sign else 0
+    x = pow(x2, (_P + 3) // 8, _P)
+    if (x * x - x2) % _P != 0:
+        x = x * _SQRT_M1 % _P
+    if (x * x - x2) % _P != 0:
+        return None
+    if (x & 1) != sign:
+        x = _P - x
+    return x
+
+
+_GY = 4 * _inv(5) % _P
+_GX = _recover_x(_GY, 0)
+_G = (_GX, _GY, 1, _GX * _GY % _P)
+
+
+def _add(p, q):
+    a = (p[1] - p[0]) * (q[1] - q[0]) % _P
+    b = (p[1] + p[0]) * (q[1] + q[0]) % _P
+    c = 2 * p[3] * q[3] * _D % _P
+    d = 2 * p[2] * q[2] % _P
+    e, f, g, h = b - a, d - c, d + c, b + a
+    return (e * f % _P, g * h % _P, f * g % _P, e * h % _P)
+
+
+def _mul(s, p):
+    q = (0, 1, 1, 0)
+    while s > 0:
+        if s & 1:
+            q = _add(q, p)
+        p = _add(p, p)
+        s >>= 1
+    return q
+
+
+def _equal(p, q):
+    return ((p[0] * q[2] - q[0] * p[2]) % _P == 0
+            and (p[1] * q[2] - q[1] * p[2]) % _P == 0)
+
+
+def _decompress(s):
+    if len(s) != 32:
+        return None
+    y = int.from_bytes(s, "little")
+    sign = y >> 255
+    y &= (1 << 255) - 1
+    x = _recover_x(y, sign)
+    if x is None:
+        return None
+    return (x, y, 1, x * y % _P)
+
+
+def ed25519_verify(public, message, signature):
+    """True only for a valid signature; any malformed input is False."""
+    if len(public) != 32 or len(signature) != 64:
+        return False
+    a = _decompress(public)
+    if a is None:
+        return False
+    r = _decompress(signature[:32])
+    if r is None:
+        return False
+    s = int.from_bytes(signature[32:], "little")
+    if s >= _L:
+        return False
+    h = int.from_bytes(hashlib.sha512(signature[:32] + public + message).digest(),
+                       "little") % _L
+    return _equal(_mul(s, _G), _add(r, _mul(h, a)))
+
+
+def _compress(p):
+    zi = _inv(p[2])
+    x, y = p[0] * zi % _P, p[1] * zi % _P
+    return (y | ((x & 1) << 255)).to_bytes(32, "little")
+
+
+def ed25519_keypair(seed):
+    """RFC 8032 5.1.5: (seed) -> (public 32 bytes, expanded secret)."""
+    h = hashlib.sha512(seed).digest()
+    a = int.from_bytes(h[:32], "little")
+    a &= (1 << 254) - 8
+    a |= 1 << 254
+    return _compress(_mul(a, _G)), (a, h[32:])
+
+
+def ed25519_sign(seed, message):
+    """RFC 8032 5.1.6. Used only to build the in-run control; never on a real key."""
+    public, (a, prefix) = ed25519_keypair(seed)
+    r = int.from_bytes(hashlib.sha512(prefix + message).digest(), "little") % _L
+    big_r = _compress(_mul(r, _G))
+    k = int.from_bytes(hashlib.sha512(big_r + public + message).digest(), "little") % _L
+    return big_r + ((r + k * a) % _L).to_bytes(32, "little")
+
+
+def b64u_decode(text):
+    if not isinstance(text, str):
+        raise ValueError("not a string")
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def b64u_encode(data):
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def witness_payload(registry, log, tree_size, root):
+    return "1f916.witness.v1:%s:%s:%s:%s" % (registry.rstrip("/"), log, tree_size, root)
+
+
+def read_witness_feed(body, public):
+    """Parse and verify one feed's bytes.
+
+    Returns {points: {(registry, log, tree_size): set(roots)}, counts...}.
+    Only a countersigned line whose signature verifies under `public` becomes
+    a point; everything else is counted by kind and never compared.
+    """
+    points = {}
+    c = {"lines": 0, "sig_ok": 0, "sig_bad": 0, "refused": 0, "unparseable": 0,
+         "other": 0, "first_at": None, "last_at": None, "bad_examples": []}
+    for raw in body.split(b"\n"):
+        if not raw.strip():
+            continue
+        c["lines"] += 1
+        try:
+            row = json.loads(raw.decode("utf-8"))
+        except ValueError:
+            c["unparseable"] += 1
+            continue
+        if not isinstance(row, dict):
+            c["unparseable"] += 1
+            continue
+        status = str(row.get("status", ""))
+        if status.startswith("refused"):
+            c["refused"] += 1
+            continue
+        if status != "countersigned" or "witness_sig" not in row:
+            c["other"] += 1
+            continue
+        try:
+            key = (str(row["registry"]).rstrip("/"), str(row["log"]), int(row["tree_size"]))
+            root = str(row["root"])
+            sig = b64u_decode(row["witness_sig"])
+        except (KeyError, ValueError, TypeError):
+            c["unparseable"] += 1
+            continue
+        if not ed25519_verify(public, witness_payload(key[0], key[1], key[2], root).encode("utf-8"), sig):
+            c["sig_bad"] += 1
+            if len(c["bad_examples"]) < 3:
+                c["bad_examples"].append({"log": key[1], "tree_size": key[2], "at": row.get("at")})
+            continue
+        c["sig_ok"] += 1
+        points.setdefault(key, set()).add(root)
+        at = row.get("at")
+        if isinstance(at, str):
+            if c["first_at"] is None or at < c["first_at"]:
+                c["first_at"] = at
+            if c["last_at"] is None or at > c["last_at"]:
+                c["last_at"] = at
+    c["own_conflicts"] = sorted(
+        [{"registry": k[0], "log": k[1], "tree_size": k[2], "roots": sorted(v)}
+         for k, v in points.items() if len(v) > 1],
+        key=lambda d: (d["log"], d["tree_size"]))
+    return points, c
+
+
+def compare_witness_points(feeds):
+    """feeds: {id: points}. Every pair, and every head held by two or more."""
+    ids = sorted(feeds)
+    pairs = []
+    pairwise_total = 0
+    for i, a in enumerate(ids):
+        for b in ids[i + 1:]:
+            common = set(feeds[a]) & set(feeds[b])
+            disagree = sorted(k for k in common if feeds[a][k] != feeds[b][k])
+            by_log = {}
+            for k in common:
+                by_log[k[1]] = by_log.get(k[1], 0) + 1
+            pairwise_total += len(common)
+            pairs.append({"a": a, "b": b, "shared_heads": len(common), "by_log": by_log,
+                          "agree": len(common) - len(disagree), "disagree": len(disagree),
+                          "disagree_examples": [
+                              {"registry": k[0], "log": k[1], "tree_size": k[2],
+                               "a_roots": sorted(feeds[a][k]), "b_roots": sorted(feeds[b][k])}
+                              for k in disagree[:5]]})
+    holders = {}
+    for wid in ids:
+        for k in feeds[wid]:
+            holders.setdefault(k, []).append(wid)
+    shared = {k: v for k, v in holders.items() if len(v) > 1}
+    split = []
+    for k in sorted(shared):
+        roots = set()
+        for wid in shared[k]:
+            roots |= feeds[wid][k]
+        if len(roots) > 1:
+            split.append({"registry": k[0], "log": k[1], "tree_size": k[2],
+                          "roots": {r: sorted(w for w in shared[k] if r in feeds[w][k])
+                                    for r in sorted(roots)}})
+    # A head one witness signed twice with two roots is a split view too,
+    # whether or not anyone else holds it.
+    for wid in ids:
+        for k, roots in feeds[wid].items():
+            if len(roots) > 1 and k not in shared:
+                split.append({"registry": k[0], "log": k[1], "tree_size": k[2],
+                              "roots": {r: [wid] for r in sorted(roots)}})
+    return {"pairs": pairs, "pairwise_comparisons": pairwise_total,
+            "unique_shared_heads": len(shared), "split_views": split}
+
+
+def _fetch_or_absent(ctx, url):
+    """GET url; None on HTTP 404 (a day with no file), CouldNotRun otherwise.
+
+    Offline (tests): DIR/<sha256 of url>.status holding "404" stands for a 404.
+    """
+    if ctx.offline_dir:
+        stem = os.path.join(ctx.offline_dir, sha256_hex(url.encode("utf-8")))
+        try:
+            with open(stem + ".status", "r") as fh:
+                if fh.read().strip() == "404":
+                    ctx.inputs["urls"].append({"url": url, "status": 404, "bytes": None,
+                                               "sha256": None})
+                    return None
+        except OSError:
+            pass
+    try:
+        return ctx.fetch(url)
+    except CouldNotRun:
+        if ctx.inputs["urls"] and ctx.inputs["urls"][-1].get("status") == 404:
+            return None
+        raise
+
+
+def witness_control(reference_points, directory_keys):
+    """The in-run control. Returns (checks, all_ok)."""
+    checks = []
+
+    def check(name, ok):
+        checks.append({"name": name, "ok": bool(ok)})
+
+    heads = sorted(k for k, v in reference_points.items() if len(v) == 1)
+    if not heads:
+        check("the reference witness has a verified head to seed the control from", False)
+        return checks, False
+    head = heads[-1]
+    real_root = next(iter(reference_points[head]))
+    fake_root = sha256_hex(b"1f916-checks witness-compare control " + real_root.encode("ascii"))
+    check("the seeded root differs from the reference root", fake_root != real_root)
+    seed = secrets.token_bytes(32)
+    public, _ = ed25519_keypair(seed)
+    check("the throwaway key is not a directory key", public not in directory_keys)
+    payload = witness_payload(head[0], head[1], head[2], fake_root).encode("utf-8")
+    sig = ed25519_sign(seed, payload)
+    line = {"type": "witness-countersignature", "at": "1970-01-01T00:00:00Z",
+            "registry": head[0], "log": head[1], "tree_size": head[2], "root": fake_root,
+            "status": "countersigned", "witness_sig": b64u_encode(sig)}
+    body = (json.dumps(line) + "\n").encode("utf-8")
+
+    points, counts = read_witness_feed(body, public)
+    check("the control feed parses and verifies under its own key",
+          counts["sig_ok"] == 1 and counts["sig_bad"] == 0)
+    result = compare_witness_points({"reference": reference_points, "control": points})
+    check("the compare reports the seeded head as a disagreement",
+          len(result["pairs"]) == 1 and result["pairs"][0]["disagree"] == 1)
+    check("the seeded head is reported as a split view",
+          any(s["log"] == head[1] and s["tree_size"] == head[2] for s in result["split_views"]))
+
+    other_key = next(iter(directory_keys)) if directory_keys else None
+    if other_key is None:
+        check("a directory key exists to test rejection against", False)
+    else:
+        _, wrong = read_witness_feed(body, other_key)
+        check("the control feed is rejected under a directory key",
+              wrong["sig_ok"] == 0 and wrong["sig_bad"] == 1)
+    flipped = bytearray(sig)
+    flipped[5] ^= 0x01
+    check("the flipped signature differs", bytes(flipped) != sig)
+    check("a flipped signature byte is rejected", not ed25519_verify(public, payload, bytes(flipped)))
+    return checks, all(c["ok"] for c in checks)
+
+
+def cmd_witness_compare(ctx, args):
+    if args.days < 1:
+        raise UsageError("--days must be at least 1")
+    directory = ctx.fetch_json(args.directory, cache_bust=False)
+    rows = directory.get("witnesses")
+    if not isinstance(rows, list):
+        raise CouldNotRun("the witness directory has no `witnesses` list")
+    if directory.get("has_more"):
+        raise CouldNotRun("the witness directory says has_more; this check reads one page")
+    today = ctx.now.date()
+    days = [(today - datetime.timedelta(days=i)).isoformat() for i in range(args.days)]
+
+    witnesses, feeds, keys = [], {}, set()
+    for w in sorted(rows, key=lambda r: r.get("id", 0)):
+        wid = w.get("id")
+        entry = {"id": wid, "name": w.get("name"), "operator": w.get("operator"),
+                 "url": w.get("url"), "alg": w.get("alg"), "key_set_at": w.get("key_set_at"),
+                 "status": None, "reason": None}
+        witnesses.append(entry)
+        url, key_text = w.get("url"), w.get("public_key")
+        if key_text is None:
+            entry.update(status="undiscoverable",
+                         reason="null public_key: the directory contract says never trust the file")
+            continue
+        if w.get("alg") != "ed25519":
+            entry.update(status="could_not_run", reason="alg %r is not ed25519" % w.get("alg"))
+            continue
+        try:
+            public = b64u_decode(key_text)
+        except ValueError:
+            public = b""
+        if len(public) != 32:
+            entry.update(status="could_not_run", reason="public_key is not 32 bytes of base64url")
+            continue
+        keys.add(public)
+        if not isinstance(url, str) or not url.startswith("https://"):
+            entry.update(status="could_not_run", reason="url is not https")
+            continue
+        try:
+            if url.endswith("/"):
+                entry["feed"] = "day_files"
+                bodies, absent = [], []
+                for day in days:
+                    body = _fetch_or_absent(ctx, url + day + ".jsonl")
+                    if body is None:
+                        absent.append(day)
+                    else:
+                        bodies.append(body)
+                entry["days_read"] = len(bodies)
+                entry["days_absent"] = absent
+                if not bodies:
+                    raise CouldNotRun("no day file in the last %d days" % args.days)
+                body = b"\n".join(bodies)
+            else:
+                entry["feed"] = "file"
+                body = _fetch_or_absent(ctx, url)
+                if body is None:
+                    raise CouldNotRun("HTTP 404 from the directory url")
+        except CouldNotRun as e:
+            entry.update(status="could_not_run", reason=str(e))
+            continue
+        points, counts = read_witness_feed(body, public)
+        entry.update(counts)
+        entry["heads"] = len(points)
+        if not points:
+            entry.update(status="could_not_run",
+                         reason="no line verified under the directory key")
+            continue
+        entry["status"] = "ok"
+        feeds[wid] = points
+
+    ref = args.reference
+    if ref not in feeds:
+        raise CouldNotRun("the reference witness #%s produced no verified head" % ref)
+    controls, controls_ok = witness_control(feeds[ref], keys)
+    if not controls_ok:
+        raise CouldNotRun("the in-run control was not caught: %s" % json.dumps(
+            [c["name"] for c in controls if not c["ok"]]))
+    result = compare_witness_points(feeds)
+    compared = sorted(feeds)
+    out = {
+        "directory": {"url": args.directory, "count": directory.get("count"),
+                      "total": directory.get("total"), "rows": len(rows)},
+        "key_source": "directory keys as served by GET /api/witnesses, the registry under audit",
+        "reference": ref,
+        "day_window": days,
+        "witnesses": witnesses,
+        "compared": compared,
+        "operators_compared": sorted({str(w["operator"]) for w in witnesses if w["id"] in feeds}),
+        "not_compared": [{"id": w["id"], "status": w["status"], "reason": w["reason"]}
+                         for w in witnesses if w["id"] not in feeds],
+        "pairs": result["pairs"],
+        "reference_pairs": [p for p in result["pairs"] if ref in (p["a"], p["b"])],
+        "pairwise_comparisons": result["pairwise_comparisons"],
+        "unique_shared_heads": result["unique_shared_heads"],
+        "split_views": result["split_views"],
+        "split_view_count": len(result["split_views"]),
+        "controls": controls,
+        "controls_cover": ["parse", "signature", "index", "compare"],
+        "scope": ("agreement at heads two or more compared witnesses both signed, under keys "
+                  "the registry serves; says nothing about heads no two share, about "
+                  "consistency between sizes, or about whether operators are independent"),
+    }
+    if len(compared) < 2:
+        out["status_override"] = "degraded"
+        out["reason_override"] = "fewer than two witnesses compared"
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -2447,6 +2871,14 @@ def build_parser():
     # below 120, and ordinary spacing is ~60.
     s.add_argument("--gap-minutes", type=float, default=90.0)
 
+    s = sub.add_parser("witness-compare", parents=[common_parser()])
+    s.add_argument("--directory", default=REGISTRY + "/api/witnesses",
+                    help="the witness directory (default: the registry's)")
+    s.add_argument("--reference", type=int, required=True,
+                    help="directory id of the operator's own witness; the control is seeded from it")
+    s.add_argument("--days", type=int, default=7,
+                    help="day-file feeds: UTC days read, today included (default 7)")
+
     s = sub.add_parser("hygiene", parents=[common_parser()])
     s.add_argument("--doc", action="append")
     s.add_argument("--prompt", action="append")
@@ -2530,7 +2962,7 @@ COMMANDS = {
     "surface": cmd_surface, "witness": cmd_witness, "hashes": cmd_hashes, "seal": cmd_seal,
     "homepage": cmd_homepage, "bindings": cmd_bindings, "model": cmd_model, "front": cmd_front,
     "docket": cmd_docket, "push-verify": cmd_push_verify, "window": cmd_window,
-    "witness-gaps": cmd_witness_gaps, "hygiene": cmd_hygiene, "tally": cmd_tally,
+    "witness-gaps": cmd_witness_gaps, "witness-compare": cmd_witness_compare, "hygiene": cmd_hygiene, "tally": cmd_tally,
     "queue-age": cmd_queue_age, "cost": cmd_cost, "manifest": cmd_manifest, "all": cmd_all,
     "prompt-integrity": cmd_prompt_integrity,
     "changes-sweep": cmd_changes_sweep,

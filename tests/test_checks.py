@@ -2046,5 +2046,308 @@ class Official(Base):
         self.assertIn("1f916-checks official", row["method"])
 
 
+# ---------------------------------------------------------------------------
+# witness-compare
+
+WITNESSES_URL = "https://1f916.ai/api/witnesses"
+PIN_SCRIPT = os.path.join(HERE, "..", "1f916-pin")
+
+# RFC 8032 section 7.1, TEST 1: the one vector whose secret key is published,
+# so the signing half is checked against a literal rather than against itself.
+RFC_T1_SEED = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"
+RFC_T1_PUB = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+RFC_T1_SIG = ("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
+              "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b")
+
+
+def load_pin_module():
+    loader = importlib.machinery.SourceFileLoader("pin_under_test", PIN_SCRIPT)
+    spec = importlib.util.spec_from_loader("pin_under_test", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+class Ed25519(unittest.TestCase):
+    def setUp(self):
+        self.mod = load_module()
+
+    def test_rfc8032_test1_signs_to_the_published_signature(self):
+        seed = bytes.fromhex(RFC_T1_SEED)
+        pub, _ = self.mod.ed25519_keypair(seed)
+        self.assertEqual(pub.hex(), RFC_T1_PUB)
+        self.assertEqual(self.mod.ed25519_sign(seed, b"").hex(), RFC_T1_SIG)
+
+    def test_the_verifier_answers_as_1f916_pin_does(self):
+        # A copy of 1f916-pin's verifier. The two are held to the same answers
+        # on the RFC vectors and on each vector tampered, so a drift in either
+        # copy shows here rather than in a run.
+        pin = load_pin_module()
+        cases = []
+        for pk, msg, sig in pin._RFC8032:
+            pk, msg, sig = bytes.fromhex(pk), bytes.fromhex(msg), bytes.fromhex(sig)
+            bad = bytearray(sig)
+            bad[0] ^= 1
+            self.assertNotEqual(bytes(bad), sig)
+            cases += [(pk, msg, sig), (pk, msg, bytes(bad)), (pk, msg + b"x", sig),
+                      (pk[:31], msg, sig), (pk, msg, sig[:63])]
+        answers = [(self.mod.ed25519_verify(*c), pin.ed25519_verify(*c)) for c in cases]
+        for mine, theirs in answers:
+            self.assertEqual(mine, theirs)
+        self.assertIn((True, True), answers)
+        self.assertIn((False, False), answers)
+
+
+class WitnessCompare(Base):
+    REG = "https://1f916.ai"
+
+    def setUp(self):
+        super().setUp()
+        self.mod = load_module()
+        self.seeds = {i: hashlib.sha256(b"fixture witness %d" % i).digest() for i in range(1, 12)}
+        self.pubs = {i: self.mod.ed25519_keypair(s)[0] for i, s in self.seeds.items()}
+
+    def row(self, wid, log, size, root, sign_as=None, **extra):
+        seed = self.seeds[sign_as if sign_as is not None else wid]
+        payload = self.mod.witness_payload(self.REG, log, size, root).encode("utf-8")
+        r = {"type": "witness-countersignature", "at": "2026-09-25T00:00:00Z",
+             "registry": self.REG, "log": log, "tree_size": size, "root": root,
+             "status": "countersigned",
+             "witness_sig": self.mod.b64u_encode(self.mod.ed25519_sign(seed, payload))}
+        r.update(extra)
+        return r
+
+    def feed(self, rows):
+        return ("".join(json.dumps(r) + "\n" for r in rows)).encode("utf-8")
+
+    def entry(self, wid, url, key=True):
+        return {"id": wid, "name": "fixture %d" % wid, "operator": "op%d" % wid, "url": url,
+                "alg": "ed25519", "epoch": 0, "key_set_at": 1, "added_at": 1,
+                "public_key": self.mod.b64u_encode(self.pubs[wid]) if key else None}
+
+    def directory(self, entries, **extra):
+        d = {"count": len(entries), "total": len(entries), "has_more": False,
+             "witnesses": entries}
+        d.update(extra)
+        self.serve(WITNESSES_URL, d)
+
+    def standard(self):
+        """#6 (reference) and #7 share three heads and agree; #8 shares one."""
+        ra, rb, rc, rd = (sha(b"root %d" % i) for i in range(4))
+        self.serve("https://w6.example.invalid/c.jsonl", self.feed([
+            self.row(6, "identity_events", 100, ra), self.row(6, "identity_events", 101, rb),
+            self.row(6, "ledger", 7, rc), self.row(6, "identity_events", 102, rd)]))
+        self.serve("https://w7.example.invalid/c.jsonl", self.feed([
+            self.row(7, "identity_events", 100, ra), self.row(7, "identity_events", 101, rb),
+            self.row(7, "ledger", 7, rc), {"status": "refused: consistency", "log": "x"}]))
+        self.serve("https://w8.example.invalid/c.jsonl", self.feed([
+            self.row(8, "identity_events", "101", rb), self.row(8, "identity_events", 99, ra)]))
+        return [self.entry(6, "https://w6.example.invalid/c.jsonl"),
+                self.entry(7, "https://w7.example.invalid/c.jsonl"),
+                self.entry(8, "https://w8.example.invalid/c.jsonl")]
+
+    def wc(self, *extra, **kw):
+        return self.run_checks("witness-compare", "--reference", "6",
+                               "--now", "2026-09-25T12:00:00Z", *extra, **kw)
+
+    def test_agreeing_witnesses_count_pairs_and_unique_heads_apart(self):
+        self.directory(self.standard())
+        out = self.wc()
+        self.assertEqual(out["compared"], [6, 7, 8])
+        self.assertEqual(out["split_view_count"], 0)
+        # pairs 6-7: 3, 6-8: 1 (tree_size "101" is the same head as 101), 7-8: 1.
+        self.assertEqual(out["pairwise_comparisons"], 5)
+        self.assertEqual(out["unique_shared_heads"], 3)
+        pair = {(p["a"], p["b"]): p for p in out["pairs"]}
+        self.assertEqual(pair[(6, 7)]["by_log"], {"identity_events": 2, "ledger": 1})
+        self.assertEqual(pair[(6, 8)]["shared_heads"], 1)
+        w7 = [w for w in out["witnesses"] if w["id"] == 7][0]
+        self.assertEqual((w7["sig_ok"], w7["refused"]), (3, 1))
+        self.assertTrue(all(c["ok"] for c in out["controls"]))
+        self.assertGreaterEqual(len(out["controls"]), 8)
+        self.assertIn("registry under audit", out["key_source"])
+
+    def test_two_roots_at_one_shared_head_is_a_split_view(self):
+        entries = self.standard()
+        ra, rb, rc = (sha(b"root %d" % i) for i in range(3))
+        self.serve("https://w7.example.invalid/c.jsonl", self.feed([
+            self.row(7, "identity_events", 100, ra), self.row(7, "identity_events", 101, sha(b"other")),
+            self.row(7, "ledger", 7, rc)]))
+        self.directory(entries)
+        out = self.wc()
+        self.assertEqual(out["split_view_count"], 1)
+        split = out["split_views"][0]
+        self.assertEqual((split["log"], split["tree_size"]), ("identity_events", 101))
+        self.assertEqual(split["roots"], {rb: [6, 8], sha(b"other"): [7]})
+        pair = {(p["a"], p["b"]): p for p in out["pairs"]}
+        self.assertEqual(pair[(6, 7)]["disagree"], 1)
+        self.assertEqual(pair[(6, 7)]["agree"], 2)
+
+    def test_one_witness_signing_two_roots_for_one_head_is_a_split_view(self):
+        entries = self.standard()
+        self.serve("https://w8.example.invalid/c.jsonl", self.feed([
+            self.row(8, "treasury", 5, sha(b"a")), self.row(8, "treasury", 5, sha(b"b"))]))
+        self.directory(entries)
+        out = self.wc()
+        self.assertEqual(out["split_view_count"], 1)
+        self.assertEqual(out["split_views"][0]["roots"], {sha(b"a"): [8], sha(b"b"): [8]})
+        w8 = [w for w in out["witnesses"] if w["id"] == 8][0]
+        self.assertEqual(len(w8["own_conflicts"]), 1)
+
+    def test_a_disagreeing_line_under_the_wrong_key_is_counted_bad_never_compared(self):
+        entries = self.standard()
+        self.serve("https://w8.example.invalid/c.jsonl", self.feed([
+            self.row(8, "identity_events", 101, sha(b"forged"), sign_as=9)]))
+        self.directory(entries)
+        out = self.wc()
+        self.assertEqual(out["split_view_count"], 0)
+        w8 = [w for w in out["witnesses"] if w["id"] == 8][0]
+        self.assertEqual((w8["status"], w8["sig_ok"], w8["sig_bad"]), ("could_not_run", 0, 1))
+        self.assertIn("no line verified", w8["reason"])
+        self.assertEqual(w8["bad_examples"][0]["tree_size"], 101)
+
+    def test_null_key_404_and_unreadable_are_named_never_agreement(self):
+        entries = self.standard()
+        entries.append(self.entry(4, "https://w4.example.invalid/c.jsonl", key=False))
+        entries.append(self.entry(1, "https://gone.example.invalid/c.jsonl"))
+        with open(os.path.join(self.offline, sha(b"https://gone.example.invalid/c.jsonl")) + ".status", "w") as fh:
+            fh.write("404\n")
+        entries.append(self.entry(3, "https://nofile.example.invalid/c.jsonl"))
+        self.directory(entries)
+        out = self.wc()
+        self.assertEqual(out["status"], "ok")
+        cells = {w["id"]: (w["status"], w["reason"]) for w in out["not_compared"]}
+        self.assertEqual(cells[4][0], "undiscoverable")
+        self.assertEqual(cells[1], ("could_not_run", "HTTP 404 from the directory url"))
+        self.assertEqual(cells[3][0], "could_not_run")
+        self.assertIn("offline file absent", cells[3][1])
+        self.assertEqual(out["compared"], [6, 7, 8])
+
+    def test_day_files_are_read_over_the_window_and_missing_days_named(self):
+        entries = self.standard()
+        base = "https://days.example.invalid/"
+        entries.append(self.entry(10, base))
+        self.serve(base + "2026-09-25.jsonl", self.feed([self.row(10, "identity_events", 100, sha(b"root 0"))]))
+        self.serve(base + "2026-09-23.jsonl", self.feed([self.row(10, "ledger", 7, sha(b"root 2"))]))
+        with open(os.path.join(self.offline, sha((base + "2026-09-24.jsonl").encode())) + ".status", "w") as fh:
+            fh.write("404")
+        self.directory(entries)
+        out = self.wc("--days", "3")
+        w10 = [w for w in out["witnesses"] if w["id"] == 10][0]
+        self.assertEqual((w10["feed"], w10["days_read"], w10["days_absent"]),
+                         ("day_files", 2, ["2026-09-24"]))
+        self.assertEqual(out["day_window"], ["2026-09-25", "2026-09-24", "2026-09-23"])
+        pair = {(p["a"], p["b"]): p for p in out["pairs"]}
+        self.assertEqual(pair[(6, 10)]["shared_heads"], 2)
+        self.assertEqual(out["split_view_count"], 0)
+
+    def test_day_files_all_absent_is_could_not_run_for_that_witness(self):
+        entries = self.standard()
+        base = "https://days.example.invalid/"
+        entries.append(self.entry(10, base))
+        for day in ("2026-09-25", "2026-09-24"):
+            with open(os.path.join(self.offline, sha((base + day + ".jsonl").encode())) + ".status", "w") as fh:
+                fh.write("404")
+        self.directory(entries)
+        out = self.wc("--days", "2")
+        w10 = [w for w in out["witnesses"] if w["id"] == 10][0]
+        self.assertEqual(w10["status"], "could_not_run")
+        self.assertIn("no day file", w10["reason"])
+
+    def test_no_reference_is_could_not_run_and_one_witness_is_degraded(self):
+        entries = self.standard()
+        self.directory(entries[1:])
+        out = self.wc(want=3)
+        self.assertIn("reference witness #6", out["reason"])
+        self.directory(entries[:1])
+        out = self.wc(status="degraded")
+        self.assertIn("fewer than two", out["reason"])
+        self.assertEqual(out["split_view_count"], 0)
+
+    def test_directory_shapes_that_cannot_be_trusted_are_could_not_run(self):
+        entries = self.standard()
+        self.directory(entries, has_more=True)
+        self.assertIn("has_more", self.wc(want=3)["reason"])
+        self.serve(WITNESSES_URL, {"count": 0})
+        self.assertIn("no `witnesses` list", self.wc(want=3)["reason"])
+        self.run_checks("witness-compare", "--reference", "6", "--days", "0", want=64)
+        self.run_checks("witness-compare", want=64)
+
+    # -- red path: the control must be the thing that stops a blind compare --
+
+    def test_the_control_catches_a_compare_that_cannot_see_disagreement(self):
+        mod = self.mod
+        ref_points, _ = mod.read_witness_feed(self.feed([self.row(6, "identity_events", 5, sha(b"r"))]),
+                                               self.pubs[6])
+        checks, ok = mod.witness_control(ref_points, {self.pubs[6]})
+        self.assertTrue(ok, checks)
+        real = mod.compare_witness_points
+
+        def blind(feeds):
+            out = real(feeds)
+            for p in out["pairs"]:
+                p["agree"] += p["disagree"]
+                p["disagree"] = 0
+            out["split_views"] = []
+            return out
+        mod.compare_witness_points = blind
+        try:
+            checks, ok = mod.witness_control(ref_points, {self.pubs[6]})
+        finally:
+            mod.compare_witness_points = real
+        self.assertFalse(ok)
+        failed = [c["name"] for c in checks if not c["ok"]]
+        self.assertIn("the compare reports the seeded head as a disagreement", failed)
+        self.assertIn("the seeded head is reported as a split view", failed)
+
+    def test_the_control_catches_a_verifier_that_accepts_everything(self):
+        mod = self.mod
+        ref_points, _ = mod.read_witness_feed(self.feed([self.row(6, "identity_events", 5, sha(b"r"))]),
+                                               self.pubs[6])
+        real = mod.ed25519_verify
+        mod.ed25519_verify = lambda public, message, signature: True
+        try:
+            checks, ok = mod.witness_control(ref_points, {self.pubs[6]})
+        finally:
+            mod.ed25519_verify = real
+        self.assertFalse(ok)
+        failed = [c["name"] for c in checks if not c["ok"]]
+        self.assertIn("the control feed is rejected under a directory key", failed)
+        self.assertIn("a flipped signature byte is rejected", failed)
+
+    def test_the_control_catches_a_parser_that_drops_every_line(self):
+        mod = self.mod
+        ref_points, _ = mod.read_witness_feed(self.feed([self.row(6, "identity_events", 5, sha(b"r"))]),
+                                               self.pubs[6])
+        real = mod.read_witness_feed
+        mod.read_witness_feed = lambda body, public: ({}, dict(real(b"", public)[1]))
+        try:
+            checks, ok = mod.witness_control(ref_points, {self.pubs[6]})
+        finally:
+            mod.read_witness_feed = real
+        self.assertFalse(ok)
+
+    def test_a_failed_control_prints_no_result(self):
+        # End to end: the same blind compare, run through main(), exits 3.
+        self.directory(self.standard())
+        mod = self.mod
+        real = mod.compare_witness_points
+        mod.compare_witness_points = lambda feeds: dict(real(feeds), split_views=[], pairs=[])
+        import io
+        buf, old = io.StringIO(), sys.stdout
+        sys.stdout = buf
+        try:
+            code = mod.main(["witness-compare", "--reference", "6", "--offline-dir", self.offline,
+                             "--now", "2026-09-25T12:00:00Z"])
+        finally:
+            sys.stdout = old
+            mod.compare_witness_points = real
+        self.assertEqual(code, 3)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["status"], "could_not_run")
+        self.assertIn("control was not caught", out["reason"])
+        self.assertNotIn("pairs", out)
+
+
 if __name__ == "__main__":
     unittest.main()
