@@ -277,7 +277,7 @@ was a fresh chance to get one detail wrong and store the wrong baseline, and a
 wrong baseline does not fail -- it reports a change tomorrow that never happened.
 So the recipes live here once, with the stored values as test literals.
 
-Nineteen subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
+Twenty subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
 `hashes`, `seal`, `homepage`, `bindings`, `front`, `docket`, `push-verify`
 and `official` fetch public things and hash or diff them; `model`, `window`, `hygiene`,
 `tally`, `queue-age` and `cost` read files the caller saved; `manifest` does
@@ -288,7 +288,18 @@ one route's refusals by day and either side of a cutoff, naming its counts
 floors unless the walk drained the stream (the log's route-less kinds --
 depth_ejection, key_rotation, tombstone -- are tallied and walked past). Each prints ONE
 JSON object naming every URL or file it read, with its status, byte count and
-sha-256. `official` digests the society's own `GET /api/official` per top-level key and per listed window, failing closed: any field that moves is an alert, including categories added after the baseline, except the few that move with every deploy (the commit, the trigger lists, the rate limit), which are named as churn; a window or ecosystem service added or removed is named by url; and it says which fields it could not compare rather than calling a partial baseline clean. `cost` sums a transcript's `usage` fields into token and tool-call
+sha-256. `witness-compare` reads every witness in the registry's directory
+(`GET /api/witnesses`), verifies each countersignature against the key the
+directory serves (pure-python Ed25519, the same verifier `1f916-pin` carries),
+and compares every pair of witnesses at the heads -- (registry, log, tree_size)
+-- they both signed: two roots at one head is a split view. It reports
+`pairwise_comparisons` and `unique_shared_heads` apart, names a null-key,
+404 or unverifiable witness as not compared rather than as agreeing, and says
+in `key_source` that the keys came from the registry under audit. Before it
+prints anything it seeds a disagreement signed with a throwaway key at a real
+head of the operator's own witness (`--reference`) and requires the parse,
+verify and compare code to catch it; a control that is not caught is exit 3
+with no result. `official` digests the society's own `GET /api/official` per top-level key and per listed window, failing closed: any field that moves is an alert, including categories added after the baseline, except the few that move with every deploy (the commit, the trigger lists, the rate limit), which are named as churn; a window or ecosystem service added or removed is named by url; and it says which fields it could not compare rather than calling a partial baseline clean. `cost` sums a transcript's `usage` fields into token and tool-call
 counters -- integers only, never the transcript's own text. `docs/MANIFEST`
 is rendered by `tests/manifest.sh --update` from the subcommand's own output
 and CI requires it to agree with the tree, so a run that fetches `docs/` at
@@ -309,7 +320,8 @@ standard library only; `git` is the one external command.
 | 64 | usage error |
 
 No operator value is built in. `witness` and `witness-gaps` take the witness
-repository by `--url` / `--repo`, `docket` takes the fork by `--fork`, and
+repository by `--url` / `--repo`, `witness-compare` the operator's witness by
+`--reference`, `docket` takes the fork by `--fork`, and
 `hygiene` takes the name its second pattern hunts by `--operator` -- all
 required, because this repository does not publish those names and a default
 would be the place it started to. `tests/checks.sh` runs with no network: live
