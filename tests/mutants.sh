@@ -97,7 +97,8 @@ mutant 'config never read by curl'         's|-K - ||g'
 # The seal verb (2026-09-27). Each mutant puts back a hole the verb exists to close.
 mutant 'seal accepts continuity-core'        's|^       continuity-core) fail3 "seal refuses the label continuity-core.*$|       continuity-core) ;;|'
 mutant 'seal label allowlist admits anything' 's|^       \*) fail3 "label not on the seal allowlist.*$|       *) ;;|'
-mutant 'seal hash alphabet not checked'      's|^       \*\[!0-9a-f\]\*) fail3 "hash is not lowercase hex.*$|       *[!0-9a-f]*) ;;|'
+mutant 'seal hash alphabet not checked'      's|^       \*\[!0123456789abcdef\]\*) fail3 "hash is not lowercase hex.*$|       *[!0123456789abcdef]*) ;;|'
+mutant 'seal hash class written as a range'  's|\*\[!0123456789abcdef\]\*)|*[!0-9A-Fa-f]*)|'
 mutant 'seal signs the continuity-core preimage' 's|sign_preimage "1f916.seal.v1:\${HANDLE}:\${SEAL_LABEL}:\${SEAL_HASH}"|sign_preimage "1f916.seal.v1:${HANDLE}:continuity-core:${local_hash}"|'
 
 # --- 1f916-run --------------------------------------------------------------

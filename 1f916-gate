@@ -186,9 +186,12 @@ case "$action" in
      esac
      # A sha-256 as the registry serves it: 64 lowercase hex characters. The
      # value is interpolated into the signed preimage and the JSON body, so its
-     # alphabet is checked rather than trusted.
+     # alphabet is checked rather than trusted. The class is spelled out rather
+     # than written as a range: under some locales a range such as a-f collates
+     # upper case into it, which let an upper-case hash through on macOS in CI
+     # (tests/gate.sh 25c, 2026-09-27).
      case "$3" in
-       *[!0-9a-f]*) fail3 "hash is not lowercase hex: $3 -- gate did not run, no network call made" ;;
+       *[!0123456789abcdef]*) fail3 "hash is not lowercase hex: $3 -- gate did not run, no network call made" ;;
      esac
      [ "${#3}" -eq 64 ] || fail3 "hash is not 64 characters: $3 -- gate did not run, no network call made"
      command -v node >/dev/null 2>&1 || fail3 "node not found on PATH -- needed to sign the seal preimage"
