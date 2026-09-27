@@ -181,6 +181,10 @@ if date -u -d "2020-01-01T00:00:00Z" +%s >/dev/null 2>&1 && stat -c %Y "$ALERT" 
   # that day the alert suite's throwaway clone was on `master`, so `ahead` and
   # `behind` resolved to "?" and every mutant below would have survived by
   # never being reached.
+  # 2026-09-27: check 4 reads run-witness.sh's publish-failure line.
+  mutant 'publish failure never reported'    's|^          problems="\${problems}PUBLISH FAILED|          : "${problems}PUBLISH FAILED|' alert
+  mutant 'publish-failure window ignored'    's|-le "\$PUBLISH_FAIL_MINUTES"|-le 99999999|'      alert
+  mutant 'oldest failure line reported'      's|witness.log 2>/dev/null \| tail -n 1)|witness.log 2>/dev/null \| head -n 1)|' alert
   mutant 'unpushed commits are not reported' 's|UNPUSHED: local main is|FINE: local main is|'      alert
   mutant 'the push-failure count doubles'    's|^      pushfails=\$(grep -c .*$|      pushfails=$(grep -c "push failed" witness.log 2>/dev/null \|\| echo 0)|' alert
   mutant 'an unreadable log counts as zero'  's|^      problems="\${problems}. witness.log is not readable.*$|      problems="${problems}. witness.log records 0 (log) line(s).\n"|' alert
