@@ -200,7 +200,7 @@ self_test() {
 }
 
 case "$cmd" in
-  build)     [ -n "$COMMIT" ] && [ -n "$SERIAL" ] && [ -n "$TAG" ] || fail "build needs --commit, --serial and --tag"
+  build)     if [ -z "$COMMIT" ] || [ -z "$SERIAL" ] || [ -z "$TAG" ]; then fail "build needs --commit, --serial and --tag"; fi
              build_pin "$REPO" "$COMMIT" "$SERIAL" "$TAG" ;;
   move)      move ;;
   self-test) self_test ;;
