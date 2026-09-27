@@ -1,0 +1,208 @@
+#!/bin/sh
+# 1f916-pin-move -- the Mac leg of a toolkit pin move, as one checked-in script.
+#
+# Since 2026-09-27 every scheduled run takes the toolkit commit and the tool
+# digests from the signed `pin/PIN` on main, so a pin move edits no prompt. What
+# is left is this: build the next PIN from a commit, cut a signed tag on that
+# commit, sign the PIN, and open the pull request that puts it on main. Every
+# earlier move did those steps from a step script written for that sitting, and
+# two of the 2026-09-23 round trips were mistakes in such scripts. This is the
+# one copy, with each step a VERDICT line that stops the rest.
+#
+# It holds no secret. The tag and the PIN are signed through 1f916-ssh-sign
+# under the Mac's own configuration; the push token comes from
+# `gh auth token --user commonwealth-1f916` at run time and reaches git through
+# a one-shot credential helper, never argv.
+#
+# Usage:
+#   1f916-pin-move build  --repo DIR --commit C --serial N --tag T
+#       Print the PIN that `move` would sign, to stdout. Offline; changes nothing.
+#   1f916-pin-move move   --commit C --serial N --tag T --tag-message FILE
+#                         --pubkey FILE --pr-body FILE [--repo DIR]
+#       The whole move, against the deployment clone (default
+#       ~/Projects/1f916-agent-toolkit). Appends to stdout; the last line is
+#       `VERDICT PASS <pr url>` or `VERDICT FAIL <reason>`.
+#   1f916-pin-move self-test
+#       Builds a throwaway repository and requires `build` to refuse each bad
+#       input it exists to refuse. No network, no key.
+#
+# What `build` refuses, each by name: a commit that is not on origin/main (or
+# main, in a repository with no origin); a serial that is not one more than
+# the serial main's pin/PIN carries; a tag name that already exists; a file the
+# current PIN names that is missing at the commit or matches more than one
+# path; a tag name with characters a PIN line cannot carry.
+
+set -u
+
+FP='SHA256:q2yRbCWjFFYblk+Fb2yBiKBpl+PLM1SnhJX/veRUsOs'
+R='commonwealth-1f916/1f916-agent-toolkit'
+KEYS_URL='https://1f916.ai/api/keys/commonwealth'
+
+fail() { printf 'VERDICT FAIL %s\n' "$1"; exit 1; }
+if command -v sha256sum >/dev/null 2>&1; then SHA='sha256sum'; else SHA='shasum -a 256'; fi
+
+# ---------------------------------------------------------------- arguments
+cmd="${1:-}"; [ $# -gt 0 ] && shift
+REPO="$HOME/Projects/1f916-agent-toolkit"; COMMIT=''; SERIAL=''; TAG=''
+TAGMSG=''; PUBKEY=''; PRBODY=''
+while [ $# -gt 0 ]; do
+  [ $# -ge 2 ] || fail "flag $1 has no value"
+  case "$1" in
+    --repo) REPO="$2" ;; --commit) COMMIT="$2" ;; --serial) SERIAL="$2" ;;
+    --tag) TAG="$2" ;; --tag-message) TAGMSG="$2" ;; --pubkey) PUBKEY="$2" ;;
+    --pr-body) PRBODY="$2" ;;
+    *) fail "unknown flag $1" ;;
+  esac
+  shift 2
+done
+
+# ------------------------------------------------------------------- build
+# build_pin <repo> <commit> <serial> <tag> -- the next PIN on stdout, or a
+# VERDICT FAIL line and exit 1. Reads the current PIN from the main ref so the
+# file list and the serial both come from what the runs verify today.
+build_pin() {
+  repo="$1"; c="$2"; n="$3"; t="$4"
+  case "$n" in ''|*[!0123456789]*) fail "serial is not a positive integer: $n" ;; esac
+  case "$t" in ''|*[!A-Za-z0-9._-]*) fail "tag name carries a character a PIN line cannot: $t" ;; esac
+  case "$c" in *[!0123456789abcdef]*) fail "commit is not lowercase hex: $c" ;; esac
+  [ "${#c}" -eq 40 ] || fail "commit is not a full 40-character id: $c"
+  cd "$repo" || fail "no repository at $repo"
+  if git rev-parse -q --verify refs/remotes/origin/main >/dev/null; then main=origin/main; else main=main; fi
+  git cat-file -e "$c^{commit}" 2>/dev/null || fail "commit $c is not in this repository"
+  git merge-base --is-ancestor "$c" "$main" || fail "commit $c is not on $main"
+  git rev-parse -q --verify "refs/tags/$t" >/dev/null && fail "tag $t already exists"
+  cur=$(git show "$main:pin/PIN" 2>/dev/null) || fail "no pin/PIN on $main"
+  prev=$(printf '%s\n' "$cur" | awk '$1 == "serial" { print $2 }')
+  [ -n "$prev" ] || fail "the PIN on $main carries no serial"
+  [ "$n" -eq $((prev + 1)) ] || fail "serial $n is not one more than the serial on $main ($prev)"
+  names=$(printf '%s\n' "$cur" | awk '$1 == "file" { print $2 }')
+  [ -n "$names" ] || fail "the PIN on $main names no files"
+  printf '1f916-pin v1\nserial %s\ncommit %s\ntag %s\n' "$n" "$c" "$t"
+  paths=$(git ls-tree -r --name-only "$c")
+  # Collected first and sorted after: a `fail` inside a pipeline would exit
+  # only the pipeline's subshell, and a missing file would print a short PIN.
+  lines=''
+  for name in $names; do
+    hits=$(printf '%s\n' "$paths" | awk -v n="$name" '{ k = split($0, p, "/"); if (p[k] == n) print }')
+    count=$(printf '%s' "$hits" | grep -c . || true)
+    [ "$count" -eq 1 ] || fail "file $name matches $count paths at $c (need exactly one)"
+    d=$(git show "$c:$hits" | $SHA | cut -c1-64)
+    lines="${lines}file $name $d
+"
+  done
+  printf '%s' "$lines" | LC_ALL=C sort -k2,2
+}
+
+# ------------------------------------------------------------------- move
+move() {
+  [ -n "$COMMIT" ] || fail "missing --commit"; [ -n "$SERIAL" ] || fail "missing --serial"
+  [ -n "$TAG" ] || fail "missing --tag"; [ -n "$TAGMSG" ] || fail "missing --tag-message"
+  [ -n "$PUBKEY" ] || fail "missing --pubkey"; [ -n "$PRBODY" ] || fail "missing --pr-body"
+  for f in "$TAGMSG" "$PUBKEY" "$PRBODY"; do [ -r "$f" ] || fail "cannot read $f"; done
+  export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+  cd "$REPO" || fail "no clone at $REPO"
+  [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || fail "the deployment clone is not on main"
+  [ -z "$(git status --porcelain)" ] || fail "the deployment clone is not clean"
+  git fetch -q origin --tags || fail "fetch"
+  git merge -q --ff-only origin/main || fail "fast-forward of the clone"
+  W=$(mktemp -d) || fail mktemp
+  trap 'rm -rf "$W"' EXIT
+  ( build_pin "$REPO" "$COMMIT" "$SERIAL" "$TAG" ) > "$W/PIN" || { cat "$W/PIN"; exit 1; }
+  echo "BUILT $(grep -c '^file ' "$W/PIN") files at $COMMIT"
+  # The tag names the commit the PIN names, so it names code that runs.
+  git tag -s "$TAG" -F "$TAGMSG" "$COMMIT" >"$W/tag.log" 2>&1 || fail "tag: $(tail -1 "$W/tag.log")"
+  git cat-file tag "$TAG" > "$W/tag.txt"
+  curl -sf "$KEYS_URL" > "$W/keys.json" || fail "keys fetch"
+  python3 1f916-pin tag-verify --tag-object "$W/tag.txt" --key-json "$W/keys.json" \
+      --fingerprint "$FP" --expect-object "$COMMIT" --expect-tag "$TAG" > "$W/tv.json" \
+      || fail "tag-verify: $(cat "$W/tv.json")"
+  echo "TAG $TAG verified against the registry key"
+  B="claude/pin-serial-$SERIAL"; WT="$W/wt"
+  git worktree add -q -b "$B" "$WT" origin/main || fail "worktree"
+  cp "$W/PIN" "$WT/pin/PIN"; rm -f "$WT/pin/PIN.sig"
+  ( cd "$WT" && "$HOME/bin/1f916-ssh-sign" -Y sign -n 1f916-pin -f "$PUBKEY" pin/PIN ) >"$W/sign.log" 2>&1
+  [ -s "$WT/pin/PIN.sig" ] || fail "no PIN signature: $(tail -1 "$W/sign.log")"
+  # Verify exactly as a run will, plus a control that must go red: the same
+  # signature at a floor one above the new serial.
+  python3 1f916-pin verify --pin "$WT/pin/PIN" --sig "$WT/pin/PIN.sig" --key-json "$W/keys.json" \
+      --fingerprint "$FP" --min-serial "$SERIAL" > "$W/v.json" || fail "PIN verify: $(cat "$W/v.json")"
+  if python3 1f916-pin verify --pin "$WT/pin/PIN" --sig "$WT/pin/PIN.sig" --key-json "$W/keys.json" \
+      --fingerprint "$FP" --min-serial $((SERIAL + 1)) >/dev/null 2>&1; then
+    fail "control: a floor above the new serial did not refuse"
+  fi
+  echo "PIN serial $SERIAL verified; the floor control refused"
+  ( cd "$WT" && git add pin/PIN pin/PIN.sig && git commit -q -S -m "pin: serial $SERIAL -> $(printf '%s' "$COMMIT" | cut -c1-8) ($TAG)" ) || fail "commit"
+  [ "$(cd "$WT" && git log -1 --format=%G?)" = G ] || fail "the pin commit is not signed G"
+  [ "$(cd "$WT" && git diff --name-only origin/main..HEAD | tr '\n' ' ')" = "pin/PIN pin/PIN.sig " ] || fail "the pin commit touches more than pin/"
+  GH_TOKEN=$(gh auth token --user commonwealth-1f916) || fail "gh token"; export GH_TOKEN
+  [ "$(gh api user --jq .login)" = commonwealth-1f916 ] || fail "wrong GitHub account"
+  # shellcheck disable=SC2016 # the helper expands $GH_TOKEN when git runs it, not here
+  H='!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'
+  git -c credential.helper= -c credential.helper="$H" push -q origin "refs/tags/$TAG" || fail "push tag"
+  [ "$(git ls-remote origin "refs/tags/$TAG" | cut -f1)" = "$(git rev-parse "refs/tags/$TAG")" ] || fail "remote tag differs"
+  ( cd "$WT" && git -c credential.helper= -c credential.helper="$H" push -q origin "HEAD:refs/heads/$B" ) || fail "push branch"
+  url=$(gh pr create --repo "$R" --base main --head "$B" --title "pin: serial $SERIAL ($TAG)" --body-file "$PRBODY") || fail "pr create"
+  git worktree remove --force "$WT"; git branch -D "$B" >/dev/null 2>&1
+  echo "VERDICT PASS $url"
+}
+
+# --------------------------------------------------------------- self-test
+self_test() {
+  T=$(mktemp -d) || exit 1
+  trap 'rm -rf "$T"' EXIT
+  (
+    set -e
+    cd "$T" && git init -q -b main . && git config user.email t@t && git config user.name t
+    git config commit.gpgsign false
+    mkdir -p pin docs colony
+    printf 'a\n' > 1f916-gate; printf 'b\n' > docs/MANIFEST; printf 'c\n' > colony/colony_inbox.py
+    printf '1f916-pin v1\nserial 3\ncommit %040d\ntag v1\nfile 1f916-gate x\nfile MANIFEST x\nfile colony_inbox.py x\n' 0 > pin/PIN
+    git add -A && git commit -q -m one
+  ) || { echo "self-test: fixture failed"; exit 1; }
+  c1=$(git -C "$T" rev-parse HEAD)
+  n=0; bad=0
+  expect() { # expect <label> <want: ok|fail> <grep> <args for build_pin>
+    label="$1"; want="$2"; pat="$3"; shift 3
+    out=$( (build_pin "$@") 2>&1 ); rc=$?
+    n=$((n + 1))
+    if { [ "$want" = ok ] && [ $rc = 0 ]; } || { [ "$want" = fail ] && [ $rc != 0 ] && printf '%s' "$out" | grep -q -- "$pat"; }
+    then echo "ok $n - $label"; else bad=$((bad + 1)); echo "not ok $n - $label: $out"; fi
+  }
+  expect "a good build passes" ok '' "$T" "$c1" 4 v2
+  good=$( (build_pin "$T" "$c1" 4 v2) )
+  n=$((n + 1))
+  if printf '%s\n' "$good" | sed -n 5p | grep -q '^file 1f916-gate ' && printf '%s\n' "$good" | tail -1 | grep -q '^file colony_inbox.py '
+  then echo "ok $n - file lines are sorted by name"; else bad=$((bad + 1)); echo "not ok $n - file lines not sorted: $good"; fi
+  want_d=$(printf 'b\n' | $SHA | cut -c1-64)
+  n=$((n + 1))
+  if printf '%s\n' "$good" | grep -q "^file MANIFEST $want_d\$"
+  then echo "ok $n - a nested file is found by name and hashed at the commit"; else bad=$((bad + 1)); echo "not ok $n - MANIFEST digest wrong"; fi
+  expect "a serial that skips is refused"          fail "not one more" "$T" "$c1" 5 v2
+  expect "a serial that repeats is refused"        fail "not one more" "$T" "$c1" 3 v2
+  expect "an upper-case commit is refused"         fail "lowercase hex" "$T" "$(printf '%s' "$c1" | tr 'a-f' 'A-F')" 4 v2
+  expect "a short commit is refused"               fail "40-character"  "$T" "$(printf '%s' "$c1" | cut -c1-12)" 4 v2
+  expect "a tag with a space is refused"           fail "cannot"        "$T" "$c1" 4 'v 2'
+  git -C "$T" tag v2 "$c1"
+  expect "an existing tag is refused"              fail "already exists" "$T" "$c1" 4 v2
+  git -C "$T" checkout -q -b side
+  printf 'z\n' > "$T/1f916-gate"; git -C "$T" commit -q -am side
+  c2=$(git -C "$T" rev-parse HEAD); git -C "$T" checkout -q main
+  expect "a commit not on main is refused"         fail "is not on main" "$T" "$c2" 4 v3
+  cp "$T/1f916-gate" "$T/docs/1f916-gate" 2>/dev/null || printf 'a\n' > "$T/docs/1f916-gate"
+  git -C "$T" add -A && git -C "$T" commit -q -m dup
+  c3=$(git -C "$T" rev-parse HEAD)
+  expect "a name matching two paths is refused"    fail "matches 2 paths" "$T" "$c3" 4 v3
+  git -C "$T" rm -q docs/1f916-gate docs/MANIFEST && git -C "$T" commit -q -m gone
+  c4=$(git -C "$T" rev-parse HEAD)
+  expect "a name missing at the commit is refused" fail "matches 0 paths" "$T" "$c4" 4 v3
+  echo "# $n tests, $bad failed"
+  [ "$bad" = 0 ]
+}
+
+case "$cmd" in
+  build)     [ -n "$COMMIT" ] && [ -n "$SERIAL" ] && [ -n "$TAG" ] || fail "build needs --commit, --serial and --tag"
+             build_pin "$REPO" "$COMMIT" "$SERIAL" "$TAG" ;;
+  move)      move ;;
+  self-test) self_test ;;
+  *)         echo "usage: 1f916-pin-move build|move|self-test [flags] (see the header)" >&2; exit 2 ;;
+esac
