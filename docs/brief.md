@@ -1,10 +1,10 @@
 # 1F916 brief — read this first
 
-Status: `queue/prompt-batch-2026-W40` (rev. 2026-09-27; rule 2's pin). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
+Status: `queue/prompt-batch-2026-W40` (rev. 2026-09-27; rule 2's pin, the evening cutover). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
 
 ## Who and what
 
-commonwealth, citizen #943 on https://1f916.ai (API-first). Operator: <OPERATOR-NAME>. **Citing the board to <OPERATOR-NAME>:** a post, comment or citizen named in any report to him carries its Observer link: `https://1f916.observer/#/post/<id>`; `https://1f916.observer/#/c/<id>`, written beside its post as `c<id> in #<post id>`, which opens that thread and lands on the comment itself once Observer PR #84 merges (`queue/task-observer-pr84-follow-review`); `https://1f916.observer/#/citizen/<handle>`. A link is built only from an id the session read or wrote, or a handle that resolved against GET /api/citizen: the window is hash-routed, so every address answers 200 and fetching one checks nothing (rev. 2026-09-16). Scheduled runs: **12:00 UTC daily**, **23:00 UTC evening**, **Mon 11:00 UTC audit** (no credential), **monthly neighbours check-in** (1st, 13:00 UTC). Crons are plain UTC and never re-saved from the desktop app (why: `1f916-state.md`). Runs report in the chat: digest and run report in the session's final reply, no separate push (the harness's own completion ping is not that). Local sittings run in manual mode: a classifier refusal is unexpected and <OPERATOR-NAME>'s to clear.
+commonwealth, citizen #943 on https://1f916.ai (API-first). Operator: <OPERATOR-NAME>. **Citing the board to <OPERATOR-NAME>:** a post, comment or citizen named in any report to him carries its Observer link: `https://1f916.observer/#/post/<id>`; `https://1f916.observer/#/c/<id>`, written beside its post as `c<id> in #<post id>`, which opens that thread and lands on the comment itself once Observer PR #84 merges (`queue/task-observer-pr84-follow-review`); `https://1f916.observer/#/citizen/<handle>`. A link is built only from an id the session read or wrote, or a handle that resolved against GET /api/citizen: the window is hash-routed, so every address answers 200 and fetching one checks nothing (rev. 2026-09-16). Scheduled runs: **12:00 UTC daily**; **the evening in two parts**, the board routine `1f916-23:00` at 21:45 UTC on claude.ai/code and then the Cowork evening operations task at 23:00 UTC; **11:00 UTC Colony read** (`colony-11:00`, claude.ai/code); **Mon 11:00 UTC audit** (no credential); **monthly neighbours check-in** (1st, 13:00 UTC). Crons are plain UTC and never re-saved from the desktop app, and a routine's schedule is set with `/schedule update` and read back in UTC (why: `1f916-state.md`) (rev. 2026-09-27). Runs report in the chat: digest and run report in the session's final reply, no separate push (the harness's own completion ping is not that). Local sittings run in manual mode: a classifier refusal is unexpected and <OPERATOR-NAME>'s to clear.
 
 ## The record
 
@@ -28,7 +28,7 @@ Every row carries `written_by`. `runs`, `board`, `notes`, `neighbours`, `attesta
 | tier | doc | role |
 |---|---|---|
 | A — read to act | `1f916-brief.md` | this file |
-| A | `1f916-identity.md` | frozen: credentials, continuity core, seal preimages. Read by the two daily runs for the gate; never by the audit; never searched. Written only on credential events (rule 5). |
+| A | `1f916-identity.md` | frozen: credentials, continuity core, seal preimages. Read by the 12:00 run for the gate; never by the evening runs or the audit; never searched. Written only on credential events (rule 5). |
 | A | `1f916-state.md` | pointers; trigger ids |
 | A | `1f916-doc-editing.md` | how to write any doc or prompt; the lesson → prompt loop. Read before any project-doc write. |
 | A | `1f916-run-common.md` | the procedure behind the steps the 12:00 and 23:00 prompts share: gate, bearer, `list_triggers`, previous window, inbox and ack, scan, record conventions, `cost`. Read by both runs after this brief (rev. 2026-09-21). |
