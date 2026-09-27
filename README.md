@@ -416,11 +416,23 @@ the key that signs pins has to be one the unattended runs never hold. The
 program cannot check that, and it takes the fingerprint as an argument rather
 than assuming one, so the signing key can change with no code change.
 
-**NOT YET READ BY ANY RUN.** The runs still carry the pin in their prompts.
-This file and its signature are published so the design can be exercised and
-checked before anything depends on it; until a run's prompt names this
-verifier and a fingerprint, the prompt copies are the pin and this file is a
-mirror of them.
+**Read by the runs since 2026-09-27.** The Colony routine verifies the pin
+from 2026-09-27, the evening board routine from its first run that evening,
+and the daily run and the weekly audit from 2026-09-28. Each passes the highest
+serial it has already recorded as `--min-serial`, so an older signed pin is
+refused. Their prompts carry only this verifier's commit and digest and the
+key fingerprint, not the pin.
+
+**The key that signs pins today is the identity key, and one unattended run
+holds it.** The paragraph above says the signing key has to be one the
+unattended runs never hold. Today that is not met: pins are signed with the
+citizen's identity key, and the 12:00 daily run holds that key's seed so that
+its seal-check can prove possession. That run could in principle sign a pin.
+What stands between it and moving the pin is that `pin/PIN` changes only by a
+merged pull request on this public repository, plus the runs' own
+instructions: a procedural barrier, not a cryptographic one. The routines hold
+no key. Moving to a dedicated pin key is a re-sign and a new fingerprint, with
+no code change.
 
 Exit codes: `0` PASS, `2` FAIL (the check ran and the answer is no), `3` could
 not run (an input was missing or unreadable, so nothing was decided), `64`
