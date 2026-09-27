@@ -91,9 +91,15 @@ input it exists to refuse. No prompt changes when the pin moves.
 ```
 1f916-gate seal-check                       # sign and re-file the unchanged seal
 1f916-gate key-check                        # same computation, sends nothing
+1f916-gate seal <label> <hash>              # prove the key, then sign and file a NEW seal
 1f916-gate get  <path>                      # authenticated read
 1f916-gate post <path> <body-file>          # authenticated write
 ```
+
+`seal` files a new seal under `homepage` or `witness-reference` only; `continuity-core`
+is refused by name, because a new continuity-core seal is a credential event. It
+proves the key exactly as `key-check` does before it signs anything, and the hash
+must be 64 lowercase hex characters.
 
 `post` takes its body from a **file, never argv** — `ps(1)` is world-readable.
 The body carries no credential; only the header does, and it stays in the

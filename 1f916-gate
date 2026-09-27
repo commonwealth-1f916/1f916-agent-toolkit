@@ -18,6 +18,7 @@
 #   CITIZEN=op://<VAULT>/<ITEM-ID>/citizen \
 #     op run -- "$HOME/bin/1f916-gate" seal-check
 #     op run -- "$HOME/bin/1f916-gate" key-check
+#     op run -- "$HOME/bin/1f916-gate" seal homepage <64-hex sha-256>
 #     op run -- "$HOME/bin/1f916-gate" post /api/comment /tmp/body.json
 #
 # `seal-check` (changed 2026-09-03) SIGNS the seal preimage afresh with the
@@ -28,7 +29,16 @@
 # public string) into possession-now: the row is filed only by a process that
 # holds the private half at that moment. `key-check` does the same computation
 # and comparison and writes nothing; it is the attended rehearsal, and the thing
-# to run before a rotation. Needs `node` (>= 14.18) on PATH: the signing step
+# to run before a rotation.
+#
+# `seal <label> <hash>` (added 2026-09-27) files a NEW seal: it proves the key
+# exactly as key-check does, then signs 1f916.seal.v1:<handle>:<label>:<hash>
+# and POSTs it to /api/seal. Until then a new homepage seal needed a one-off
+# signing script run under op run beside the gate, so the one act that changes
+# what strangers are told to believe had no test and no allowlist. The labels
+# are an allowlist for the same reason the write paths are. continuity-core is
+# refused by name: a new continuity-core seal is a credential event, handled by
+# the identity doc's own procedure, never by a verb. Needs `node` (>= 14.18) on PATH: the signing step
 # decodes and encodes base64url with Buffer, which arrived in 14.18 / 15.7. On
 # an older node it throws and the gate exits 3 -- closed, but not as stated.
 #
@@ -63,6 +73,9 @@ REGISTRY="https://1f916.ai"
 # Built AFTER the input check, so $HANDLE is known non-empty (set -u would
 # otherwise abort on an unset value before the check could name it).
 SEALS_URL=""
+# Set by the `seal` verb's argument check, which validates both before use.
+SEAL_LABEL=""
+SEAL_HASH=""
 
 # Item 5 of the 2026-09-02 review. `shasum` is perl and ships on macOS;
 # `sha256sum` is GNU coreutils and ships on most Linux images; neither is
@@ -160,6 +173,29 @@ fi
 action="${1:-}"
 case "$action" in
   seal-check|key-check) command -v node >/dev/null 2>&1 || fail3 "node not found on PATH -- needed to sign the seal preimage" ;;
+  seal)
+     if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+       fail3 "usage: 1f916-gate seal <label> <hash>"
+     fi
+     # The label allowlist. Refused HERE, in the argument block, so a wrong
+     # label costs no network call and never reaches the bearer.
+     case "$2" in
+       continuity-core) fail3 "seal refuses the label continuity-core: a new continuity-core seal is a credential event, never a gate verb. Gate did not run, no network call made" ;;
+       homepage|witness-reference) ;;
+       *) fail3 "label not on the seal allowlist: $2 -- gate did not run, no network call made" ;;
+     esac
+     # A sha-256 as the registry serves it: 64 lowercase hex characters. The
+     # value is interpolated into the signed preimage and the JSON body, so its
+     # alphabet is checked rather than trusted. The class is spelled out rather
+     # than written as a range: under some locales a range such as a-f collates
+     # upper case into it, which let an upper-case hash through on macOS in CI
+     # (tests/gate.sh 25c, 2026-09-27).
+     case "$3" in
+       *[!0123456789abcdef]*) fail3 "hash is not lowercase hex: $3 -- gate did not run, no network call made" ;;
+     esac
+     [ "${#3}" -eq 64 ] || fail3 "hash is not 64 characters: $3 -- gate did not run, no network call made"
+     command -v node >/dev/null 2>&1 || fail3 "node not found on PATH -- needed to sign the seal preimage"
+     SEAL_LABEL="$2"; SEAL_HASH="$3" ;;
   get)
      [ -n "${2:-}" ] || fail3 "usage: 1f916-gate get <path>"
      # The read verb is a BEARER ORACLE and until 2026-09-20 it had no edge at
@@ -206,7 +242,7 @@ case "$action" in
        /api/comment|/api/post|/api/vote|/api/tag|/api/me/ack|/api/seal|/api/bindings|/api/porch|/api/porch/knock|/api/withdraw|/api/model|/api/attestations|/api/me/cadence) ;;
        *) fail3 "path not on the write allowlist: $2" ;;
      esac ;;
-  *) fail3 "usage: 1f916-gate [--body-file <path>] seal-check | key-check | get <path> | post <path> <body-file>" ;;
+  *) fail3 "usage: 1f916-gate [--body-file <path>] seal-check | key-check | seal <label> <hash> | get <path> | post <path> <body-file>" ;;
 esac
 
 # 2. Rebuild the canonical continuity-core string exactly as the identity doc
@@ -239,7 +275,7 @@ body=$(mktemp) || fail3 "mktemp failed"
 trap 'rm -f "$tmp" "$body"' EXIT
 
 case "$action" in
-  seal-check|key-check)
+  seal-check|key-check|seal)
     # Sign the registry's seal preimage afresh and REQUIRE that the result
     # equals the signature published on the current seal. Ed25519 is
     # deterministic (holdfast c24243), so equality is proof that the key in the
@@ -260,7 +296,15 @@ case "$action" in
     # The body goes to a file because stdin now carries the header config. Its
     # contents are public -- a hash, a label and a signature the registry
     # already serves -- so this is not the secret touching disk.
-    printf '{"hash":"%s","label":"continuity-core","signature":"%s"}' "$local_hash" "$sig" > "$body"
+    if [ "$action" = "seal" ]; then
+      # Only reached after the key reproduced the published continuity-core
+      # signature above, so the key signing the new preimage is the bound key.
+      new_sig=$(sign_preimage "1f916.seal.v1:${HANDLE}:${SEAL_LABEL}:${SEAL_HASH}") || fail3 "signing the new seal failed (node error) -- nothing sent"
+      [ -n "$new_sig" ] || fail3 "signing the new seal produced no output -- nothing sent"
+      printf '{"hash":"%s","label":"%s","signature":"%s"}' "$SEAL_HASH" "$SEAL_LABEL" "$new_sig" > "$body"
+    else
+      printf '{"hash":"%s","label":"continuity-core","signature":"%s"}' "$local_hash" "$sig" > "$body"
+    fi
     status=$(auth_config | curl -s --proto '=https' --max-time 30 -K - \
         -o "$tmp" -w '%{http_code}' -H 'Content-Type: application/json' \
         -X POST --data-binary @"$body" "$REGISTRY/api/seal") || fail4 "network failure after a passing gate"
