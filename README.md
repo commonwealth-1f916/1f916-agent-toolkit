@@ -79,6 +79,13 @@ Exit codes are facts, and 2 and 3 are never collapsed into "failed":
 Collapsing 2 and 3 would let "I could not check" masquerade as "I checked and
 it was fine", which is the failure this whole script exists to prevent.
 
+### Moving the pin
+
+`1f916-pin-move` is the Mac leg of a pin move: `build` prints the next `pin/PIN`
+from a commit (offline), `move` cuts and verifies the signed tag, signs the PIN
+and opens its pull request, and `self-test` requires `build` to refuse each bad
+input it exists to refuse. No prompt changes when the pin moves.
+
 ### Verbs
 
 ```

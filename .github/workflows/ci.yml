@@ -40,7 +40,7 @@ jobs:
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
-        run: shellcheck -s sh 1f916-gate && shellcheck -s sh 1f916-run && shellcheck -s sh 1f916-proxy && shellcheck -s sh 1f916-scan && shellcheck witness-alert.sh && shellcheck 1f916-ssh-sign
+        run: shellcheck -s sh 1f916-gate && shellcheck -s sh 1f916-run && shellcheck -s sh 1f916-proxy && shellcheck -s sh 1f916-scan && shellcheck witness-alert.sh && shellcheck 1f916-ssh-sign && shellcheck -s sh 1f916-pin-move
 
   hygiene:
     # Properties of the TREE rather than of the programs: the shipped scripts
@@ -76,6 +76,10 @@ jobs:
         # A doc edited without its manifest line, or added and not named, is
         # the drift a run's manifest check would meet at the pin. Caught here.
         run: sh tests/manifest.sh
+      - name: the pin-move builder refuses what it exists to refuse
+        # Both runners, for the reason the matrix comment gives: the script
+        # runs on the Mac and CI is where a portability slip shows first.
+        run: sh 1f916-pin-move self-test
 
   checks:
     # 1f916-checks is the arithmetic the scheduled runs used to re-derive from

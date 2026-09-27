@@ -126,16 +126,18 @@ echo "Digests at $2:"
 print_digests "$2"
 echo
 cat <<'OWED'
-Merging this does NOT deploy it. The runs fetch a pinned commit and verify
-four digests before executing anything, so until the pin moves they keep
-running the old code and nothing reports the gap for up to a week.
+Merging this does NOT deploy it. The runs verify the signed pin/PIN on main
+and fetch the commit it names, checking each file's digest, so until the pin
+moves they keep running the old code and nothing reports the gap for up to a
+week.
 
-What is owed, and it is one sitting:
-  1. move the pin + digests in the 12:00 prompt, step 1
-  2. move the pin + digests in the 23:00 prompt, step 1
-  3. move the pin + the 1f916-scan digest in the brief, security rule 2
-  4. cut a SIGNED, ANNOTATED tag on the merge commit and push it
-  5. update the ledger row prompts/toolkit-pin
+What is owed, and it is one sitting (since 2026-09-27 no prompt carries a pin):
+  1. on the Mac: 1f916-pin-move move --commit <merge commit> --serial <N+1>
+     --tag <name> --tag-message <file> --pubkey <identity key .pub> --pr-body <file>
+     which builds the next PIN, cuts and verifies the SIGNED, ANNOTATED tag on
+     that commit, signs the PIN and opens its pull request
+  2. merge that pull request
+  3. update the ledger row prompts/toolkit-pin
 
 Cut the tag when the pin moves, not when this merges: then every tag names
 code that actually ran, and "the pin resolves to a signed tag" stays a thing
