@@ -224,5 +224,46 @@ body_has "AUTOHEAL SKIPPED:" "12. and autoheal did not rebase onto a stale origi
 
 ( cd "$W/repo" && git remote set-url origin "$W/origin.git" )
 
+# --- 2026-09-27: the publish-failure line run-witness.sh now writes --------
+# run-witness.sh logs "<step> failed <date -u>" when add, commit or push fails.
+# Check 4 reports the newest such line only while it is recent.
+
+# 13. An old failure line is history. The healthy repo stays silent even though
+#     the log still holds a push failure from hours ago -- which is the real
+#     log's shape, since the 2026-09-01 lines are still in it.
+rm -f "$W/state"
+# Tests 10-12 left a local commit unpushed, and the feed may already be current,
+# so the commit is allowed to be empty-handed; the push is what must happen.
+( cd "$W/repo" && fresh_feed 5 && git add -A && { git commit -q -m fresh13 || true; } && git push -q origin HEAD:main )
+base=$(mails)
+printf 'push failed %s\n' "$(date -u -d '-3 hours')" > "$W/repo/witness.log"
+run_alert
+count_is "13. a publish failure hours old is history, not news" "$base"
+
+# 14. A failure line from the latest run alerts, and names the step. Written
+#     in the 12-hour form radagast's locale gives `date -u` ("Tue Sep  1
+#     12:07:03 PM UTC 2026", read from the real log 2026-09-27), not this
+#     container's 24-hour one, since that is the shape the parser meets.
+printf 'push failed %s\n' "$(date -u -d '-5 minutes' '+%a %b %e %I:%M:%S %p UTC %Y')" >> "$W/repo/witness.log"
+run_alert
+count_is "14. a publish failure from the latest run alerts" "$((base+1))"
+body_has "PUBLISH FAILED:" "14. and names the kind"
+body_has "logged 'push failed'" "14. and the step that failed"
+
+# 15. The NEWEST line is the one reported.
+rm -f "$W/state"
+printf 'commit failed %s\n' "$(date -u -d '-4 minutes')" >> "$W/repo/witness.log"
+run_alert
+count_is "15. a later failure line alerts" "$((base+2))"
+body_has "logged 'commit failed'" "15. and the newest failure line is the one reported"
+
+# 16. A date that does not parse is reported, not skipped.
+rm -f "$W/state"
+printf 'add failed not-a-date\n' >> "$W/repo/witness.log"
+run_alert
+count_is "16. an unparseable failure date alerts" "$((base+3))"
+body_has "did not parse ('not-a-date')" "16. and says what it could not read"
+: > "$W/repo/witness.log"
+
 printf '# %d tests, %d passed, %d failed\n' "$n" "$pass" "$fail"
 [ "$fail" = 0 ] || exit 1

@@ -30,6 +30,11 @@ FROM="${WITNESS_ALERT_FROM:-}"
 WITNESS_ID="${WITNESS_ID:-}"
 STALE_HOURS="${WITNESS_STALE_HOURS:-3}"
 LOG_STALE_MINUTES="${WITNESS_LOG_STALE_MINUTES:-90}"
+# How recent a publish-failure line in witness.log must be to count as news
+# (check 4). This script runs at :12, five minutes after the writer at :07, so
+# the latest run's line is ~5 minutes old and the run before it ~65. Sixty
+# keeps the one and drops the other.
+PUBLISH_FAIL_MINUTES="${WITNESS_PUBLISH_FAIL_MINUTES:-60}"
 STATE="${WITNESS_ALERT_STATE:-$HOME/.witness-alert.state}"
 # Local record of what this script itself could not do (a failed send). Never
 # mailed — it exists precisely for the case where mail is what failed.
@@ -226,6 +231,36 @@ if [ "$in_repo" = "1" ]; then
   else
     problems="${problems}NOT RUNNING: witness.log is missing.
 "
+  fi
+
+  # --- 4. DID THE LATEST RUN PUBLISH? Since 2026-09-27 run-witness.sh checks
+  #        add, commit and push separately, logs "<step> failed <date -u>" for
+  #        the one that failed, and exits 4. Cron discards the exit status, and
+  #        the cron line and run-witness.sh are both seal inputs, so neither can
+  #        be changed to carry it anywhere. The log line is the one place the
+  #        writer's own knowledge of a failed publish survives. Read here, it
+  #        names the cause five minutes after the run; without it the failure
+  #        shows first as UNPUSHED (push only) or, for add and commit, only as
+  #        STALE hours later. Only a line newer than PUBLISH_FAIL_MINUTES
+  #        counts: the log keeps earlier failures (the 2026-09-01 outage among
+  #        them), and an old line is history, not news. The newest line is the
+  #        one reported.
+  if [ -r witness.log ]; then
+    lastfail=$(grep -E '^(add|commit|push) failed ' witness.log 2>/dev/null | tail -n 1)
+    if [ -n "$lastfail" ]; then
+      step=${lastfail%% *}
+      when=${lastfail#* failed }
+      if when_epoch=$(date -u -d "$when" +%s 2>/dev/null); then
+        failage=$(( ( $(date -u +%s) - when_epoch ) / 60 ))
+        if [ "$failage" -le "$PUBLISH_FAIL_MINUTES" ]; then
+          problems="${problems}PUBLISH FAILED: run-witness.sh logged '${step} failed' ${failage} minute(s) ago (${when}); the reader ran, but its output was not published.
+"
+        fi
+      else
+        problems="${problems}UNPARSEABLE: the newest publish-failure line in witness.log carries a date that did not parse ('${when}').
+"
+      fi
+    fi
   fi
 fi
 
