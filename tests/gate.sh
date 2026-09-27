@@ -412,5 +412,71 @@ if [ -n "$sig" ]; then
   unset STUB_BODY
 fi
 
+# ------------------------------------------------------------ the seal verb
+# `seal <label> <hash>` files a NEW seal (2026-09-27). What it must prove: the
+# label and the hash are refused in the argument block with no call of any
+# kind; a wrong credential stops at the compare exactly like every other verb;
+# a key that does not reproduce the published continuity-core signature is
+# exit 5 with nothing sent; and on success the body carries the label, the hash
+# and a signature that verifies over 1f916.seal.v1:<handle>:<label>:<hash>.
+SH=$(printf 'ab%.0s' $(seq 1 32))
+unset STUB_SEALS
+
+run 3 "25. seal refuses continuity-core by name" seal continuity-core "$SH"
+saw "credential event" "25. and says why"
+no_calls "25. and made no network call"
+
+run 3 "25b. seal refuses a label off its allowlist" seal anything-else "$SH"
+saw "not on the seal allowlist" "25b. and names the allowlist"
+no_calls "25b. and made no network call"
+
+run 3 "25c. seal refuses an uppercase hash" seal homepage "$(printf '%s' "$SH" | tr 'a-f' 'A-F')"
+no_calls "25c. and made no network call"
+
+run 3 "25d. seal refuses a hash that is not 64 characters" seal homepage "abcdef"
+saw "not 64 characters" "25d. and says so"
+no_calls "25d. and made no network call"
+
+run 3 "25e. seal with no hash is refused" seal homepage
+no_calls "25e. and made no network call"
+
+STUB_SEALS="$WORK/seals-wrong.json"; export STUB_SEALS
+run 2 "26. seal with a wrong credential stops at the compare" seal homepage "$SH"
+saw "Credentials NOT used" "26. and says the credentials were not used"
+calls "26. exactly one call, the unauthenticated seals GET" 1
+no_secret_in_argv "26. the bearer never appeared in curl's argv"
+
+if [ -n "$sig" ]; then
+  STUB_SEALS="$WORK/seals-badsig.json"; export STUB_SEALS
+  run 5 "27. seal with a key that does not reproduce the published signature is exit 5" seal homepage "$SH"
+  calls "27. and nothing was sent" 1
+
+  STUB_SEALS="$WORK/seals-good.json"; export STUB_SEALS
+  SENT="$WORK/seal-sent.json"; : > "$SENT"
+  STUB_POST_BODY="$SENT"; export STUB_POST_BODY
+  run 0 "28. seal files a new seal when hash and key agree" seal homepage "$SH"
+  calls "28. two calls: the seals GET and the POST" 2
+  unset STUB_POST_BODY
+  if [ "$(jq -r '.label' "$SENT" 2>/dev/null)" = homepage ] && [ "$(jq -r '.hash' "$SENT" 2>/dev/null)" = "$SH" ]
+  then ok "28. the body carries the requested label and hash"
+  else nok "28. the body carries the requested label and hash" "sent: $(head -c 160 "$SENT")"; fi
+  want=$(ED25519_PRIV="$D_SEED" node -e '
+    const c = require("crypto");
+    const seed = Buffer.from(process.env.ED25519_PRIV, "base64url");
+    const der = Buffer.concat([Buffer.from("302e020100300506032b657004220420","hex"), seed]);
+    const key = c.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+    process.stdout.write(c.sign(null, Buffer.from(process.argv[1],"utf8"), key).toString("base64url"));
+  ' "1f916.seal.v1:${D_HANDLE}:homepage:${SH}" 2>/dev/null)
+  if [ -n "$want" ] && [ "$(jq -r '.signature' "$SENT" 2>/dev/null)" = "$want" ]
+  then ok "28. the signature is over the NEW preimage, not the continuity-core one"
+  else nok "28. the signature is over the NEW preimage, not the continuity-core one" "sent: $(jq -r '.signature' "$SENT" 2>/dev/null | cut -c1-20)"; fi
+  if [ "$(jq -r '.signature' "$SENT" 2>/dev/null)" != "$sig" ]
+  then ok "28. and it differs from the published continuity-core signature"
+  else nok "28. and it differs from the published continuity-core signature" "the continuity-core signature was re-sent"; fi
+  if grep -qF -- "$D_BEARER" "$LOG"
+  then nok "28. the bearer is absent from curl's argv" "it appeared in the arguments"
+  else ok "28. the bearer is absent from curl's argv"; fi
+fi
+
 printf '# %d tests, %d passed, %d failed\n' "$n" "$pass" "$fail"
 [ "$fail" = 0 ] || exit 1
