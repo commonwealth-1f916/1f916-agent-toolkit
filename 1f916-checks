@@ -47,6 +47,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zlib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -184,6 +185,33 @@ def _read_capped(resp, limit, url):
         parts.append(chunk)
 
 
+def _decode_body(body, encoding, limit, url):
+    """Undo a gzip Content-Encoding, capped at `limit` decoded bytes.
+
+    Every fetch asks for gzip, so the wire carries the compressed form; the
+    body every check hashes and parses is always the decoded one."""
+    enc = (encoding or "").strip().lower()
+    if enc in ("", "identity"):
+        return body
+    if enc not in ("gzip", "x-gzip"):
+        raise CouldNotRun("fetch failed: unexpected Content-Encoding %r from %s" % (encoding, url))
+    d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        out = d.decompress(body, limit + 1)
+    except zlib.error as e:
+        raise CouldNotRun("fetch failed: gzip body from %s does not decode: %s" % (url, e))
+    if len(out) > limit or d.unconsumed_tail:
+        raise CouldNotRun("fetch failed: body from %s exceeds %d bytes" % (url, limit))
+    if not d.eof:
+        raise CouldNotRun("fetch failed: gzip body from %s is truncated" % url)
+    return out
+
+
+def _request(url):
+    return urllib.request.Request(url, headers={"User-Agent": USER_AGENT,
+                                                "Accept-Encoding": "gzip"})
+
+
 class Ctx(object):
     def __init__(self, args):
         self.offline_dir = getattr(args, "offline_dir", None)
@@ -221,11 +249,13 @@ class Ctx(object):
             return body
         last = None
         for attempt in (1, 2):
-            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            req = _request(url)
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                    body = _read_capped(resp, self.max_bytes, url)
+                    wire = _read_capped(resp, self.max_bytes, url)
                     status = resp.status
+                    body = _decode_body(wire, resp.headers.get("Content-Encoding"),
+                                        self.max_bytes, url)
             except urllib.error.HTTPError as e:
                 rec["status"] = e.code
                 last = "HTTP %d from %s" % (e.code, url)
@@ -239,7 +269,8 @@ class Ctx(object):
                     time.sleep(2)
                     continue
                 raise CouldNotRun("fetch failed: " + last)
-            rec.update(status=status, bytes=len(body), sha256=sha256_hex(body))
+            rec.update(status=status, bytes=len(body), wire_bytes=len(wire),
+                       sha256=sha256_hex(body))
             if not 200 <= status < 300:
                 raise CouldNotRun("fetch failed: HTTP %d from %s" % (status, url))
             return body
@@ -954,12 +985,19 @@ def cmd_front(ctx, args):
 MIGRATION = re.compile(r"^(\d+)")
 
 
-def docket_side(ctx, repo_dir, url, ref, full):
+def docket_side(ctx, repo_dir, name, url, ref, full):
     sha = ctx.ls_remote(url, ref)
-    fetch = ["fetch", "-q", "--no-tags"]
+    # A named promisor remote lets the fetch carry --filter=blob:none: the
+    # migration listing and the behind count read commits and trees only, so
+    # no file content crosses the wire. A server that ignores the filter
+    # sends the blobs as before; the listing is the same either way.
+    ctx.git(["remote", "add", name, url], cwd=repo_dir)
+    ctx.git(["config", "remote.%s.promisor" % name, "true"], cwd=repo_dir)
+    ctx.git(["config", "remote.%s.partialclonefilter" % name, "blob:none"], cwd=repo_dir)
+    fetch = ["fetch", "-q", "--no-tags", "--filter=blob:none"]
     if not full:
         fetch.append("--depth=1")
-    ctx.git(fetch + [url, "refs/heads/%s:refs/checks/%s" % (ref, sha)], cwd=repo_dir)
+    ctx.git(fetch + [name, "refs/heads/%s:refs/checks/%s" % (ref, sha)], cwd=repo_dir)
     got = ctx.git(["rev-parse", "refs/checks/%s" % sha], cwd=repo_dir).strip()
     if got != sha:
         raise CouldNotRun("%s %s moved between ls-remote (%s) and fetch (%s)" % (url, ref, sha, got))
@@ -986,8 +1024,8 @@ def cmd_docket(ctx, args):
     if os.path.exists(repo_dir):
         shutil.rmtree(repo_dir)
     ctx.git(["init", "-q", repo_dir])
-    up, up_by, up_w = docket_side(ctx, repo_dir, args.upstream, args.upstream_ref, args.full)
-    fk, fk_by, fk_w = docket_side(ctx, repo_dir, args.fork, args.fork_ref, args.full)
+    up, up_by, up_w = docket_side(ctx, repo_dir, "upstream", args.upstream, args.upstream_ref, args.full)
+    fk, fk_by, fk_w = docket_side(ctx, repo_dir, "fork", args.fork, args.fork_ref, args.full)
     shared = sorted(n for n in set(up_by) & set(fk_by) if sorted(up_by[n]) != sorted(fk_by[n]))
     nums = list(up_by) + list(fk_by)
     out = {
@@ -2525,11 +2563,12 @@ def _sweep_fetch(ctx, url):
             raise CouldNotRun("fetch failed: %s (offline file absent)" % url)
         rec.update(status=200, bytes=len(body), sha256=sha256_hex(body))
         return body
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    req = _request(url)
     try:
         with urllib.request.urlopen(req, timeout=ctx.timeout) as resp:
-            body = resp.read()
+            wire = resp.read()
             status = resp.status
+            body = _decode_body(wire, resp.headers.get("Content-Encoding"), ctx.max_bytes, url)
     except urllib.error.HTTPError as e:
         rec["status"] = e.code
         if e.code == 429:
@@ -2537,7 +2576,7 @@ def _sweep_fetch(ctx, url):
         raise CouldNotRun("fetch failed: HTTP %d from %s" % (e.code, url))
     except (urllib.error.URLError, OSError) as e:
         raise CouldNotRun("fetch failed: %s from %s" % (getattr(e, "reason", e), url))
-    rec.update(status=status, bytes=len(body), sha256=sha256_hex(body))
+    rec.update(status=status, bytes=len(body), wire_bytes=len(wire), sha256=sha256_hex(body))
     if not 200 <= status < 300:
         raise CouldNotRun("fetch failed: HTTP %d from %s" % (status, url))
     return body

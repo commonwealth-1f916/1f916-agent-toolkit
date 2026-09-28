@@ -593,6 +593,26 @@ class Docket(GitBase):
         self.assertIsNone(out["behind"])
         self.assertEqual(out["behind_reason"], "not computed: shallow")
 
+    def test_fetch_carries_no_file_content(self):
+        self.git(self.up, "config", "uploadpack.allowFilter", "true")
+        self.git(self.fork, "config", "uploadpack.allowFilter", "true")
+        wd = os.path.join(self.tmp, "wd")
+        out = self.run_checks("docket", "--upstream", self.url(self.up), "--fork", self.url(self.fork),
+                              "--workdir", wd)
+        self.assertEqual(out["upstream"]["numbers"], [1, 2, 3])
+        self.assertEqual(out["fork"]["newest_migration"], "0003_custody.sql")
+        repo = os.path.join(wd, "docket")
+        for side in ("upstream", "fork"):
+            listing = subprocess.run(
+                ["git", "rev-list", "--objects", "--missing=print", "refs/checks/%s" % out[side]["sha"]],
+                cwd=repo, stdout=subprocess.PIPE, env=git_env(), check=True).stdout.decode()
+            missing = [l for l in listing.splitlines() if l.startswith("?")]
+            self.assertTrue(missing, side)
+            present = subprocess.run(["git", "cat-file", "--batch-all-objects", "--batch-check"],
+                                     cwd=repo, stdout=subprocess.PIPE, env=git_env(),
+                                     check=True).stdout.decode()
+            self.assertNotIn(" blob ", present)
+
     def test_full_counts_behind(self):
         out = self.run_checks("docket", "--upstream", self.url(self.up), "--fork", self.url(self.fork),
                               "--full")
@@ -659,6 +679,31 @@ class FetchCap(unittest.TestCase):
             mod._read_capped(self.Resp(body + b"y"), len(body), "u")
         self.assertIn("exceeds", str(cm.exception))
         self.assertGreater(mod.MAX_FETCH_BYTES, 16 * 1024 * 1024)
+
+
+class FetchGzip(unittest.TestCase):
+    # Every fetch asks for gzip; the body a check hashes is the decoded one,
+    # and the decoded size keeps the same cap as an uncompressed body.
+    def test_gzip_decodes_to_the_same_bytes_and_identity_passes_through(self):
+        import gzip
+        mod = load_module()
+        body = b'{"at":"2026-09-28T11:07:02Z"}\n' * 500
+        self.assertEqual(mod._decode_body(gzip.compress(body), "gzip", len(body), "u"), body)
+        self.assertEqual(mod._decode_body(body, None, len(body), "u"), body)
+        self.assertEqual(mod._decode_body(body, "identity", len(body), "u"), body)
+        self.assertEqual(mod._request("https://x/y").get_header("Accept-encoding"), "gzip")
+
+    def test_over_the_cap_truncated_or_unknown_is_could_not_run(self):
+        import gzip
+        mod = load_module()
+        body = b"x" * 4096
+        for wire, enc, limit, word in ((gzip.compress(body), "gzip", 4095, "exceeds"),
+                                       (gzip.compress(body)[:-12], "gzip", 8192, "truncated"),
+                                       (b"not gzip at all", "gzip", 8192, "does not decode"),
+                                       (body, "br", 8192, "Content-Encoding")):
+            with self.assertRaises(mod.CouldNotRun) as cm:
+                mod._decode_body(wire, enc, limit, "u")
+            self.assertIn(word, str(cm.exception))
 
 
 class WitnessGaps(GitBase):
