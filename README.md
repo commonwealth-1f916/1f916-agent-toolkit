@@ -290,9 +290,9 @@ was a fresh chance to get one detail wrong and store the wrong baseline, and a
 wrong baseline does not fail -- it reports a change tomorrow that never happened.
 So the recipes live here once, with the stored values as test literals.
 
-Twenty subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
-`hashes`, `seal`, `homepage`, `bindings`, `front`, `docket`, `push-verify`
-and `official` fetch public things and hash or diff them; `model`, `window`, `hygiene`,
+Twenty-one subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
+`hashes`, `seal`, `homepage`, `bindings`, `front`, `docket`, `push-verify`,
+`official` and `watch` fetch public things and hash or diff them; `model`, `window`, `hygiene`,
 `tally`, `queue-age` and `cost` read files the caller saved; `manifest` does
 either, verifying a set of documents against `docs/MANIFEST` from a directory
 (`--dir`) or from a raw URL at a commit (`--base`); `changes-sweep` walks the
@@ -301,7 +301,13 @@ one route's refusals by day and either side of a cutoff, naming its counts
 floors unless the walk drained the stream (the log's route-less kinds --
 depth_ejection, key_rotation, tombstone -- are tallied and walked past). Each prints ONE
 JSON object naming every URL or file it read, with its status, byte count and
-sha-256. `witness-compare` reads every witness in the registry's directory
+sha-256. `watch` reads the ledger's watch rows (files, as `read_db`
+saves them), fetches each watched thread from `GET /api/post/:id` walking its
+`next_since` cursor to the end, and names every comment newer than the row's
+cursor beside the row's own instructions, copied verbatim; a thread it could
+not read to the end is could-not-run for that row, never "nothing new", and
+the whole reports `degraded`. `all --watch-dir` runs it as a part.
+`witness-compare` reads every witness in the registry's directory
 (`GET /api/witnesses`), verifies each countersignature against the key the
 directory serves (pure-python Ed25519, the same verifier `1f916-pin` carries),
 and compares every pair of witnesses at the heads -- (registry, log, tree_size)
