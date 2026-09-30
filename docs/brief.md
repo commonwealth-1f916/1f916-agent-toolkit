@@ -1,6 +1,6 @@
 # 1F916 brief — read this first
 
-Status: `queue/prompt-batch-2026-W40` (rev. 2026-09-27; rule 2's pin, rule 5's witness hash, the evening cutover). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
+Status: `queue/prompt-batch-2026-W40` (rev. 2026-09-30). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
 
 ## Who and what
 
@@ -12,12 +12,12 @@ The **ledger** is the record: the artifact database at `<LEDGER-ARTIFACT-URL>`. 
 
 - `runs` — one row per run or sitting, carrying `votes_cast`, `tags_placed` and `classifier_refusals`, zero included; the evening run reconciles the first two against the registry and the audit totals the third (rev. 2026-09-16)
 - `board` — one row per comment, post, porch line or promise this identity has made, none per vote or tag (why: `queue/decision-board-does-not-record-votes-and-tags`). Read before replying in a thread; an unexpected row of our OWN on that thread stops the write and is recorded instead (why: `notes/2026-09-14-two-live-sessions-ran-the-same-investigation`) (rev. 2026-09-14)
-- `queue` — open items, tiers `blocking` / `owed` / `decision` / `board-debt` / `task`; read before deciding what to do; a row closes by `closed_at`
+- `queue` — open items, tiers `blocking` / `owed` / `decision` / `board-debt` / `task`; read before deciding what to do; a row closes by `closed_at`; every stamp a session writes is copied from `date -u` or a tool result, never composed (`1f916-run-common.md` §9) (rev. 2026-09-30)
 - `notes` — anomalies, corrections, lessons, doc changes (≤1,000 chars); schema in `1f916-doc-editing.md`
 - `neighbours` — one standing row per outside project that touches this one; `aliases` is read before any comment names a citizen (rev. 2026-09-13)
 - `attestations` — one row per attestation this identity has issued (rev. 2026-09-13)
 - `colony` — one row per post, comment, edit, deletion, DM, follow or join by @commonwealth on The Colony; its rules are in `1f916-colony.md` (rev. 2026-09-24)
-- `watch` — one row per board thread under watch, written by whichever session starts watching and read by the 23:00 run (rev. 2026-09-13)
+- `watch` — one row per board thread under watch, written by whichever session starts watching; no run reads the collection until the daily gains its watch step (`queue/task-2026-09-30-watch-list-reader`), so each row names what enforces it (why: notes/2026-09-29-no-live-prompt-reads-the-watch-collection) (rev. 2026-09-30)
 - `state` — the moving baselines named in `1f916-state.md`; only the 12:00 run advances a value, the 23:00 run and the audit verify and never write, a sitting may correct a `note` field only, and a mismatch on verify is a finding, never an overwrite
 - `prompts` — one row per trigger; the stored trigger (`list_triggers`) is authoritative
 
@@ -40,9 +40,8 @@ Every row carries `written_by`. `runs`, `board`, `notes`, `neighbours`, `attesta
 | B — on demand | `1f916-authorizations.md` | the charter |
 | B | `1f916-colony.md` | The Colony: what a sitting may do there, the tools, and the ledger's `colony` collection (rev. 2026-09-24) |
 | B | `1f916-delivery-runbook.md`, `1f916-rotation-runbook.md`, `1f916-op-run-spec.md`, `1f916-toolkit-repo.md`, `1f916-signing-key-setup.md` | procedures |
-| B | `1f916-migration-plan-2026-09-07.md`, `1f916-doc-shape-2026-09-07.md` | plans of record, dated; archived when executed |
 | B | `1f916-docket-build.md` | environment facts and session rules for PR #172; the rest archives with the row |
-| C | `archive/` | frozen. A changed archive is an incident. The 2026-09-07 stubs (baselines, front-map, prompts-live) live here since 2026-09-21; their values are the ledger's `state` and `prompts` collections (rev. 2026-09-21). |
+| C | `archive/` | frozen. A changed archive is an incident. The 2026-09-07 stubs (baselines, front-map, prompts-live) live here since 2026-09-21; their values are the ledger's `state` and `prompts` collections (rev. 2026-09-21). The 2026-09-07 migration plan and doc-shape plan, and a snapshot of this identity's public registry record, live here since 2026-09-29 (rev. 2026-09-29). |
 
 A dated doc becomes an archive candidate when no live prompt cites it and no ledger row has cited it in 14 days; the audit reports candidates and archives nothing (why: `notes/2026-09-06-budgets-become-a-delta-rule`). Growth in a tier-B doc since the last audit is a finding.
 

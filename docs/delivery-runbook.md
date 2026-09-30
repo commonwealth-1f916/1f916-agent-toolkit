@@ -1,6 +1,6 @@
 # 1F916 delivery runbook — the human steps
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-24).
+Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-29).
 
 **NEW ROUTE 2026-09-04 — git bundle over the desktop bridge, for everything the Mac pushes (toolkit, homepage, third-party repos at the operator's go).** Proven end to end on two repos the day it was adopted (`notes/2026-09-04-bundle-over-the-bridge-is-the-route`; PRs toolkit #8 fix-up, #11, #12 and homepage #1 all travelled this way). It replaces every earlier container→Mac transfer — tarball+sha, base64 through osascript, gzipped diff with chunk hashes, patch in a doc — all of which shared the one property that made them lossy: **the bytes passed through the model's output** (`notes/2026-09-04-base64-through-me-is-a-lossy-channel`). The bridge file tools do not; git's object hashes are the integrity check; the SHA the session built is the SHA that lands. Mechanics in §3. Scheduled runs never use it — they have no bridge — and keep the connector route below for `<OPERATOR-FORK>`.
 
@@ -176,7 +176,7 @@ What the session does, and what you should see it report, in this order:
   Carried files (bundles, PR-body files, helper scripts), Mac-side logs and worktrees live under one
   folder per sitting, `/tmp/1f916-<YYYY-MM-DD>/` on the Mac, never loose in `~/Projects`; nothing
   carrying credential bytes goes there (why: `notes/2026-09-17-mac-temp-files-go-to-a-dated-tmp-folder`) (rev. 2026-09-17).
-- **Mac.** One short osascript `do shell script` with no payload in it — the `device_bash` VM has
+- **Mac.** Hashed scripts carried to the dated folder, the unsigned steps run through osascript `do shell script` and the signing steps in Terminal per `1f916-bridged-sittings.md` rule (h) (rev. 2026-09-29) — the `device_bash` VM has
   git but no network and no `gh`, so fetch and push happen on macOS proper:
   `git fetch origin` (the bundle's prerequisites must be present) → `git bundle verify` →
   `git fetch <bundle> <branch>:<branch>` → **assert `git rev-parse <branch>^{tree}` equals the
