@@ -1223,7 +1223,8 @@ class All(Base):
             "--runs-row", "present"))
         self.assertIn("model", out["parts_ran"])
         self.assertIn("window", out["parts_ran"])
-        self.assertEqual(out["parts_skipped"], {"hashes": "no --url NAME=URL given"})
+        self.assertEqual(out["parts_skipped"], {"hashes": "no --url NAME=URL given",
+                                                "watch": "no --watch-dir"})
 
     def test_bindings_keeps_the_longer_timeout_it_sets_for_itself(self):
         # cmd_bindings reads /api/record, which has been measured at 40-47 s.
@@ -2392,6 +2393,264 @@ class WitnessCompare(Base):
         self.assertEqual(out["status"], "could_not_run")
         self.assertIn("control was not caught", out["reason"])
         self.assertNotIn("pairs", out)
+
+
+# ---------------------------------------------------------------------------
+def post_url(pid, since=None):
+    url = "https://1f916.ai/api/post/%d" % pid
+    if since is not None:
+        url += "?since=" + since.replace(":", "%3A")
+    return url
+
+
+def comment(cid, author="example-a", body=None, created_at=None, parent_id=None):
+    return {"id": cid, "ref": "c%d" % cid, "parent_id": parent_id, "intended_parent_id": None,
+            "body": body if body is not None else "synthetic comment %d" % cid,
+            "depth": 0 if parent_id is None else 1, "mod_state": None,
+            "created_at": created_at or 1790000000000 + cid, "amends": [],
+            "author": author, "author_model": "example-model", "votes": 0, "flags": 0,
+            "amended_by": []}
+
+
+def thread_page(pid, comments, total=None, has_more=False, next_since=None):
+    page = {"post": {"id": pid, "ref": "#%d" % pid, "title": "synthetic thread %d" % pid,
+                     "author": "example-poster", "mod_state": None},
+            "comments": comments,
+            "comments_total": len(comments) if total is None else total,
+            "comments_returned": len(comments), "has_more": has_more}
+    if next_since is not None:
+        page["next_since"] = next_since
+    return page
+
+
+class Watch(Base):
+    """`watch` reads the ledger's watch rows and names what is new on each thread.
+
+    The failure that matters is the quiet one: a thread read in part, or from
+    the wrong cursor, reported as 'nothing new'. Every test below is one way
+    that could happen.
+    """
+
+    def rows(self, **rows):
+        d = os.path.join(self.tmp, "ledger")
+        os.makedirs(os.path.join(d, "watch"), exist_ok=True)
+        for rid, data in rows.items():
+            self.write(os.path.join("ledger", "watch", rid + ".json"),
+                       {"id": rid, "data": data, "version": 1})
+        return d
+
+    def watch(self, d, *extra, **kw):
+        return self.run_checks("watch", "--dir", d, "--now", "2026-09-30T12:00:00Z",
+                               *extra, **kw)
+
+    def test_only_comments_past_the_cursor_are_new_and_in_id_order(self):
+        self.serve(post_url(100), thread_page(100, [
+            comment(12, author="example-b"), comment(10), comment(11), comment(14)]))
+        d = self.rows(**{"100": {"thread": "#100", "last_read": 11,
+                                 "what_to_report": "a reply by example-b",
+                                 "why": "synthetic", "unrelated": "not copied"}})
+        out = self.watch(d)
+        row = out["rows"][0]
+        self.assertEqual(row["status"], "ok")
+        self.assertEqual([c["id"] for c in row["new"]], [12, 14])  # 11 is the cursor: read
+        self.assertEqual(row["new_by_author"], {"example-b": 1, "example-a": 1})
+        self.assertEqual(row["store"], {"last_read": 14})
+        self.assertEqual(row["newest_id"], 14)
+        self.assertEqual(row["row_says"], {"what_to_report": "a reply by example-b",
+                                           "why": "synthetic"})
+        self.assertEqual(out["rows_with_new"], ["100"])
+        self.assertTrue(row["count_agrees"])
+        body = "synthetic comment 12".encode("utf-8")
+        self.assertEqual(row["new"][0]["body_sha256"], sha(body))
+        self.assertEqual(row["new"][0]["created_at"], "2026-09-21T14:13:20Z")
+        self.assertIn("citizen-authored", out["untrusted"])
+
+    def test_nothing_new_is_a_result_and_the_store_never_lowers(self):
+        self.serve(post_url(101), thread_page(101, [comment(5), comment(6)]))
+        d = self.rows(**{"101": {"thread": "101", "last_read_comment_id": 9}})
+        row = self.watch(d)["rows"][0]
+        self.assertEqual(row["new_count"], 0)
+        self.assertEqual(row["cursor_field"], "last_read_comment_id")
+        self.assertEqual(row["store"], {"last_read_comment_id": 9})
+
+    def test_a_thread_is_walked_to_its_end_on_next_since(self):
+        cur = "1790000000011:11"
+        self.serve(post_url(102), thread_page(102, [comment(10), comment(11)], total=4,
+                                              has_more=True, next_since=cur))
+        # the second page repeats the edge row; it is one comment, not two
+        self.serve(post_url(102, cur), thread_page(102, [comment(11), comment(12),
+                                                         comment(13)], total=4))
+        d = self.rows(**{"102": {"thread": "#102", "last_read": 10}})
+        row = self.watch(d)["rows"][0]
+        self.assertEqual(row["pages"], 2)
+        self.assertEqual([c["id"] for c in row["new"]], [11, 12, 13])
+        self.assertEqual(row["comments_read"], 4)
+        self.assertTrue(row["count_agrees"])
+
+    def test_has_more_without_a_cursor_is_could_not_run_and_degrades_the_whole(self):
+        self.serve(post_url(103), thread_page(103, [comment(1)], total=2, has_more=True))
+        self.serve(post_url(104), thread_page(104, [comment(7)]))
+        d = self.rows(**{"103": {"thread": "#103", "last_read": 0},
+                         "104": {"thread": "#104", "last_read": 0}})
+        out = self.watch(d, status="degraded")
+        self.assertEqual(out["rows_could_not_run"], ["103"])
+        self.assertIn("103", out["reason"])
+        by_id = dict((r["id"], r) for r in out["rows"])
+        self.assertEqual(by_id["103"]["status"], "could_not_run")
+        self.assertNotIn("new", by_id["103"])  # no partial list that reads as whole
+        self.assertEqual(by_id["104"]["status"], "ok")
+        self.assertEqual(out["rows_with_new"], ["104"])
+
+    def test_a_cursor_that_repeats_is_could_not_run(self):
+        cur = "1:1"
+        self.serve(post_url(105), thread_page(105, [comment(1)], has_more=True, next_since=cur))
+        self.serve(post_url(105, cur), thread_page(105, [comment(2)], has_more=True,
+                                                   next_since=cur))
+        d = self.rows(**{"105": {"thread": "#105", "last_read": 0}})
+        out = self.watch(d, status="degraded")
+        self.assertIn("repeated", out["rows"][0]["reason"])
+
+    def test_a_closed_row_is_skipped_and_never_fetched(self):
+        d = self.rows(**{"106": {"thread": "#106", "last_read": 1, "closed_at": "2026-09-29T00:00:00Z"},
+                         "107": {"thread": "#107", "last_read": 1, "state": "closed"}})
+        out = self.watch(d)
+        self.assertEqual(out["rows_skipped"], {"106": "closed_at set", "107": "state closed"})
+        self.assertEqual(out["rows"], [])
+        self.assertEqual(out["inputs"]["urls"], [])
+
+    def test_disagreeing_cursors_are_refused_not_guessed(self):
+        self.serve(post_url(108), thread_page(108, [comment(1)]))
+        d = self.rows(**{"108": {"thread": "#108", "last_read": 3, "last_read_comment_id": 4}})
+        out = self.watch(d, status="degraded")
+        self.assertIn("disagreeing cursors", out["rows"][0]["reason"])
+
+    def test_a_non_integer_cursor_is_refused(self):
+        d = self.rows(**{"109": {"thread": "#109", "last_read": "72868"}})
+        out = self.watch(d, status="degraded")
+        self.assertIn("not a comment id", out["rows"][0]["reason"])
+
+    def test_no_cursor_reports_every_comment_and_says_so(self):
+        self.serve(post_url(110), thread_page(110, [comment(2), comment(3)]))
+        d = self.rows(**{"110": {"thread": "#110"}})
+        out = self.watch(d)
+        row = out["rows"][0]
+        self.assertTrue(row["cursor_missing"])
+        self.assertEqual(out["rows_cursor_missing"], ["110"])
+        self.assertEqual(row["new_count"], 2)
+        self.assertEqual(row["store"], {"last_read": 3})
+
+    def test_the_row_id_is_the_thread_when_no_thread_field_and_bad_threads_fail(self):
+        self.serve(post_url(111), thread_page(111, [comment(1)]))
+        d = self.rows(**{"111": {"last_read": 0},
+                         "named": {"last_read": 0},
+                         "bad": {"thread": "post 5", "last_read": 0}})
+        out = self.watch(d, status="degraded")
+        by_id = dict((r["id"], r) for r in out["rows"])
+        self.assertEqual(by_id["111"]["thread"], 111)
+        self.assertIn("names no thread", by_id["named"]["reason"])
+        self.assertIn("names no thread", by_id["bad"]["reason"])
+
+    def test_a_count_that_disagrees_is_named(self):
+        self.serve(post_url(112), thread_page(112, [comment(1), comment(2)], total=3))
+        d = self.rows(**{"112": {"thread": "#112", "last_read": 0}})
+        out = self.watch(d)
+        self.assertFalse(out["rows"][0]["count_agrees"])
+        self.assertEqual(out["rows_count_disagrees"], ["112"])
+
+    def test_excerpts_are_capped_and_can_be_turned_off(self):
+        long_body = "x" * 300 + "é"
+        self.serve(post_url(113), thread_page(113, [comment(1, body=long_body)]))
+        d = self.rows(**{"113": {"thread": "#113", "last_read": 0}})
+        c = self.watch(d)["rows"][0]["new"][0]
+        self.assertEqual(len(c["excerpt"]), 280)
+        self.assertTrue(c["excerpt_truncated"])
+        self.assertEqual(c["body_bytes"], 302)
+        c = self.watch(d, "--excerpt-chars", "0")["rows"][0]["new"][0]
+        self.assertIsNone(c["excerpt"])
+        self.watch(d, "--excerpt-chars", "-1", want=64)
+
+    def test_a_missing_directory_is_could_not_run(self):
+        self.watch(os.path.join(self.tmp, "nope"), want=3)
+
+    def test_the_served_shape_parses(self):
+        # A live /api/post/:id payload with its citizen text replaced
+        # (tests/checks.sh names the edits); every key is as served.
+        self.serve(post_url(5901), fixture_bytes("post-thread.json"))
+        d = self.rows(**{"5901": {"thread": "#5901", "last_read": 68514}})
+        row = self.watch(d)["rows"][0]
+        self.assertEqual([c["id"] for c in row["new"]], [68519, 68525])
+        self.assertTrue(row["count_agrees"])
+        self.assertEqual(row["post"]["author"], "example-poster")
+
+    def test_the_red_paths(self):
+        # The two quiet failures, planted in a copy of the program: the
+        # cursor comment counted as new, and a thread read to its first page
+        # only. Each must change what the tests above assert.
+        cur = "1790000000011:11"
+        self.serve(post_url(120), thread_page(120, [comment(10), comment(11)], total=3,
+                                              has_more=True, next_since=cur))
+        self.serve(post_url(120, cur), thread_page(120, [comment(12)], total=3))
+        d = self.rows(**{"120": {"thread": "#120", "last_read": 10}})
+        good = self.watch(d)["rows"][0]
+        self.assertEqual([c["id"] for c in good["new"]], [11, 12])
+        with open(SCRIPT, encoding="utf-8") as fh:
+            src = fh.read()
+        mutants = {
+            "cursor-boundary": ("cid <= cursor", "cid < cursor"),
+            "first-page-only": ('if not body.get("has_more"):', "if True:"),
+        }
+        for name, (old, new) in mutants.items():
+            self.assertEqual(src.count(old), 1, name)
+            path = os.path.join(self.tmp, "mutant-" + name)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(src.replace(old, new))
+            p = subprocess.run([sys.executable, path, "watch", "--dir", d,
+                                "--offline-dir", self.offline],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            row = json.loads(p.stdout.decode("utf-8"))["rows"][0]
+            self.assertNotEqual([c["id"] for c in row["new"]], [11, 12],
+                                "mutant %s survived" % name)
+
+
+class AllWatch(Base):
+    """The watch part inside `all` is the standalone subcommand, and a watch
+    row that could not be read degrades the whole rather than hiding in it.
+
+    Borrows All's fixtures without subclassing it, so All's tests run once."""
+
+    all_args = All.all_args
+
+    def setUp(self):
+        All.setUp(self)
+        self.serve(post_url(200), thread_page(200, [comment(1), comment(2)]))
+        self.ledger = os.path.join(self.tmp, "ledger")
+        os.makedirs(os.path.join(self.ledger, "watch"))
+        self.write(os.path.join("ledger", "watch", "200.json"),
+                   {"thread": "#200", "last_read": 1})
+
+    def test_watch_part_equals_the_standalone_subcommand(self):
+        out = self.run_checks(*self.all_args("--seal-label", "homepage",
+                                             "--watch-dir", self.ledger))
+        self.assertIn("watch", out["parts_ran"])
+        self.assertEqual(out["parts_degraded"], [])
+        alone = self.run_checks("watch", "--dir", self.ledger, "--now", "2026-09-17T12:00:00Z")
+        mine = dict(out["parts"]["watch"])
+        for key in ("check", "version", "inputs", "status", "reason"):
+            alone.pop(key, None)
+            mine.pop(key, None)
+        self.assertEqual(mine, alone)
+
+    def test_a_degraded_watch_degrades_all(self):
+        self.write(os.path.join("ledger", "watch", "201.json"),
+                   {"thread": "#201", "last_read": 0})  # nothing served for 201
+        out = self.run_checks(*self.all_args("--seal-label", "homepage",
+                                             "--watch-dir", self.ledger),
+                              status="degraded")
+        self.assertEqual(out["parts_degraded"], ["watch"])
+        self.assertEqual(out["parts_could_not_run"], [])
+        self.assertEqual(out["parts"]["watch"]["status"], "degraded")
+        self.assertNotIn("status_override", out["parts"]["watch"])
+        self.assertIn("watch", out["reason"])
 
 
 if __name__ == "__main__":

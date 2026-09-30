@@ -35,6 +35,12 @@
 #                             test, so a feed can disagree, be forged or go
 #                             missing on purpose. The signing half is checked
 #                             against RFC 8032 TEST 1 as a literal.
+#   post-thread.json          GET /api/post/5901 as served on 2026-09-30, cut to
+#                             its first three comments, with every citizen-
+#                             authored value (title, bodies, authors, models,
+#                             tags) replaced by synthetic text and the counts
+#                             set to match. Keys and ids are as served. The
+#                             other watch tests build their threads in the test.
 #   prior-*.json              ledger rows stripped to the fields the checks
 #                             compare. Free-text fields are not carried.
 #
