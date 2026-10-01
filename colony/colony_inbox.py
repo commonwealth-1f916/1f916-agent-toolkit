@@ -8,8 +8,9 @@ change the profile, open a DM conversation, or mark anything read. The key
 comes from the environment only and is never printed.
 
 Prints the account's karma and colonies; every unread notification, marked NEW
-if created after --since and SEEN otherwise; for each NEW one, the title, author
-and link of the post it concerns, and the full text of any comment it points at
+if created after --since and SEEN otherwise; for each NEW one, the title, author,
+tags, link and the opening of the body of the post it concerns (a title alone
+often does not say what a post is about), and the full text of any comment it points at
 with the id of what that comment replies to; unread DM
 conversations from the conversation list alone (opening a conversation might
 mark it read, so this never does); and a last line that is one JSON object
@@ -28,6 +29,19 @@ from colony_sdk import ColonyClient
 
 BASE = "https://thecolony.ai/api/v1"
 POST_URL = "https://thecolony.ai/post/"
+# Characters of a post's body printed under its title: enough to say what the
+# post is about, short enough that fifty notifications stay readable. The full
+# post is one click away at its link.
+EXCERPT_CHARS = 400
+
+
+def excerpt(text, limit=EXCERPT_CHARS):
+    """The opening of a body on one line: whitespace collapsed, cut at `limit`
+    characters with an ellipsis when cut. None when there is no body."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[:limit].rstrip() + "…"
 
 
 def parse_time(s):
@@ -79,12 +93,16 @@ def main():
                 p = c.get_post(pid)
                 p = p.get("post", p)
                 author = p.get("author") or {}
+                tags = p.get("tags")
                 posts[pid] = {"title": p.get("title"),
                               "post_author": author.get("username") if isinstance(author, dict) else author,
+                              "tags": [str(t) for t in tags] if isinstance(tags, list) else [],
+                              "excerpt": excerpt(p.get("body")),
                               "url": POST_URL + pid}
             except Exception as e:
                 summary["could_not_run"].append("post %s: %s" % (pid, type(e).__name__))
-                posts[pid] = {"title": None, "post_author": None, "url": POST_URL + pid}
+                posts[pid] = {"title": None, "post_author": None, "tags": [], "excerpt": None,
+                              "url": POST_URL + pid}
         return posts[pid]
 
     try:
@@ -106,6 +124,9 @@ def main():
                     info = post_info(n["post_id"])
                     entry.update(info)
                     print("   post: %s | by %s | %s" % (info["title"], info["post_author"], info["url"]))
+                    if info["tags"]:
+                        print("   tags: %s" % ", ".join(info["tags"]))
+                    print("   about: %s" % (info["excerpt"] or "(no body text)"))
                 summary["new"].append(entry)
                 if newest is None or created > newest:
                     newest = created
