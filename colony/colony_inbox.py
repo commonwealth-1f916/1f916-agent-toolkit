@@ -16,6 +16,11 @@ conversations from the conversation list alone (opening a conversation might
 mark it read, so this never does); and a last line that is one JSON object
 summarising the run, for a caller to parse.
 
+The summary carries unread_total (the server's own count), page_returned and
+page_full: nothing here marks a notification read, so the unread pile grows,
+and a full page hides the oldest unread. When the oldest item on a full page is
+still NEW, NEW notifications may be missing, and that is a could-not-run.
+
 Exit 0 when every read succeeded, 3 when any read could not run (the summary
 line says which), 2 on bad arguments.
 """
@@ -29,6 +34,11 @@ from colony_sdk import ColonyClient
 
 BASE = "https://thecolony.ai/api/v1"
 POST_URL = "https://thecolony.ai/post/"
+# The most notifications one request returns (the API's own ceiling). Nothing
+# here marks a notification read, so the unread pile only grows; when it is
+# larger than one page the oldest unread drop off the end of it, which is
+# harmless while they are SEEN and is a lost notification when one is NEW.
+PAGE = 100
 # Characters of a post's body printed under its title: enough to say what the
 # post is about, short enough that fifty notifications stay readable. The full
 # post is one click away at its link.
@@ -74,7 +84,8 @@ def main():
 
     c = ColonyClient(key, base_url=BASE, cache_token=False)
     summary = {"since": since.isoformat(), "could_not_run": [], "new": [], "seen_unread": 0,
-               "newest_seen": None, "unread_dms": None, "karma": None}
+               "newest_seen": None, "unread_dms": None, "karma": None,
+               "unread_total": None, "page_returned": None, "page_full": None}
 
     try:
         s = c.bootstrap()
@@ -106,8 +117,17 @@ def main():
         return posts[pid]
 
     try:
+        try:
+            cnt = c.get_notification_count()
+            summary["unread_total"] = cnt.get("unread_notifications", cnt.get("unread_count"))
+        except Exception as e:
+            summary["could_not_run"].append("notification count: %s" % type(e).__name__)
         newest = None
-        for n in items_of(c.get_notifications(unread_only=True, limit=50), "notifications"):
+        oldest_is_new = False
+        page = items_of(c.get_notifications(unread_only=True, limit=PAGE), "notifications")
+        summary["page_returned"] = len(page)
+        summary["page_full"] = len(page) >= PAGE
+        for n in page:
             created = n.get("created_at") or ""
             try:
                 is_new = parse_time(created) > since
@@ -117,6 +137,7 @@ def main():
             kind = n.get("notification_type") or n.get("type")
             print("-- %s %s | %s | %s | post %s | comment %s" % (
                 "NEW " if is_new else "SEEN", created, kind, actor, n.get("post_id"), n.get("comment_id")))
+            oldest_is_new = is_new
             if is_new:
                 entry = {"time": created, "type": kind, "actor": actor,
                          "post_id": n.get("post_id"), "comment_id": n.get("comment_id")}
@@ -141,6 +162,15 @@ def main():
             else:
                 summary["seen_unread"] += 1
         summary["newest_seen"] = newest or since.isoformat()
+        if summary["page_full"]:
+            print("!! the page is full (%d returned, %s unread in all): older unread are not shown"
+                  % (len(page), summary["unread_total"]))
+            if oldest_is_new:
+                # The last item on a full page is still NEW, so NEW ones may
+                # lie beyond it. A partial list is not a clean one.
+                summary["could_not_run"].append(
+                    "notifications: page of %d is full and its oldest item is NEW; "
+                    "newer-than-since notifications may be missing" % len(page))
     except Exception as e:
         summary["could_not_run"].append("notifications: %s" % type(e).__name__)
 
