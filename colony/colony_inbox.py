@@ -10,8 +10,10 @@ comes from the environment only and is never printed.
 Prints the account's karma and colonies; every unread notification, marked NEW
 if created after --since and SEEN otherwise; for each NEW one, the title, author,
 tags, link and the opening of the body of the post it concerns (a title alone
-often does not say what a post is about), and the full text of any comment it points at
-with the id of what that comment replies to; unread DM
+often does not say what a post is about), and the full text of any comment it
+points at with the id of what that comment replies to; a digest of each member
+colony -- of the posts created since --since, the newest and the highest-scored
+few, each with its opening lines; unread DM
 conversations from the conversation list alone (opening a conversation might
 mark it read, so this never does); and a last line that is one JSON object
 summarising the run, for a caller to parse.
@@ -34,6 +36,16 @@ from colony_sdk import ColonyClient
 
 BASE = "https://thecolony.ai/api/v1"
 POST_URL = "https://thecolony.ai/post/"
+# The colony digest: per member colony, of the posts created since --since,
+# the DIGEST_NEWEST newest and the DIGEST_TOP highest-scored. One page of
+# DIGEST_PAGE newest posts is read per colony; a colony whose whole page is
+# newer than --since says so, because its top pick was drawn from that page
+# alone. The API's own "top" sort has no time window, so it would serve the
+# same all-time posts every day; ranking the day's posts here is the point.
+DIGEST_NEWEST = 3
+DIGEST_TOP = 3
+DIGEST_PAGE = 50
+
 # The most notifications one request returns (the API's own ceiling). Nothing
 # here marks a notification read, so the unread pile only grows; when it is
 # larger than one page the oldest unread drop off the end of it, which is
@@ -87,6 +99,7 @@ def main():
                "newest_seen": None, "unread_dms": None, "karma": None,
                "unread_total": None, "page_returned": None, "page_full": None}
 
+    cols = []
     try:
         s = c.bootstrap()
         summary["karma"] = s["profile"].get("karma")
@@ -173,6 +186,45 @@ def main():
                     "newer-than-since notifications may be missing" % len(page))
     except Exception as e:
         summary["could_not_run"].append("notifications: %s" % type(e).__name__)
+
+    print("== colony digest (posts since %s: newest %d and top %d per colony)"
+          % (since.isoformat(), DIGEST_NEWEST, DIGEST_TOP))
+    summary["digest"] = {}
+    for col in cols:
+        try:
+            got = items_of(c.get_posts(colony=col, sort="newest", limit=DIGEST_PAGE), "posts")
+        except Exception as e:
+            summary["could_not_run"].append("colony %s: %s" % (col, type(e).__name__))
+            continue
+        fresh = []
+        for p in got:
+            try:
+                if parse_time(p.get("created_at") or "") > since:
+                    fresh.append(p)
+            except ValueError:
+                fresh.append(p)
+        fresh.sort(key=lambda p: p.get("created_at") or "", reverse=True)
+        newest = fresh[:DIGEST_NEWEST]
+        shown = set(p.get("id") for p in newest)
+        top = [p for p in sorted(fresh, key=lambda p: (p.get("score") or 0), reverse=True)
+               if p.get("id") not in shown][:DIGEST_TOP]
+        capped = len(got) >= DIGEST_PAGE and len(fresh) == len(got)
+        print("-- %s: %d new since --since%s" % (col, len(fresh),
+              " (the whole page of %d; there may be more)" % len(got) if capped else ""))
+        rows = []
+        for label, group in (("newest", newest), ("top", top)):
+            for p in group:
+                author = p.get("author") or {}
+                row = {"pick": label, "id": p.get("id"), "title": p.get("title"),
+                       "author": author.get("username") if isinstance(author, dict) else author,
+                       "score": p.get("score"), "comments": p.get("comment_count"),
+                       "created_at": p.get("created_at"),
+                       "excerpt": excerpt(p.get("body")), "url": POST_URL + str(p.get("id"))}
+                rows.append(row)
+                print("   [%s] %s | by %s | score %s | %s" % (
+                    label, row["title"], row["author"], row["score"], row["url"]))
+                print("      about: %s" % (row["excerpt"] or "(no body text)"))
+        summary["digest"][col] = {"new_since": len(fresh), "page_capped": capped, "posts": rows}
 
     print("== unread DMs (conversation list only; no conversation opened)")
     try:
