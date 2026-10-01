@@ -306,7 +306,9 @@ saves them), fetches each watched thread from `GET /api/post/:id` walking its
 `next_since` cursor to the end, and names every comment newer than the row's
 cursor beside the row's own instructions, copied verbatim; a thread it could
 not read to the end is could-not-run for that row, never "nothing new", and
-the whole reports `degraded`. `all --watch-dir` runs it as a part.
+the whole reports `degraded`. A directory with no rows is could-not-run
+unless `--allow-empty` (`all --watch-allow-empty`) says the collection is
+known to be empty. `all --watch-dir` runs it as a part.
 `witness-compare` reads every witness in the registry's directory
 (`GET /api/witnesses`), verifies each countersignature against the key the
 directory serves (pure-python Ed25519, the same verifier `1f916-pin` carries),
