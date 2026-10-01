@@ -2561,6 +2561,22 @@ AUDIT_JUDGEMENT_FIELDS = (
     "tags_placed", "votes_cast", "window", "witness_git", "written_by",
 )
 
+# The evening board routine's row (claude.ai/code, `1f916-23:00`). DERIVED
+# from that routine's own step 5, which lists the row's fields; the two blocks
+# a file it already holds can measure -- `pin` from its `1f916-pin verify`
+# output, `docs` from its `manifest` output -- are built here, and the rest is
+# the run's to say. The routine may make no request beyond its closed list, so
+# this kind fetches nothing and takes no `all` output.
+EVENING_BOARD_JUDGEMENT_FIELDS = (
+    "anomaly", "board_debt", "board_writes", "citizen_lookups",
+    "classifier_refusals", "cost", "history_previous_day", "http_status",
+    "inbox_handled", "kind", "me_blocks", "mentions_unresolved", "model", "note",
+    "placeholders", "pulse", "quota_after", "refused_commands", "seal_check_form",
+    "seal_check_id", "surface", "tags_placed", "tools", "transport", "votes_cast",
+    "window", "written_by",
+)
+EVENING_BOARD_JUDGEMENT_NESTED = (("pin", "floor"),)
+
 # kind -> (flat fields, nested fields). A kind absent from this table gets no
 # missing-list, and says so rather than returning an empty one: silence and
 # "nothing missing" are different answers and this command has no business
@@ -2568,7 +2584,57 @@ AUDIT_JUDGEMENT_FIELDS = (
 JUDGEMENT_FIELDS_BY_KIND = {
     "daily": (DAILY_JUDGEMENT_FIELDS, DAILY_JUDGEMENT_NESTED),
     "audit": (AUDIT_JUDGEMENT_FIELDS, ()),
+    "evening-board": (EVENING_BOARD_JUDGEMENT_FIELDS, EVENING_BOARD_JUDGEMENT_NESTED),
 }
+
+# A stamp is a value that is a timestamp and nothing else: a date, a time of
+# day with up to three parts, an optional fraction and zone. The time digits may
+# be x on purpose here -- that is the shape being looked for.
+STAMP_SHAPE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[T ]([0-9xX]{1,2}(?::?[0-9xX]{1,2}){0,2})(?:\.\d+)?"
+    r"\s*(?:Z|[+-]\d{2}:?\d{2})?$")
+
+
+def _walk_strings(obj, path=""):
+    if isinstance(obj, dict):
+        for key in sorted(obj):
+            for hit in _walk_strings(obj[key], "%s.%s" % (path, key) if path else key):
+                yield hit
+    elif isinstance(obj, list):
+        for i, value in enumerate(obj):
+            for hit in _walk_strings(value, "%s[%d]" % (path, i)):
+                yield hit
+    elif isinstance(obj, str):
+        yield path, obj
+
+
+def _judgement_stamp_faults(judgement, written_at):
+    """Stamps in a judgement that no clock wrote.
+
+    run-common s9: every stamp a session writes is copied whole from `date -u`
+    or a tool result -- never composed, rounded, or written with x in place of
+    a digit -- and a stamp later than the row's own write is the defect. The
+    rule was a sentence until now, and a sentence is what the runs broke
+    (notes/lesson-2026-09-20-run-rows-carry-invented-timestamps). This builder
+    writes the row, so its own clock is the ceiling, and a value that IS a
+    timestamp (not prose that mentions one) is held to it. A stamp with x in
+    it, one that does not parse, and one later than `written_at` are refused,
+    each named by its path.
+    """
+    faults = []
+    for path, value in _walk_strings(judgement):
+        m = STAMP_SHAPE.match(value.strip())
+        if not m:
+            continue
+        if re.search(r"[xX]", m.group(1)):
+            faults.append("%s=%r has x in place of a digit (composed, not copied)" % (path, value))
+            continue
+        when = parse_iso(value)
+        if when is None:
+            faults.append("%s=%r is not a valid time" % (path, value))
+        elif when > written_at:
+            faults.append("%s=%r is later than this row's written_at %s" % (path, value, iso(written_at)))
+    return faults
 
 
 def _dig(obj, path):
@@ -2629,21 +2695,71 @@ def _deep_merge(base, overlay):
     return base
 
 
+def _evening_board_blocks(ctx, args, row, produced, absent):
+    """The two blocks the evening board routine can build from files it holds.
+
+    `pin` from `1f916-pin verify` output (it prints one JSON object whatever
+    the verdict, so a FAIL is recorded as measured, not left for the run to
+    retype); `docs` from `1f916-checks manifest`. A file not given leaves its
+    block absent with the reason, never a block of nulls.
+    """
+    if args.pin_verify:
+        verify = ctx.read_json(args.pin_verify, "pin verify output")
+        if not isinstance(verify, dict) or "verdict" not in verify:
+            raise CouldNotRun("pin verify output has no verdict: %s" % args.pin_verify)
+        pin = verify.get("pin") if isinstance(verify.get("pin"), dict) else {}
+        row["pin"] = {"serial": pin.get("serial"), "commit": pin.get("commit"),
+                      "tag": pin.get("tag"), "verdict": verify.get("verdict")}
+        if verify.get("reasons"):
+            row["pin"]["reasons"] = verify.get("reasons")
+        produced["pin"] = sorted(row["pin"])
+    else:
+        absent["pin"] = "no --pin-verify given"
+    if args.manifest_out:
+        manifest = ctx.read_json(args.manifest_out, "manifest output")
+        if not isinstance(manifest, dict):
+            raise CouldNotRun("manifest output is not a JSON object: %s" % args.manifest_out)
+        if manifest.get("status") != "ok":
+            absent["docs"] = "manifest: %s" % (manifest.get("reason") or manifest.get("status"))
+        else:
+            row["docs"] = {"manifest_all_match": manifest.get("all_match")}
+            produced["docs"] = sorted(row["docs"])
+    else:
+        absent["docs"] = "no --manifest-out given"
+
+
 def cmd_runs_row(ctx, args):
-    """Assemble the mechanical blocks of a runs row from an `all` output.
+    """Assemble the mechanical blocks of a runs row from an `all` output (or,
+    for the evening board routine, from its pin-verify and manifest outputs),
+    stamped with the builder's own `written_at`.
 
     Emits {"row": ..., ...}: the row is NESTED so that a field of the row can
     never collide with this program's own check/status/version keys. The caller
     writes `.row`, having merged its own judgement into it.
     """
-    payload = ctx.read_json(args.all, "all output")
-    parts = payload.get("parts")
-    if not isinstance(parts, dict):
-        raise CouldNotRun("all output has no `parts` object: %s" % args.all)
+    board = args.kind == "evening-board"
+    if board and (args.all or args.docket):
+        raise UsageError("--kind evening-board builds from --pin-verify and --manifest-out; "
+                         "it takes no --all or --docket (that routine runs neither)")
+    if not board and not args.all:
+        raise UsageError("--all is required for --kind %s" % args.kind)
+    if not board and (args.pin_verify or args.manifest_out):
+        raise UsageError("--pin-verify and --manifest-out are for --kind evening-board")
 
+    # The builder's own clock, taken once: the row's `written_at`, and the
+    # ceiling every stamp in the judgement is held to.
+    written_at = ctx.now
     row = {}
     produced, absent = {}, {}
-    for block, fields in RUNS_ROW_MAP.items():
+    if board:
+        parts = {}
+        _evening_board_blocks(ctx, args, row, produced, absent)
+    else:
+        payload = ctx.read_json(args.all, "all output")
+        parts = payload.get("parts")
+        if not isinstance(parts, dict):
+            raise CouldNotRun("all output has no `parts` object: %s" % args.all)
+    for block, fields in ([] if board else RUNS_ROW_MAP.items()):
         source = RUNS_ROW_SOURCE.get(block, block)
         part = parts.get(source)
         if not isinstance(part, dict) or part.get("status") != "ok":
@@ -2698,6 +2814,15 @@ def cmd_runs_row(ctx, args):
         judgement = ctx.read_json(args.judgement, "judgement")
         if not isinstance(judgement, dict):
             raise CouldNotRun("judgement is not a JSON object: %s" % args.judgement)
+        if "written_at" in judgement:
+            raise CouldNotRun("judgement carries written_at: the builder stamps it from "
+                              "its own clock, and a run-supplied one is the composed "
+                              "stamp this field exists to rule out")
+        stamps = _judgement_stamp_faults(judgement, written_at)
+        if stamps:
+            raise CouldNotRun("judgement carries stamp(s) no clock wrote: %s -- copy "
+                              "each from `date -u` or a tool result, whole"
+                              % "; ".join(stamps))
         clash = _judgement_collisions(produced, judgement)
         if clash:
             raise CouldNotRun(
@@ -2708,6 +2833,7 @@ def cmd_runs_row(ctx, args):
                 "report the disagreement in a field of your own."
                 % ", ".join(clash))
         _deep_merge(row, judgement)
+    row["written_at"] = iso(written_at)
 
     missing = None
     missing_reason = None
@@ -3234,10 +3360,13 @@ def build_parser():
     s.add_argument("--max-pages", type=int, default=2000)
 
     s = sub.add_parser("runs-row", parents=[common_parser()])
-    s.add_argument("--all", required=True, help="an `all` output as a file")
+    s.add_argument("--all", help="an `all` output as a file (every kind but evening-board)")
     s.add_argument("--docket", help="a `docket` output as a file")
+    s.add_argument("--pin-verify", help="evening-board: a `1f916-pin verify` output as a file")
+    s.add_argument("--manifest-out", help="evening-board: a `manifest` output as a file")
     s.add_argument("--judgement", help="JSON merged over the mechanical blocks")
-    s.add_argument("--kind", default="daily", choices=["daily", "evening", "audit", "sitting"])
+    s.add_argument("--kind", default="daily",
+                   choices=["daily", "evening", "evening-board", "audit", "sitting"])
     s.add_argument("--front-limit", type=int, default=100)
     return p
 
