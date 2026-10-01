@@ -1371,8 +1371,10 @@ class RunsRow(Base):
             self.assertNotEqual(out["judgement_missing"], [])
 
     def test_the_kind_changes_only_the_missing_list_not_the_row(self):
-        daily = self.run_checks("runs-row", "--all", self.all_path, "--kind", "daily")
-        audit = self.run_checks("runs-row", "--all", self.all_path, "--kind", "audit")
+        # --now pins written_at, which is otherwise the builder's live clock
+        now = ("--now", "2026-09-20T12:30:00Z")
+        daily = self.run_checks("runs-row", "--all", self.all_path, "--kind", "daily", *now)
+        audit = self.run_checks("runs-row", "--all", self.all_path, "--kind", "audit", *now)
         self.assertEqual(daily["row"], audit["row"])
         self.assertEqual(daily["blocks_built"], audit["blocks_built"])
         self.assertNotEqual(daily["judgement_missing"], audit["judgement_missing"])
@@ -1465,6 +1467,133 @@ class RunsRow(Base):
         path = self.write("nope.json", {"no": "parts here"})
         self.run_checks("runs-row", "--all", path, want=3)
 
+
+
+class RunsRowStamps(Base):
+    """The builder stamps `written_at` itself and refuses stamps no clock wrote.
+
+    run-common s9 says every stamp is copied whole from `date -u` or a tool
+    result; the runs broke it in prose (12:0xZ, a closed_at later than the row
+    it sat in), and a sentence cannot refuse anything. This can.
+    """
+
+    NOW = "2026-10-01T12:30:00Z"
+
+    def setUp(self):
+        Base.setUp(self)
+        self.all_path = self.write("all.json", fixture_bytes("all-output.json"))
+
+    def build(self, judgement, want=0, kind="daily"):
+        args = ["runs-row", "--all", self.all_path, "--kind", kind, "--now", self.NOW]
+        if judgement is not None:
+            args += ["--judgement", self.write("j.json", judgement)]
+        return self.run_checks(*args, want=want)
+
+    def test_written_at_is_the_builders_clock(self):
+        out = self.build(None)
+        self.assertEqual(out["row"]["written_at"], self.NOW)
+
+    def test_a_judgement_may_not_supply_written_at(self):
+        err = self.build({"written_at": "2026-10-01T12:00:00Z"}, want=3)
+        self.assertIn("written_at", err["reason"])
+
+    def test_copied_stamps_at_or_before_the_clock_pass(self):
+        out = self.build({"note": "fine", "started_at": "2026-10-01T12:04:58Z",
+                          "previous_window": {"fired_at": "2026-09-30T23:00:12.5Z"},
+                          "board": [{"filed_at": self.NOW}]})
+        self.assertEqual(out["row"]["started_at"], "2026-10-01T12:04:58Z")
+
+    def test_an_x_digit_is_refused_and_named_by_its_path(self):
+        for stamp in ("2026-10-01T12:0xZ", "2026-10-01T1x:00Z", "2026-10-01 12:3X"):
+            err = self.build({"queue": {"opened": stamp}}, want=3)
+            self.assertIn("queue.opened", err["reason"])
+            self.assertIn("x in place of a digit", err["reason"])
+
+    def test_a_stamp_later_than_the_row_is_refused(self):
+        err = self.build({"items": [{"closed_at": "2026-10-01T12:30:01Z"}]}, want=3)
+        self.assertIn("items[0].closed_at", err["reason"])
+        self.assertIn("later than", err["reason"])
+
+    def test_an_impossible_time_is_refused(self):
+        err = self.build({"ended_at": "2026-10-01T25:00:00Z"}, want=3)
+        self.assertIn("not a valid time", err["reason"])
+
+    def test_prose_and_bare_dates_are_left_alone(self):
+        # a sentence that mentions a stamp is not a stamp, and a date is not a time
+        out = self.build({"note": "the 2026-09-14T21:0xZ row was wrong",
+                          "taken": "2026-10-02",
+                          "window": "2026-10-01T12-daily"})
+        self.assertEqual(out["row"]["taken"], "2026-10-02")
+
+
+class RunsRowEveningBoard(Base):
+    """The evening board routine's kind: built from files it already holds."""
+
+    VERIFY_PASS = {"verdict": "PASS", "reasons": [],
+                   "pin": {"serial": 6, "commit": "d9943bcd" + "0" * 32,
+                           "tag": "v2026.09.30.2", "files": {}}}
+    MANIFEST_OK = {"check": "manifest", "status": "ok", "reason": None,
+                   "all_match": True, "version": 1}
+
+    def build(self, *extra, **kw):
+        return self.run_checks("runs-row", "--kind", "evening-board",
+                               "--now", "2026-10-01T21:59:00Z", *extra, **kw)
+
+    def files(self, verify=None, manifest=None):
+        return ("--pin-verify", self.write("verify.json", verify or self.VERIFY_PASS),
+                "--manifest-out", self.write("manifest.json", manifest or self.MANIFEST_OK))
+
+    def test_pin_and_docs_are_built_and_the_rest_is_owed(self):
+        out = self.build(*self.files())
+        self.assertEqual(out["row"]["pin"], {"serial": 6, "commit": "d9943bcd" + "0" * 32,
+                                             "tag": "v2026.09.30.2", "verdict": "PASS"})
+        self.assertEqual(out["row"]["docs"], {"manifest_all_match": True})
+        missing = out["judgement_missing"]
+        for field in ("seal_check_id", "inbox_handled", "me_blocks", "pin.floor",
+                      "votes_cast", "tags_placed", "classifier_refusals", "written_by"):
+            self.assertIn(field, missing)
+        self.assertNotIn("judgement_missing_reason", out)
+        self.assertEqual(out["row"]["written_at"], "2026-10-01T21:59:00Z")
+
+    def test_a_failed_verify_is_recorded_as_measured(self):
+        verify = {"verdict": "FAIL", "reasons": ["pin serial 5 is below the minimum 6"]}
+        out = self.build(*self.files(verify=verify))
+        self.assertEqual(out["row"]["pin"]["verdict"], "FAIL")
+        self.assertIsNone(out["row"]["pin"]["serial"])
+        self.assertIn("below the minimum", out["row"]["pin"]["reasons"][0])
+
+    def test_the_run_may_add_the_floor_but_not_rewrite_the_verdict(self):
+        out = self.build(*self.files(), "--judgement",
+                         self.write("j.json", {"pin": {"floor": 6}}))
+        self.assertEqual(out["row"]["pin"]["floor"], 6)
+        self.assertEqual(out["row"]["pin"]["verdict"], "PASS")
+        err = self.build(*self.files(), "--judgement",
+                         self.write("j2.json", {"pin": {"verdict": "PASS", "serial": 9}}),
+                         want=3)
+        self.assertIn("pin.serial", err["reason"])
+        self.assertIn("pin.verdict", err["reason"])
+
+    def test_a_manifest_that_could_not_run_leaves_no_docs_block(self):
+        manifest = {"status": "could_not_run", "reason": "fetch failed: HTTP 404"}
+        out = self.build(*self.files(manifest=manifest))
+        self.assertNotIn("docs", out["row"])
+        self.assertIn("HTTP 404", out["blocks_absent"]["docs"])
+
+    def test_an_absent_file_is_named_not_nulled(self):
+        out = self.build()
+        self.assertNotIn("pin", out["row"])
+        self.assertEqual(out["blocks_absent"]["pin"], "no --pin-verify given")
+
+    def test_the_kinds_do_not_mix_their_inputs(self):
+        all_path = self.write("all.json", fixture_bytes("all-output.json"))
+        self.build("--all", all_path, want=64)
+        self.run_checks("runs-row", "--kind", "daily", want=64)
+        self.run_checks("runs-row", "--all", all_path, "--pin-verify",
+                        self.write("v.json", self.VERIFY_PASS), want=64)
+
+    def test_it_fetches_nothing(self):
+        out = self.build(*self.files())
+        self.assertEqual(out["inputs"]["urls"], [])
 
 
 # ---------------------------------------------------------------------------
