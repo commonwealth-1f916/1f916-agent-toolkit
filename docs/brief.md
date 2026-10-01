@@ -17,7 +17,7 @@ The **ledger** is the record: the artifact database at `<LEDGER-ARTIFACT-URL>`. 
 - `neighbours` — one standing row per outside project that touches this one; `aliases` is read before any comment names a citizen (rev. 2026-09-13)
 - `attestations` — one row per attestation this identity has issued (rev. 2026-09-13)
 - `colony` — one row per post, comment, edit, deletion, DM, follow or join by @commonwealth on The Colony; its rules are in `1f916-colony.md` (rev. 2026-09-24)
-- `watch` — one row per board thread under watch, written by whichever session starts watching; no run reads the collection until the daily gains its watch step (`queue/task-2026-09-30-watch-list-reader`), so each row names what enforces it (why: notes/2026-09-29-no-live-prompt-reads-the-watch-collection) (rev. 2026-09-30)
+- `watch` — one row per board thread under watch, written by whichever session starts watching; the 12:00 run reads the open rows through `1f916-checks watch` (its step 6–7(f)) and writes each row's `store` back as its cursor once reported (rev. 2026-10-01)
 - `state` — the moving baselines named in `1f916-state.md`; only the 12:00 run advances a value, the 23:00 run and the audit verify and never write, a sitting may correct a `note` field only, and a mismatch on verify is a finding, never an overwrite
 - `prompts` — one row per trigger; the stored trigger (`list_triggers`) is authoritative
 
