@@ -2701,6 +2701,40 @@ class Watch(Base):
     def test_a_missing_directory_is_could_not_run(self):
         self.watch(os.path.join(self.tmp, "nope"), want=3)
 
+    def test_an_empty_collection_is_could_not_run_unless_declared(self):
+        # The 2026-10-01 daily fetched the rows with a filter no row carried
+        # and handed over an empty directory; "no rows, nothing new" read as
+        # a clean check of nothing. Only a caller who knows the collection is
+        # empty may say so.
+        d = self.rows()
+        out = self.watch(d, want=3)
+        self.assertIn("empty read", out["reason"])
+        out = self.watch(d, "--allow-empty")
+        self.assertEqual(out["rows"], [])
+        self.assertEqual(out["rows_read"], 0)
+
+    def test_every_row_closed_is_a_result_not_an_empty_read(self):
+        d = self.rows(**{"130": {"thread": "#130", "state": "closed"}})
+        out = self.watch(d)
+        self.assertEqual(out["rows_skipped"], {"130": "state closed"})
+        self.assertEqual(out["rows_watched"], 0)
+
+    def test_the_empty_read_red_path(self):
+        # With the refusal removed, an empty directory reports ok again.
+        d = self.rows()
+        with open(SCRIPT, encoding="utf-8") as fh:
+            src = fh.read()
+        old = "if not rows and not args.allow_empty:"
+        self.assertEqual(src.count(old), 1)
+        path = os.path.join(self.tmp, "mutant-empty-read")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(src.replace(old, "if False:"))
+        p = subprocess.run([sys.executable, path, "watch", "--dir", d,
+                            "--offline-dir", self.offline],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(p.returncode, 0, "mutant empty-read should report ok")
+        self.assertEqual(json.loads(p.stdout.decode("utf-8"))["status"], "ok")
+
     def test_the_served_shape_parses(self):
         # A live /api/post/:id payload with its citizen text replaced
         # (tests/checks.sh names the edits); every key is as served.
@@ -2768,6 +2802,19 @@ class AllWatch(Base):
             alone.pop(key, None)
             mine.pop(key, None)
         self.assertEqual(mine, alone)
+
+    def test_an_empty_watch_dir_is_a_part_that_could_not_run(self):
+        os.remove(os.path.join(self.ledger, "watch", "200.json"))
+        out = self.run_checks(*self.all_args("--seal-label", "homepage",
+                                             "--watch-dir", self.ledger),
+                              status="degraded")
+        self.assertEqual(out["parts_could_not_run"], ["watch"])
+        self.assertIn("empty read", out["parts"]["watch"]["reason"])
+        out = self.run_checks(*self.all_args("--seal-label", "homepage",
+                                             "--watch-dir", self.ledger,
+                                             "--watch-allow-empty"))
+        self.assertIn("watch", out["parts_ran"])
+        self.assertEqual(out["parts"]["watch"]["rows"], [])
 
     def test_a_degraded_watch_degrades_all(self):
         self.write(os.path.join("ledger", "watch", "201.json"),

@@ -2253,6 +2253,15 @@ def cmd_watch(ctx, args):
     if args.excerpt_chars < 0:
         raise UsageError("--excerpt-chars must be 0 or more")
     rows = read_collection(ctx, args.dir, args.collection)
+    if not rows and not args.allow_empty:
+        # An empty read and an empty collection look the same from here, and
+        # only one of them is quiet. A caller that fetched the collection with
+        # a filter its rows do not carry hands over an empty directory, and
+        # "no rows, nothing new" would be a clean report of a check that read
+        # nothing. The caller who knows the collection is empty says so.
+        raise CouldNotRun("no rows in %s: an empty read is not a quiet one "
+                          "(pass --allow-empty if the collection is known to be empty)"
+                          % os.path.join(args.dir, args.collection))
     results, skipped, failed = [], {}, []
     for rid, row in rows:
         closed = watch_row_closed(row)
@@ -2379,7 +2388,8 @@ def _all_entries(args):
         if not args.watch_dir:
             raise _Skip("no --watch-dir")
         return _part_args(args, dir=args.watch_dir, collection=args.watch_collection,
-                          excerpt_chars=args.excerpt_chars)
+                          excerpt_chars=args.excerpt_chars,
+                          allow_empty=args.watch_allow_empty)
 
     def seal_missing():
         raise _Skip("no --seal-label")
@@ -3337,6 +3347,8 @@ def build_parser():
     s.add_argument("--cache-bust", action="append", metavar="NAME")
     s.add_argument("--watch-dir", help="DIR holding the ledger watch collection (read_db out_dir)")
     s.add_argument("--watch-collection", default="watch")
+    s.add_argument("--watch-allow-empty", action="store_true",
+                   help="an empty watch collection is a result, not could-not-run")
     s.add_argument("--excerpt-chars", type=int, default=280)
 
     s = sub.add_parser("watch", parents=[common_parser()])
@@ -3344,6 +3356,9 @@ def build_parser():
     s.add_argument("--collection", default="watch")
     s.add_argument("--excerpt-chars", type=int, default=280,
                     help="characters of each new comment's body to print (0: none; default 280)")
+    s.add_argument("--allow-empty", action="store_true",
+                   help="an empty collection is a result, not could-not-run "
+                        "(default: no rows is could-not-run)")
 
     s = sub.add_parser("changes-sweep", parents=[common_parser()])
     s.add_argument("--since", required=True, help="window start: epoch ms or ISO 8601")
