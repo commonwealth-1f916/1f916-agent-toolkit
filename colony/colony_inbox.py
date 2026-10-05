@@ -37,14 +37,16 @@ from colony_sdk import ColonyClient
 BASE = "https://thecolony.ai/api/v1"
 POST_URL = "https://thecolony.ai/post/"
 # The colony digest: per member colony, of the posts created since --since,
-# the DIGEST_NEWEST newest and the DIGEST_TOP highest-scored. One page of
-# DIGEST_PAGE newest posts is read per colony; a colony whose whole page is
-# newer than --since says so, because its top pick was drawn from that page
-# alone. The API's own "top" sort has no time window, so it would serve the
+# the DIGEST_NEWEST newest and the DIGEST_TOP highest-scored. Up to
+# DIGEST_PAGES pages of DIGEST_PAGE newest posts are read per colony: the next
+# page only when the one before was full and wholly newer than --since. A
+# colony whose last page read was still all new says so, because its top pick
+# was drawn from those pages alone. The API's own "top" sort has no time window, so it would serve the
 # same all-time posts every day; ranking the day's posts here is the point.
 DIGEST_NEWEST = 3
 DIGEST_TOP = 3
 DIGEST_PAGE = 50
+DIGEST_PAGES = 2
 
 # The most notifications one request returns (the API's own ceiling). Nothing
 # here marks a notification read, so the unread pile only grows; when it is
@@ -191,26 +193,44 @@ def main():
           % (since.isoformat(), DIGEST_NEWEST, DIGEST_TOP))
     summary["digest"] = {}
     for col in cols:
-        try:
-            got = items_of(c.get_posts(colony=col, sort="newest", limit=DIGEST_PAGE), "posts")
-        except Exception as e:
-            summary["could_not_run"].append("colony %s: %s" % (col, type(e).__name__))
-            continue
-        fresh = []
-        for p in got:
+        got, fresh, seen, pages, last_all_new, failed = [], [], set(), 0, False, None
+        while pages < DIGEST_PAGES:
             try:
-                if parse_time(p.get("created_at") or "") > since:
+                page = items_of(c.get_posts(colony=col, sort="newest", limit=DIGEST_PAGE,
+                                            offset=pages * DIGEST_PAGE), "posts")
+            except Exception as e:
+                failed = type(e).__name__
+                break
+            pages += 1
+            page_fresh = 0
+            for p in page:
+                if p.get("id") in seen:
+                    continue
+                seen.add(p.get("id"))
+                got.append(p)
+                try:
+                    is_new = parse_time(p.get("created_at") or "") > since
+                except ValueError:
+                    is_new = True
+                if is_new:
                     fresh.append(p)
-            except ValueError:
-                fresh.append(p)
+                    page_fresh += 1
+            last_all_new = len(page) >= DIGEST_PAGE and page_fresh == len(page)
+            if not last_all_new:
+                break
+        if failed and not pages:
+            summary["could_not_run"].append("colony %s: %s" % (col, failed))
+            continue
+        if failed:
+            summary["could_not_run"].append("colony %s page %d: %s" % (col, pages + 1, failed))
         fresh.sort(key=lambda p: p.get("created_at") or "", reverse=True)
         newest = fresh[:DIGEST_NEWEST]
         shown = set(p.get("id") for p in newest)
         top = [p for p in sorted(fresh, key=lambda p: (p.get("score") or 0), reverse=True)
                if p.get("id") not in shown][:DIGEST_TOP]
-        capped = len(got) >= DIGEST_PAGE and len(fresh) == len(got)
+        capped = last_all_new
         print("-- %s: %d new since --since%s" % (col, len(fresh),
-              " (the whole page of %d; there may be more)" % len(got) if capped else ""))
+              " (all %d read, %d page(s); there may be more)" % (len(got), pages) if capped else ""))
         rows = []
         for label, group in (("newest", newest), ("top", top)):
             for p in group:
@@ -224,7 +244,8 @@ def main():
                 print("   [%s] %s | by %s | score %s | %s" % (
                     label, row["title"], row["author"], row["score"], row["url"]))
                 print("      about: %s" % (row["excerpt"] or "(no body text)"))
-        summary["digest"][col] = {"new_since": len(fresh), "page_capped": capped, "posts": rows}
+        summary["digest"][col] = {"new_since": len(fresh), "page_capped": capped,
+                                  "pages_read": pages, "posts": rows}
 
     print("== unread DMs (conversation list only; no conversation opened)")
     try:

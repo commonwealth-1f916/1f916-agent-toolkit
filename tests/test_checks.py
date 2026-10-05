@@ -1467,6 +1467,72 @@ class RunsRow(Base):
         path = self.write("nope.json", {"no": "parts here"})
         self.run_checks("runs-row", "--all", path, want=3)
 
+    def test_a_docket_that_could_not_run_says_so_in_the_row(self):
+        # W41 line 2: the builder dropped status and reason with the
+        # bookkeeping keys and wrote an empty block, a could-not-run read as
+        # clean (notes/2026-09-30-lesson-runs-row-drops-a-could-not-run-docket).
+        docket = self.write("docket.json", {"check": "docket", "version": 1,
+                                            "status": "could_not_run",
+                                            "reason": "clone failed: nope"})
+        out = self.run_checks("runs-row", "--all", self.all_path, "--docket", docket)
+        self.assertEqual(out["row"]["docket"],
+                         {"status": "could_not_run", "reason": "clone failed: nope"})
+        self.assertIn("docket", out["blocks_absent"])
+
+    def test_a_docket_that_ran_still_drops_only_the_bookkeeping(self):
+        docket = self.write("docket.json", {"check": "docket", "version": 1,
+                                            "status": "ok", "reason": None,
+                                            "behind": 3, "inputs": {}})
+        out = self.run_checks("runs-row", "--all", self.all_path, "--docket", docket)
+        self.assertEqual(out["row"]["docket"], {"behind": 3})
+        self.assertNotIn("docket", out["blocks_absent"])
+
+    def test_the_row_carries_a_mark_only_the_builder_writes(self):
+        # W41 line 21 (queue/task-2026-10-01-runs-row-builder-marker).
+        out = self.run_checks("runs-row", "--all", self.all_path)
+        mark = out["row"]["built_by"]
+        self.assertEqual(mark["tool"], "1f916-checks runs-row")
+        with open(SCRIPT, "rb") as fh:
+            self.assertEqual(mark["sha256"], sha(fh.read()))
+        judgement = self.write("j.json", {"built_by": {"tool": "by hand"}})
+        err = self.run_checks("runs-row", "--all", self.all_path,
+                              "--judgement", judgement, want=3)
+        self.assertIn("built_by", json.dumps(err))
+
+
+class Stamp(Base):
+    """`stamp` writes a ledger row's stamp fields from the program's own clock
+    (W41 line 1): a sitting stops typing them."""
+
+    NOW = "2026-10-05T16:00:00Z"
+
+    def test_it_fills_the_named_fields_from_its_clock(self):
+        row = self.write("row.json", {"item": "x", "closed_at": None})
+        out = self.run_checks("stamp", "--row", row, "--field", "closed_at",
+                              "--field", "opened", "--now", self.NOW, "--write")
+        self.assertEqual(out["row"]["closed_at"], out["taken"])
+        self.assertEqual(out["row"]["opened"], out["taken"])
+        with open(row, encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["closed_at"], out["taken"])
+
+    def test_it_refuses_to_overwrite_a_value_unless_told(self):
+        row = self.write("row.json", {"closed_at": "2026-10-05T15:00:00Z"})
+        self.run_checks("stamp", "--row", row, "--field", "closed_at",
+                        "--now", self.NOW, want=3)
+        out = self.run_checks("stamp", "--row", row, "--field", "closed_at",
+                              "--now", self.NOW, "--replace")
+        self.assertNotEqual(out["row"]["closed_at"], "2026-10-05T15:00:00Z")
+
+    def test_it_refuses_a_composed_stamp_elsewhere_in_the_row(self):
+        for bad in ("2026-10-05T15:xxZ", "2026-10-05T17:00:00Z"):
+            row = self.write("row.json", {"opened": bad})
+            self.run_checks("stamp", "--row", row, "--field", "closed_at",
+                            "--now", self.NOW, want=3)
+
+    def test_no_field_is_a_usage_error(self):
+        row = self.write("row.json", {})
+        self.run_checks("stamp", "--row", row, "--now", self.NOW, want=64)
+
 
 
 class RunsRowStamps(Base):
