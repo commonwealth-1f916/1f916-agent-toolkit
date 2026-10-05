@@ -2738,6 +2738,51 @@ def _evening_board_blocks(ctx, args, row, produced, absent):
         absent["docs"] = "no --manifest-out given"
 
 
+def _self_sha256():
+    """The digest of this file as it ran: the pin names the same value."""
+    try:
+        with open(os.path.abspath(__file__), "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def cmd_stamp(ctx, args):
+    """Write the named stamp fields of a ledger row file from this program's clock.
+
+    The runs-row builder took stamps out of a run's hands; a sitting writing a
+    queue or notes row still typed them, and one composed a closed_at five
+    minutes ahead minutes after the rule against it was written
+    (notes/2026-09-30-lesson-a-sitting-composed-a-closed-at-while-applying-the-stamp-rule).
+    The sitting writes the row without its stamps, runs this, and writes the
+    file the ledger receives. A field that already holds a value is refused
+    unless --replace says the overwrite is meant, and every other stamp in the
+    row is held to the same faults the builder refuses.
+    """
+    doc = ctx.read_json(args.row, "row")
+    if not isinstance(doc, dict):
+        raise CouldNotRun("row is not a JSON object: %s" % args.row)
+    if not args.field:
+        raise UsageError("name at least one --field to stamp")
+    taken = iso(ctx.now)
+    for name in args.field:
+        if doc.get(name) not in (None, "") and not args.replace:
+            raise CouldNotRun("%s already holds %r: pass --replace to overwrite it"
+                              % (name, doc.get(name)))
+        doc[name] = taken
+    faults = _judgement_stamp_faults(doc, ctx.now)
+    if faults:
+        raise CouldNotRun("row carries stamp(s) no clock wrote: %s" % "; ".join(faults))
+    if args.write:
+        tmp = args.row + ".stamp-tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, indent=1, sort_keys=True, ensure_ascii=False)
+            fh.write("\n")
+        os.replace(tmp, args.row)
+    return {"row": doc, "stamped": sorted(args.field), "taken": taken,
+            "written": bool(args.write)}
+
+
 def cmd_runs_row(ctx, args):
     """Assemble the mechanical blocks of a runs row from an `all` output (or,
     for the evening board routine, from its pin-verify and manifest outputs),
@@ -2814,16 +2859,29 @@ def cmd_runs_row(ctx, args):
 
     if args.docket:
         docket = ctx.read_json(args.docket, "docket output")
-        if isinstance(docket, dict):
+        if not isinstance(docket, dict):
+            raise CouldNotRun("docket output is not a JSON object: %s" % args.docket)
+        if docket.get("status", "ok") != "ok":
+            # A docket check that could not run is a cell of its own, never an
+            # empty block: the builder dropped `status` and `reason` with the
+            # bookkeeping keys and wrote {} where "could not run" belonged
+            # (notes/2026-09-30-lesson-runs-row-drops-a-could-not-run-docket).
+            row["docket"] = {"status": docket.get("status"),
+                             "reason": docket.get("reason")}
+            absent["docket"] = "docket: %s" % (docket.get("reason") or docket.get("status"))
+        else:
             row["docket"] = dict((k, v) for k, v in docket.items()
                                  if k not in ("check", "version", "status", "reason", "inputs"))
-            produced["docket"] = sorted(row["docket"])
+        produced["docket"] = sorted(row["docket"])
 
     judgement = {}
     if args.judgement:
         judgement = ctx.read_json(args.judgement, "judgement")
         if not isinstance(judgement, dict):
             raise CouldNotRun("judgement is not a JSON object: %s" % args.judgement)
+        if "built_by" in judgement:
+            raise CouldNotRun("judgement carries built_by: only this builder writes it, "
+                              "so that a row it did not build cannot claim it did")
         if "written_at" in judgement:
             raise CouldNotRun("judgement carries written_at: the builder stamps it from "
                               "its own clock, and a run-supplied one is the composed "
@@ -2844,6 +2902,11 @@ def cmd_runs_row(ctx, args):
                 % ", ".join(clash))
         _deep_merge(row, judgement)
     row["written_at"] = iso(written_at)
+    # The one field nothing but this builder writes: a ledger query over it
+    # answers what share of runs rows went through the guards above
+    # (queue/task-2026-10-01-runs-row-builder-marker).
+    row["built_by"] = {"tool": "1f916-checks runs-row", "version": VERSION,
+                       "sha256": _self_sha256()}
 
     missing = None
     missing_reason = None
@@ -3374,6 +3437,11 @@ def build_parser():
     s.add_argument("--max-429", type=int, default=6, help="429 retries per page before stopping")
     s.add_argument("--max-pages", type=int, default=2000)
 
+    s = sub.add_parser("stamp", parents=[common_parser()])
+    s.add_argument("--row", required=True, help="a ledger row as a JSON file")
+    s.add_argument("--field", action="append", help="a stamp field to set (repeatable)")
+    s.add_argument("--replace", action="store_true", help="overwrite a field that holds a value")
+    s.add_argument("--write", action="store_true", help="write the stamped row back to --row")
     s = sub.add_parser("runs-row", parents=[common_parser()])
     s.add_argument("--all", help="an `all` output as a file (every kind but evening-board)")
     s.add_argument("--docket", help="a `docket` output as a file")
@@ -3395,6 +3463,7 @@ COMMANDS = {
     "prompt-integrity": cmd_prompt_integrity,
     "changes-sweep": cmd_changes_sweep,
     "runs-row": cmd_runs_row,
+    "stamp": cmd_stamp,
     "official": cmd_official,
     "watch": cmd_watch,
 }
