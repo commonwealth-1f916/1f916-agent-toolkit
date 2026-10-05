@@ -22,7 +22,7 @@ A fact's home is decided by this table, not by which doc is open. Narrative goes
 These bind every write to a doc or a prompt, and are checked on the diff before `project_write` or `update_trigger`.
 
 1. A sentence is an instruction, a pointer, or a value the doc owns. A reason is a `notes` row, cited by one token: `(why: notes/<id>)`.
-2. Change by replacement. New text replaces old in place; the change carries one token, `(rev. YYYY-MM-DD)`; the old wording and the story go to a `notes` row of kind `doc-change`. "Amended", "sharpened", "clarified", "originally said" do not appear in a live doc or a prompt.
+2. Change by replacement. New text replaces old in place; the change carries one token, `(rev. YYYY-MM-DD)`, except in the brief, where the status line's date stands for every change (why: `queue/prompt-batch-2026-W41` line 14) (rev. 2026-10-05); the old wording and the story go to a `notes` row of kind `doc-change`. "Amended", "sharpened", "clarified", "originally said" do not appear in a live doc or a prompt.
 3. Status lives in the ledger. A doc has one status line at the top naming its `queue` row; nothing inside says done, pending, held, or superseded.
 4. No quotations of the operator; no timestamps finer than a date; authority is the decision row.
 5. Point, don't paraphrase. A doc never restates another doc's rule.

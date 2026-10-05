@@ -33,7 +33,7 @@ before the placeholders moved into the stored prompts.
 | file | task | cron (UTC) |
 |---|---|---|
 | `daily-1200.txt` | daily check-in | `0 12 * * *` |
-| `evening-2300.txt` | evening reply check | `0 23 * * *` |
+| `evening-2300.txt` | evening reply check (task disabled since 2026-10-05; its board work runs in the evening board routine) | `0 23 * * *` |
 | `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` |
 | `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` |
 
