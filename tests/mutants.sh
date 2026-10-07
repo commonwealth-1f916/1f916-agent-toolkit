@@ -22,6 +22,7 @@ SCANTOOL="$here/../1f916-scan"
 SIGNTOOL="$here/../1f916-ssh-sign"
 SEEDTOOL="$here/../1f916-seed-to-sshkey.mjs"
 PROXYTOOL="$here/../1f916-proxy"
+SEALSTOOL="$here/../seals/ledger-genesis.mjs"
 WORK=$(mktemp -d) || exit 1
 trap 'rm -rf "$WORK"' EXIT
 
@@ -33,6 +34,7 @@ mutant() {  # mutant <name> <sed-expression> [gate|run|scan|sign|seed|gatekey|pr
   case "$kind" in
     alert) src="$ALERT"; suite="$here/alert.sh" ;;
     proxy) src="$PROXYTOOL"; suite="$here/proxy.sh" ;;
+    seals) src="$SEALSTOOL"; suite="$here/seals.sh" ;;
     run)   src="$RUNTOOL"; suite="$here/run.sh" ;;
     scan)  src="$SCANTOOL"; suite="$here/scan.sh" ;;
     sign)  src="$SIGNTOOL"; suite="$here/sign.sh" ;;
@@ -97,6 +99,7 @@ mutant 'config never read by curl'         's|-K - ||g'
 # The seal verb (2026-09-27). Each mutant puts back a hole the verb exists to close.
 mutant 'seal accepts continuity-core'        's|^       continuity-core) fail3 "seal refuses the label continuity-core.*$|       continuity-core) ;;|'
 mutant 'seal label allowlist admits anything' 's|^       \*) fail3 "label not on the seal allowlist.*$|       *) ;;|'
+mutant 'seal allowlist loses runs-genesis'      's|^       homepage\|witness-reference\|runs-genesis) ;;|       homepage\|witness-reference) ;;|'
 mutant 'seal hash alphabet not checked'      's|^       \*\[!0123456789abcdef\]\*) fail3 "hash is not lowercase hex.*$|       *[!0123456789abcdef]*) ;;|'
 mutant 'seal hash class written as a range'  's|\*\[!0123456789abcdef\]\*)|*[!0-9A-Fa-f]*)|'
 mutant 'seal signs the continuity-core preimage' 's|sign_preimage "1f916.seal.v1:\${HANDLE}:\${SEAL_LABEL}:\${SEAL_HASH}"|sign_preimage "1f916.seal.v1:${HANDLE}:continuity-core:${local_hash}"|'
@@ -222,6 +225,20 @@ mutant 'RUN_BODY_DIR directory check removed' 's|\[ -d "\$RUN_BODY_DIR" \]|[ -d 
 mutant 'ack accepts a numeric cursor'        's|type == "object"|type != "nothing"|'                                  run
 mutant 'ack rebuilds the cursor field by field' 's|{up_to: .ack_cursor}|{up_to: {last_seen_comment_id: .ack_cursor.last_seen_comment_id}}|' run
 mutant 'ack sends the cursor with company'   's|{up_to: .ack_cursor}|{up_to: .ack_cursor, now: 1}|'                   run
+
+# seals/ledger-genesis.mjs (2026-10-07). The two requirements a genesis seal
+# was promised under, each planted as the mistake it guards against: the round
+# hashed BESIDE the preimage instead of inside it, and the round trusted from
+# the preimage instead of fetched and checked against the group key.
+if [ -d "$here/../seals/node_modules/@noble/curves" ] && command -v node >/dev/null 2>&1; then
+  mutant 'seal hash leaves the beacon lines out'    's#sha256(Buffer.from(preimageText, "utf8"))#sha256(Buffer.from(preimageText.slice(0, preimageText.indexOf("drand_chain")), "utf8"))#' seals
+  mutant 'round taken from the preimage, not fetched' 's#  const net = await fetchRound(round, o\["beacon-json"\]);#  const net = { signature: p.drand_signature, randomness: p.drand_randomness };#' seals
+  mutant 'network copy never compared with preimage' 's#  if (net.signature !== p.drand_signature || net.randomness !== p.drand_randomness) {#  if (false) {#' seals
+  mutant 'group-key signature check skipped'        's#^    ok = ss.verify(.*$#    ok = true;#' seals
+  mutant 'randomness not tied to the signature'     '/return "randomness is not sha256(signature)";$/d' seals
+else
+  printf '# seals/node_modules or node missing: seal mutants skipped, not passed\n'
+fi
 
 printf '# %d killed, %d survived\n' "$killed" "$survived"
 [ "$survived" = 0 ] || exit 1

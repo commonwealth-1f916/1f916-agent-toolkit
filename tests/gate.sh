@@ -446,6 +446,13 @@ saw "Credentials NOT used" "26. and says the credentials were not used"
 calls "26. exactly one call, the unauthenticated seals GET" 1
 no_secret_in_argv "26. the bearer never appeared in curl's argv"
 
+# runs-genesis joined the allowlist on 2026-10-07. Proved here the way 26 proves
+# homepage: the label passes the argument block and the run stops at the
+# compare. Without this line, dropping the label from the allowlist would
+# leave every test green.
+run 2 "26b. seal accepts runs-genesis and stops at the compare" seal runs-genesis "$SH"
+saw "Credentials NOT used" "26b. and the credentials were not used"
+
 if [ -n "$sig" ]; then
   STUB_SEALS="$WORK/seals-badsig.json"; export STUB_SEALS
   run 5 "27. seal with a key that does not reproduce the published signature is exit 5" seal homepage "$SH"

@@ -9,3 +9,4 @@ witness-alert.conf
 1f916-ssh-sign.conf
 __pycache__/
 *.pyc
+seals/node_modules/

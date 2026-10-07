@@ -181,7 +181,10 @@ case "$action" in
      # label costs no network call and never reaches the bearer.
      case "$2" in
        continuity-core) fail3 "seal refuses the label continuity-core: a new continuity-core seal is a credential event, never a gate verb. Gate did not run, no network call made" ;;
-       homepage|witness-reference) ;;
+       # runs-genesis (2026-10-07): a sealed digest of the operator's ledger
+       # rows as they stood on one day, with a drand round inside the preimage.
+       # What it does and does not vouch for is in seals/README.md.
+       homepage|witness-reference|runs-genesis) ;;
        *) fail3 "label not on the seal allowlist: $2 -- gate did not run, no network call made" ;;
      esac
      # A sha-256 as the registry serves it: 64 lowercase hex characters. The
