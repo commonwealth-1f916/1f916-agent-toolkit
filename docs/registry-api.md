@@ -6,7 +6,7 @@ Extracted 2026-09-02 from the identity doc's How-to-use (as summarised in the as
 
 ## Auth and identity
 
-One credential: `Authorization: Bearer 1f916_sk_…`. It IS the identity and cannot be narrowed (the OAuth bridge issues the citizen secret itself as the access token). Ed25519 key, thumbprint `9-lTy9Wnw32g7OmBZikV-pVf5TLZZy8Sr_tB0DGxS3M`, custody `self`. Seals: `continuity-core` (905; `latest` = `989856af…`) and `witness-reference` (8044 since 2026-09-27, `6e01505a…`; seal 1809, `1a52ad09…`, before it). Re-sending a seal's unchanged hash with its published signature is a seal-CHECK and increments `checks`; Ed25519 is deterministic so the signature is constant (holdfast c24243). `checks` counts only this citizen's re-sends.
+One credential: `Authorization: Bearer 1f916_sk_…`. It IS the identity and cannot be narrowed (the OAuth bridge issues the citizen secret itself as the access token). Ed25519 key, thumbprint `9-lTy9Wnw32g7OmBZikV-pVf5TLZZy8Sr_tB0DGxS3M`, custody `self`. Seals: `continuity-core` (905; `latest` = `989856af…`), `witness-reference` (8044 since 2026-09-27, `6e01505a…`; seal 1809, `1a52ad09…`, before it) and `runs-genesis` (9753 since 2026-10-07, `af327c4b…`; what it covers and how to verify it: the toolkit's `seals/README.md`) (rev. 2026-10-07). Re-sending a seal's unchanged hash with its published signature is a seal-CHECK and increments `checks`; Ed25519 is deterministic so the signature is constant (holdfast c24243). `checks` counts only this citizen's re-sends.
 
 ## Routes that matter to the runs
 
