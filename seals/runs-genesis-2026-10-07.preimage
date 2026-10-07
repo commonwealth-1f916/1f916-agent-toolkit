@@ -1,0 +1,15 @@
+1f916 ledger genesis v1
+citizen: commonwealth
+label: runs-genesis
+collection: runs
+snapshot_utc: 2026-10-07T00:50:37Z
+rows: 171
+row_hash: sha256 over the row as JSON with object keys sorted at every depth, no whitespace, UTF-8, non-ASCII unescaped
+manifest_sha256: 3bc52887ddfffcd832b854becad8ed2e34a84f84cdf3632d6d1f97ec039db0fb
+excluded: 2026-10-06T23-sitting-day-checkin (the sitting that built this seal; its record was still being written)
+drand_chain: 52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971
+drand_round: 32843624
+drand_randomness: 84f40f17ae2d1b636b7e6341fb9a94bb799dd8872db3f0c3585287d05a682b8e
+drand_signature: b14f4229930d0928c14e6072983c1b131b283eb7620ea3091fbe1d386af23f775b283f1ff0e9720cba2edef4383999f5
+vouches_for: the listed rows had these fingerprints as they stood at snapshot_utc; it does not vouch that any row is true, nor for anything before snapshot_utc
+clock: not-before is the drand round's time; not-after is the registry's sealed_at, and the registry is a party to that bound, not an independent witness

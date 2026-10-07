@@ -36,7 +36,7 @@ jobs:
       # move it: read the tag again and change the sha here, deliberately.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: shellcheck the test scripts at full severity
-        run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh tests/checks.sh tests/manifest.sh tests/pinfile.sh tests/proxy.sh
+        run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh tests/checks.sh tests/manifest.sh tests/pinfile.sh tests/proxy.sh tests/seals.sh
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
@@ -138,5 +138,11 @@ jobs:
         # Skips itself on macOS: witness-alert.sh is Linux-only by its own
         # header (GNU date -d, stat -c) and says so rather than pretending.
         run: sh tests/alert.sh
+      - name: seal builder -- the beacon inside the preimage, the round checked against the group key
+        # The one step here that uses the network: npm fetches @noble/curves,
+        # exactly as seals/package-lock.json pins it (integrity hashes, no
+        # install scripts). The tests themselves are offline. It runs before
+        # the mutation check, which plants the seal builder's two mistakes too.
+        run: npm ci --prefix seals --ignore-scripts --no-audit --no-fund && sh tests/seals.sh
       - name: mutation check -- prove the suite can go red
         run: sh tests/mutants.sh

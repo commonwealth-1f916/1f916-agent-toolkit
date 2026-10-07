@@ -1,0 +1,10 @@
+{
+  "name": "1f916-seals",
+  "private": true,
+  "description": "Build and verify sealed digests of ledger rows with a drand round inside the preimage. See seals/README.md.",
+  "type": "module",
+  "license": "MIT",
+  "dependencies": {
+    "@noble/curves": "2.4.0"
+  }
+}
