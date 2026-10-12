@@ -947,6 +947,60 @@ class Ledger(Base):
 
 
 # ---------------------------------------------------------------------------
+class IntakeReconcile(Base):
+    """queue/gatefire-unread-discriminator: fabricate each divergence and require
+    it to be caught, before the clean case is believed."""
+
+    def run3(self, drained, recorded, after, **kw):
+        return self.run_checks("intake-reconcile", "--drained", self.write("d.json", drained),
+                               "--recorded", self.write("r.json", recorded),
+                               "--unread-after", self.write("a.json", after), **kw)
+
+    def test_clean_drain_agrees(self):
+        out = self.run3(["m1", "m2"], ["m1", "m2"], [])
+        self.assertTrue(out["agree"])
+        self.assertEqual((out["drained"], out["recorded"], out["unread_after"]), (2, 2, 0))
+        self.assertFalse(out["found_nothing"])
+
+    def test_marked_read_without_a_record_is_caught(self):
+        out = self.run3(["m1", "m2"], ["m1"], [])
+        self.assertFalse(out["agree"])
+        self.assertEqual(out["read_without_record"], ["m2"])
+
+    def test_a_record_of_a_mail_never_served_is_caught(self):
+        out = self.run3(["m1"], ["m1", "m9"], [])
+        self.assertFalse(out["agree"])
+        self.assertEqual(out["recorded_not_drained"], ["m9"])
+
+    def test_recorded_but_still_unread_is_reported_not_counted(self):
+        out = self.run3(["m1", "m2"], ["m1", "m2"], ["m2", "m3"])
+        self.assertTrue(out["agree"])
+        self.assertEqual(out["recorded_still_unread"], ["m2"])
+        self.assertEqual(out["arrived_during_run"], ["m3"])
+
+    def test_unhandled_and_still_unread_is_carried_not_lost(self):
+        out = self.run3(["m1", "m2"], ["m1"], ["m2"])
+        self.assertTrue(out["agree"])
+        self.assertEqual(out["left_unread_unrecorded"], ["m2"])
+
+    def test_empty_is_found_nothing(self):
+        out = self.run3([], [], [])
+        self.assertTrue(out["agree"])
+        self.assertTrue(out["found_nothing"])
+
+    def test_object_lists_and_wrappers_are_read(self):
+        out = self.run3({"emails": [{"id": "m1"}, {"id": "m2"}]}, [{"id": "m1"}], {"ids": []})
+        self.assertEqual(out["read_without_record"], ["m2"])
+
+    def test_bad_inputs_could_not_run(self):
+        self.run3({"nope": 1}, [], [], want=3)
+        self.run3(["m1", "m1"], [], [], want=3)
+        self.run3([{"subject": "no id"}], [], [], want=3)
+        self.run_checks("intake-reconcile", "--drained", os.path.join(self.tmp, "missing.json"),
+                        "--recorded", self.write("r.json", []), "--unread-after", self.write("a.json", []), want=3)
+
+
+# ---------------------------------------------------------------------------
 class Cost(Base):
     FIXTURE = os.path.join(HERE, "fixtures", "cost", "transcript.jsonl")
 

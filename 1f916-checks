@@ -1771,6 +1771,62 @@ def cmd_queue_age(ctx, args):
 
 
 # ---------------------------------------------------------------------------
+# intake-reconcile -- the email intake's record against the mailbox, by id
+#
+# The intake rule is "record first, mark read second" (claude/1f916-intake-
+# rules.md), and until 2026-10-12 nothing checked it: the runs row said what
+# was handled in prose, the mailbox said what was read, and the comparison was
+# a reader's (queue/gatefire-unread-discriminator; board c39959 conceded it had
+# no executable arm). This is the arm. Three id lists, each the run's own:
+#   --drained       what `in:1F916 is:unread` returned when the drain began
+#   --recorded      the ids the runs row records as handled
+#   --unread-after  what the same search returns after marking read
+# A mail that left the unread set without a record is the loss the order
+# exists to prevent; a record of a mail the search never served is a row that
+# cannot be trusted. Either one is a divergence. A recorded mail still unread
+# is the at-least-once case and is reported, not counted against the run.
+
+def _intake_ids(ctx, path, role):
+    data = ctx.read_json(path, role)
+    if isinstance(data, dict):
+        for k in ("ids", "emails", "results", "items"):
+            if isinstance(data.get(k), list):
+                data = data[k]
+                break
+    if not isinstance(data, list):
+        raise CouldNotRun("%s is not a list of ids: %s" % (role, path))
+    ids = []
+    for x in data:
+        if isinstance(x, dict):
+            x = x.get("id")
+        if not isinstance(x, str) or not x:
+            raise CouldNotRun("%s holds an entry with no string id: %s" % (role, path))
+        ids.append(x)
+    if len(set(ids)) != len(ids):
+        raise CouldNotRun("%s lists an id twice: %s" % (role, path))
+    return set(ids)
+
+
+def cmd_intake_reconcile(ctx, args):
+    drained = _intake_ids(ctx, args.drained, "drained")
+    recorded = _intake_ids(ctx, args.recorded, "recorded")
+    after = _intake_ids(ctx, args.unread_after, "unread_after")
+    read_without_record = sorted(drained - recorded - after)
+    recorded_not_drained = sorted(recorded - drained)
+    out = {
+        "drained": len(drained), "recorded": len(recorded), "unread_after": len(after),
+        "read_without_record": read_without_record,
+        "recorded_not_drained": recorded_not_drained,
+        "recorded_still_unread": sorted(recorded & after),
+        "left_unread_unrecorded": sorted((drained - recorded) & after),
+        "arrived_during_run": sorted(after - drained),
+        "found_nothing": not drained and not recorded,
+    }
+    out["agree"] = not read_without_record and not recorded_not_drained
+    return out
+
+
+# ---------------------------------------------------------------------------
 # cost -- token and tool-call counters from a transcript, never its content
 
 COST_USAGE_FIELDS = (
@@ -3461,6 +3517,11 @@ def build_parser():
     s.add_argument("--collection", default="queue")
     s.add_argument("--tier", default="owed")
 
+    s = sub.add_parser("intake-reconcile", parents=[common_parser()])
+    s.add_argument("--drained", required=True, help="ids the unread search returned when the drain began (JSON list)")
+    s.add_argument("--recorded", required=True, help="ids the runs row records as handled (JSON list)")
+    s.add_argument("--unread-after", required=True, help="ids the same search returns after marking read (JSON list)")
+
     s = sub.add_parser("prompt-integrity", parents=[common_parser()])
     s.add_argument("--trigger-json", required=True, help="a RAW list_triggers payload as a file")
     s.add_argument("--dir", help="a directory of ledger collections (omit to measure only)")
@@ -3543,7 +3604,7 @@ COMMANDS = {
     "homepage": cmd_homepage, "bindings": cmd_bindings, "model": cmd_model, "front": cmd_front,
     "docket": cmd_docket, "push-verify": cmd_push_verify, "window": cmd_window,
     "witness-gaps": cmd_witness_gaps, "witness-compare": cmd_witness_compare, "hygiene": cmd_hygiene, "tally": cmd_tally,
-    "queue-age": cmd_queue_age, "cost": cmd_cost, "manifest": cmd_manifest, "all": cmd_all,
+    "queue-age": cmd_queue_age, "intake-reconcile": cmd_intake_reconcile, "cost": cmd_cost, "manifest": cmd_manifest, "all": cmd_all,
     "prompt-integrity": cmd_prompt_integrity,
     "changes-sweep": cmd_changes_sweep,
     "runs-row": cmd_runs_row,
