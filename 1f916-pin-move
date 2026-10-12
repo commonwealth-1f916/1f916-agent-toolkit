@@ -19,6 +19,8 @@
 #       Print the PIN that `move` would sign, to stdout. Offline; changes nothing.
 #   1f916-pin-move move   --commit C --serial N --tag T --tag-message FILE
 #                         --pubkey FILE --pr-body FILE [--repo DIR]
+#                         [--add-file NAME ...]   (build takes it too: a file
+#                         the new PIN names that the current one does not)
 #       The whole move, against the deployment clone (default
 #       ~/Projects/1f916-agent-toolkit). Appends to stdout; the last line is
 #       `VERDICT PASS <pr url>` or `VERDICT FAIL <reason>`.
@@ -44,13 +46,14 @@ if command -v sha256sum >/dev/null 2>&1; then SHA='sha256sum'; else SHA='shasum 
 # ---------------------------------------------------------------- arguments
 cmd="${1:-}"; [ $# -gt 0 ] && shift
 REPO="$HOME/Projects/1f916-agent-toolkit"; COMMIT=''; SERIAL=''; TAG=''
-TAGMSG=''; PUBKEY=''; PRBODY=''
+TAGMSG=''; PUBKEY=''; PRBODY=''; ADD_FILES=''
 while [ $# -gt 0 ]; do
   [ $# -ge 2 ] || fail "flag $1 has no value"
   case "$1" in
     --repo) REPO="$2" ;; --commit) COMMIT="$2" ;; --serial) SERIAL="$2" ;;
     --tag) TAG="$2" ;; --tag-message) TAGMSG="$2" ;; --pubkey) PUBKEY="$2" ;;
     --pr-body) PRBODY="$2" ;;
+    --add-file) ADD_FILES="$ADD_FILES $2" ;;
     *) fail "unknown flag $1" ;;
   esac
   shift 2
@@ -77,6 +80,14 @@ build_pin() {
   [ "$n" -eq $((prev + 1)) ] || fail "serial $n is not one more than the serial on $main ($prev)"
   names=$(printf '%s\n' "$cur" | awk '$1 == "file" { print $2 }')
   [ -n "$names" ] || fail "the PIN on $main names no files"
+  # --add-file (2026-10-12): a tool the runs will verify from this serial on.
+  # Named once, by a basename a PIN line can carry, and never one already named.
+  for extra in $ADD_FILES; do
+    case "$extra" in ''|*[!A-Za-z0-9._-]*) fail "added file name carries a character a PIN line cannot: $extra" ;; esac
+    printf '%s\n' "$names" | grep -qxF -- "$extra" && fail "added file $extra is already named by the PIN"
+    names="$names
+$extra"
+  done
   printf '1f916-pin v1\nserial %s\ncommit %s\ntag %s\n' "$n" "$c" "$t"
   paths=$(git ls-tree -r --name-only "$c")
   # Collected first and sorted after: a `fail` inside a pipeline would exit
@@ -195,6 +206,16 @@ self_test() {
   git -C "$T" rm -q docs/1f916-gate docs/MANIFEST && git -C "$T" commit -q -m gone
   c4=$(git -C "$T" rev-parse HEAD)
   expect "a name missing at the commit is refused" fail "matches 0 paths" "$T" "$c4" 4 v3
+  printf 'd\n' > "$T/colony/colony_reply.py"; mkdir -p "$T/docs"; printf 'b\n' > "$T/docs/MANIFEST"; git -C "$T" add -A && git -C "$T" commit -q -m add
+  c5=$(git -C "$T" rev-parse HEAD)
+  added=$( (ADD_FILES=' colony_reply.py'; build_pin "$T" "$c5" 4 v4) 2>&1 )
+  n=$((n + 1))
+  if printf '%s\n' "$added" | grep -q "^file colony_reply.py $(printf 'd\n' | $SHA | cut -c1-64)\$"
+  then echo "ok $n - an added file is named and hashed"; else bad=$((bad + 1)); echo "not ok $n - added file missing: $added"; fi
+  ADD_FILES=' colony_inbox.py'; expect "adding a file the PIN already names is refused" fail "already named" "$T" "$c5" 4 v4
+  ADD_FILES=' bad/name'; expect "an added name with a slash is refused" fail "cannot" "$T" "$c5" 4 v4
+  ADD_FILES=' nothere.py'; expect "an added name missing at the commit is refused" fail "matches 0 paths" "$T" "$c5" 4 v4
+  ADD_FILES=''
   echo "# $n tests, $bad failed"
   [ "$bad" = 0 ]
 }

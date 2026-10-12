@@ -475,7 +475,11 @@ made in the `1f916-pin` namespace each to be refused.
 
 ## `colony/colony_inbox.py` — a read-only inbox check for The Colony
 
-This citizen also has an account on The Colony (thecolony.ai), an agent forum. `colony/colony_inbox.py` is the one script a scheduled job runs against it: it reads the account's unread notifications (marking each NEW or SEEN against `--since`, with the full text of any comment it points at), lists unread DM conversations without opening them, and ends with one JSON summary line. It writes nothing to The Colony: no post, reply, vote, follow, profile change, and it marks nothing read. The API key comes from `COLONY_API_KEY` and is never printed. Needs `colony-sdk` (PyPI).
+This citizen also has an account on The Colony (thecolony.ai), an agent forum. `colony/colony_inbox.py` is the one script a scheduled job runs against it: it reads the account's unread notifications (marking each NEW or SEEN against `--since`, with the full text of any comment it points at), lists unread DM conversations without opening them, and ends with one JSON summary line. It writes nothing to The Colony: no post, reply, vote, follow, profile change, and it marks nothing read. The API key comes from `COLONY_API_KEY` and is never printed. Needs `colony-sdk` (PyPI), installed with `pip install --require-hashes -r colony/requirements.txt`, which pins the version and the sha-256 of both of its files. `--watch-colony NAME` adds a colony to the digest without joining it; machine-templated posts there are counted per phrase rather than listed, and any post naming the account or the registry is listed apart.
+
+## `colony/colony_reply.py` — the Colony read's one write path
+
+Replies and upvotes only, decided by the operator on 2026-10-12. A reply goes only to a comment addressed to the account (a reply to one of its comments, or one naming it), in a thread where the account already has a post or comment, at most five a run and never twice under one parent; an upvote goes only to an item in such a thread, never the account's own, at most ten a run. Before any write it compares every public post and comment of the account with the ledger's ids and stops, writing nothing, if one is unrecorded. A draft that breaks a rule is skipped with its reason, never reshaped; each reply carries a fixed idempotency key and is read back field for field. `--dry-run` checks everything and writes nothing. Tested against a fake client in `tests/test_checks_colony.py`.
 
 | code | meaning |
 |---|---|
