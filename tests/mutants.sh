@@ -197,6 +197,7 @@ if date -u -d "2020-01-01T00:00:00Z" +%s >/dev/null 2>&1 && stat -c %Y "$ALERT" 
   mutant 'the push-failure count doubles'    's|^      pushfails=\$(grep -c .*$|      pushfails=$(grep -c "push failed" witness.log 2>/dev/null \|\| echo 0)|' alert
   mutant 'an unreadable log counts as zero'  's|^      problems="\${problems}. witness.log is not readable.*$|      problems="${problems}. witness.log records 0 (log) line(s).\n"|' alert
   mutant 'a multi-line fetch error is raw'   's|^    fetch_err=\$(printf .*tr .*)$|    :|'         alert
+  mutant 'a missing checkout is silent'      's|^  problems="\${problems}REPO MISSING|  : "${problems}REPO MISSING|' alert
   mutant 'autoheal runs on a stale ref'      's|^  if \[ "\$fetch_ok" = "0" \] && \[ "\$AUTOHEAL" = "1" \]; then$|  if false; then|' alert
 else
   printf '# GNU date -d / stat -c absent: alert mutants skipped, not passed\n'

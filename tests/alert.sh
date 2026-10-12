@@ -265,5 +265,18 @@ count_is "16. an unparseable failure date alerts" "$((base+3))"
 body_has "did not parse ('not-a-date')" "16. and says what it could not read"
 : > "$W/repo/witness.log"
 
+# 17. A MISSING CHECKOUT. Before 2026-09-02 a repo that was not there exited 0
+#     in silence -- health by omission. The fix had no test until 2026-10-12
+#     (queue/task-2026-09-27-alert-missing-repo-test).
+rm -f "$W/state"
+base=$(mails)
+sed "s|^WITNESS_REPO=.*|WITNESS_REPO=\"$W/there-is-no-checkout-here\"|" "$CONF" > "$W/conf-missing"
+PATH="$BIN:$PATH" FAKE_MSMTP_DIR="$MAIL" WITNESS_ALERT_CONF="$W/conf-missing" \
+  bash "$ALERT" > "$W/out" 2> "$W/err"
+count_is "17. a missing checkout alerts" "$((base+1))"
+body_has "REPO MISSING:" "17. and names the kind"
+body_has "there-is-no-checkout-here" "17. and the path it looked for"
+rm -f "$W/state"
+
 printf '# %d tests, %d passed, %d failed\n' "$n" "$pass" "$fail"
 [ "$fail" = 0 ] || exit 1

@@ -294,7 +294,7 @@ So the recipes live here once, with the stored values as test literals.
 Twenty-one subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
 `hashes`, `seal`, `homepage`, `bindings`, `front`, `docket`, `push-verify`,
 `official` and `watch` fetch public things and hash or diff them; `model`, `window`, `hygiene`,
-`tally`, `queue-age` and `cost` read files the caller saved; `manifest` does
+`tally`, `queue-age`, `intake-reconcile` and `cost` read files the caller saved; `manifest` does
 either, verifying a set of documents against `docs/MANIFEST` from a directory
 (`--dir`) or from a raw URL at a commit (`--base`); `changes-sweep` walks the
 nulls log of `/api/changes` on its own cursor, paced and resumable, and counts
