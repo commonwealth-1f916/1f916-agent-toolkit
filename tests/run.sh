@@ -159,6 +159,14 @@ EOF
   calls "11. two calls: step 1's seals GET and POST; nothing for steps 2 or 3" 2
 
   printf '{"path":"/api/comment","body":{}}' > "$WORK/manifest-obj.json"
+  # The seal verb (2026-10-12): a run-record chain tip goes through the gate's
+  # seal verb, so its allowlist and key proof apply.
+  TIP=$(printf 'tip' | $SHA | cut -d' ' -f1)
+  run 0 "11b. seal files a chain tip through the gate" "$GOOD" seal runs-daily "$TIP"
+  saw "== seal runs-daily" "11b. under its own step header"
+  calls "11b. two calls: the seals GET and the POST" 2
+  run 3 "11c. seal refuses a label the gate does not allow" "$GOOD" seal runs-sitting "$TIP"
+  run 3 "11d. seal with a missing hash is a usage error" "$GOOD" seal runs-daily
   run 3 "12. a manifest that is not an array is refused" "$GOOD" act "$WORK/manifest-obj.json"
   no_calls "12. no network call was made"
   printf '[]' > "$WORK/manifest-empty.json"

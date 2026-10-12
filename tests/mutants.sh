@@ -99,7 +99,11 @@ mutant 'config never read by curl'         's|-K - ||g'
 # The seal verb (2026-09-27). Each mutant puts back a hole the verb exists to close.
 mutant 'seal accepts continuity-core'        's|^       continuity-core) fail3 "seal refuses the label continuity-core.*$|       continuity-core) ;;|'
 mutant 'seal label allowlist admits anything' 's|^       \*) fail3 "label not on the seal allowlist.*$|       *) ;;|'
-mutant 'seal allowlist loses runs-genesis'      's|^       homepage\|witness-reference\|runs-genesis) ;;|       homepage\|witness-reference) ;;|'
+mutant 'seal allowlist loses runs-genesis'      's|^       homepage\|witness-reference\|runs-genesis\|runs-daily\|runs-evening-board\|runs-audit) ;;|       homepage\|witness-reference\|runs-daily\|runs-evening-board\|runs-audit) ;;|'
+mutant 'seal allowlist loses runs-audit'        's|runs-evening-board\|runs-audit) ;;|runs-evening-board) ;;|'
+mutant 'seal-check drops check_only'            's|"label":"continuity-core","check_only":true,"signed_at"|"label":"continuity-core","signed_at"|'
+mutant 'seal-check drops signed_at from the signature' 's|continuity-core:\${local_hash}:\${signed_at}"|continuity-core:${local_hash}"|'
+mutant 'seal-check re-sends the published signature'  's|"signed_at":%s,"signature":"%s"}. "\$local_hash" "\$signed_at" "\$chk_sig"|"signed_at":%s,"signature":"%s"}'"'"' "$local_hash" "$signed_at" "$sig"|'
 mutant 'seal hash alphabet not checked'      's|^       \*\[!0123456789abcdef\]\*) fail3 "hash is not lowercase hex.*$|       *[!0123456789abcdef]*) ;;|'
 mutant 'seal hash class written as a range'  's|\*\[!0123456789abcdef\]\*)|*[!0-9A-Fa-f]*)|'
 mutant 'seal signs the continuity-core preimage' 's|sign_preimage "1f916.seal.v1:\${HANDLE}:\${SEAL_LABEL}:\${SEAL_HASH}"|sign_preimage "1f916.seal.v1:${HANDLE}:continuity-core:${local_hash}"|'
@@ -113,6 +117,7 @@ mutant 'header check removed'              's|^\[ "\$first" = "1f916 continuity 
 mutant 'unexpected lines accepted'         's|^    \*) fail3 "gate file has an unexpected line.*$|    *) ;;|'       run
 mutant 'a failed step no longer stops'     's|^    exit "\$rc"$|    :|'                                            run
 mutant 'secret line no longer loaded'      's|^    secret=\*)       BEARER=\${line#secret=} ;;$|    secret=*) ;;|' run
+mutant 'seal verb skips the gate'           's|^    step "seal \$3" seal "\$3" "\$4"$|    printf "== seal %s\\n" "$3"|' run
 mutant 'empty manifest reported done'       's|^      .. fail3 "manifest is not a non-empty JSON array: \$manifest"$|      \|\| true|' run
 
 # --- 1f916-proxy ------------------------------------------------------------

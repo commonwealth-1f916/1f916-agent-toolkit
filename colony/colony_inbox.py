@@ -29,6 +29,7 @@ line says which), 2 on bad arguments.
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -57,6 +58,15 @@ PAGE = 100
 # post is about, short enough that fifty notifications stay readable. The full
 # post is one click away at its link.
 EXCERPT_CHARS = 400
+# A watched colony (--watch-colony, 2026-10-12) is read like a member colony
+# but never joined. Machine-templated posts -- a bracketed tag, a handle, then a
+# fixed phrase, as "[Artifact Council] @x offers a page ..." -- are collapsed to
+# a count per phrase and kept out of the picks, so the digest names what people
+# wrote rather than what a template printed.
+TEMPLATED = re.compile(r"^\[[^\]]+\]\s+@\S+\s+((?:\S+\s+){0,2}\S+)")
+# A post that names the account or the registry it lives on is listed apart, so
+# a caller can file it for a person to look at.
+NAMES_US = re.compile(r"@?commonwealth\b|1f916\.ai", re.I)
 
 
 def excerpt(text, limit=EXCERPT_CHARS):
@@ -85,6 +95,8 @@ def items_of(r, *keys):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--since", help="ISO-8601 time; notifications after it are NEW (default: 24 hours ago)")
+    ap.add_argument("--watch-colony", action="append", default=[],
+                    help="a colony to digest without being a member of it (repeatable; read-only)")
     a = ap.parse_args()
     try:
         since = parse_time(a.since) if a.since else datetime.now(timezone.utc) - timedelta(hours=24)
@@ -192,7 +204,8 @@ def main():
     print("== colony digest (posts since %s: newest %d and top %d per colony)"
           % (since.isoformat(), DIGEST_NEWEST, DIGEST_TOP))
     summary["digest"] = {}
-    for col in cols:
+    watched = [w for w in a.watch_colony if w not in cols]
+    for col in cols + watched:
         got, fresh, seen, pages, last_all_new, failed = [], [], set(), 0, False, None
         while pages < DIGEST_PAGES:
             try:
@@ -224,12 +237,27 @@ def main():
         if failed:
             summary["could_not_run"].append("colony %s page %d: %s" % (col, pages + 1, failed))
         fresh.sort(key=lambda p: p.get("created_at") or "", reverse=True)
+        templated = {}
+        names_us = []
+        written = []
+        for p in fresh:
+            text = "%s\n%s" % (p.get("title") or "", p.get("body") or "")
+            if NAMES_US.search(text):
+                names_us.append(p.get("id"))
+            m = TEMPLATED.match(p.get("title") or "")
+            if m:
+                phrase = re.sub(r"\d+", "#", m.group(1).lower()).rstrip(",.:;!?")
+                templated[phrase] = templated.get(phrase, 0) + 1
+            else:
+                written.append(p)
+        fresh_all = fresh
+        fresh = written
         newest = fresh[:DIGEST_NEWEST]
         shown = set(p.get("id") for p in newest)
         top = [p for p in sorted(fresh, key=lambda p: (p.get("score") or 0), reverse=True)
                if p.get("id") not in shown][:DIGEST_TOP]
         capped = last_all_new
-        print("-- %s: %d new since --since%s" % (col, len(fresh),
+        print("-- %s%s: %d new since --since%s" % (col, " (watched, not a member)" if col in watched else "", len(fresh_all),
               " (all %d read, %d page(s); there may be more)" % (len(got), pages) if capped else ""))
         rows = []
         for label, group in (("newest", newest), ("top", top)):
@@ -244,8 +272,14 @@ def main():
                 print("   [%s] %s | by %s | score %s | %s" % (
                     label, row["title"], row["author"], row["score"], row["url"]))
                 print("      about: %s" % (row["excerpt"] or "(no body text)"))
-        summary["digest"][col] = {"new_since": len(fresh), "page_capped": capped,
-                                  "pages_read": pages, "posts": rows}
+        if templated:
+            print("   templated: %s" % ", ".join("%s x%d" % kv for kv in sorted(templated.items())))
+        if names_us:
+            print("!! names commonwealth or 1f916.ai: %s" % ", ".join(str(i) for i in names_us))
+        summary["digest"][col] = {"new_since": len(fresh_all), "page_capped": capped,
+                                  "pages_read": pages, "posts": rows,
+                                  "templated": templated, "names_us": names_us,
+                                  "watched": col in watched}
 
     print("== unread DMs (conversation list only; no conversation opened)")
     try:
