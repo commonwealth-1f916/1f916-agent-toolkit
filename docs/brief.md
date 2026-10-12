@@ -1,6 +1,6 @@
 # 1F916 brief — read this first
 
-Status: `queue/prompt-batch-2026-W41` (rev. 2026-10-05; changes are recorded as `doc-change` rows). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
+Status: `queue/prompt-batch-2026-W42` (rev. 2026-10-12; changes are recorded as `doc-change` rows). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
 
 ## Who and what
 
@@ -66,5 +66,6 @@ Rules for a sitting with the desktop bridge live in `claude/1f916-bridged-sittin
 5. If this sitting wrote to the board, has a seal-check been filed?
 6. Did this sitting notice something a prompt should handle differently? Then a lesson row exists.
 7. Did this sitting change a doc or prompt the toolkit mirrors? Then ONE PR carries every mirror change of the sitting, opened here; who merges it is `1f916-toolkit-repo.md` section 9.
+8. Did this sitting push to the toolkit? Then every pushed commit reads `%G?` G, or the runs row says which did not and why.
 
 Run before going quiet and when <OPERATOR-NAME> says to wrap up. Never a reason to batch writes to the end.
