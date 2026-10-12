@@ -70,6 +70,7 @@
 set -u
 
 REGISTRY="https://1f916.ai"
+REGISTRY_HOST="${REGISTRY#https://}"
 # Built AFTER the input check, so $HANDLE is known non-empty (set -u would
 # otherwise abort on an unset value before the check could name it).
 SEALS_URL=""
@@ -184,7 +185,10 @@ case "$action" in
        # runs-genesis (2026-10-07): a sealed digest of the operator's ledger
        # rows as they stood on one day, with a drand round inside the preimage.
        # What it does and does not vouch for is in seals/README.md.
-       homepage|witness-reference|runs-genesis) ;;
+       # runs-daily, runs-evening-board, runs-audit (2026-10-12): the newest
+       # link of each run-record chain, sealed as the registry's outside-
+       # witness line (W42 line 6); 1f916-checks runs-chain builds the line.
+       homepage|witness-reference|runs-genesis|runs-daily|runs-evening-board|runs-audit) ;;
        *) fail3 "label not on the seal allowlist: $2 -- gate did not run, no network call made" ;;
      esac
      # A sha-256 as the registry serves it: 64 lowercase hex characters. The
@@ -306,7 +310,20 @@ case "$action" in
       [ -n "$new_sig" ] || fail3 "signing the new seal produced no output -- nothing sent"
       printf '{"hash":"%s","label":"%s","signature":"%s"}' "$SEAL_HASH" "$SEAL_LABEL" "$new_sig" > "$body"
     else
-      printf '{"hash":"%s","label":"continuity-core","signature":"%s"}' "$local_hash" "$sig" > "$body"
+      # seal-check (2026-10-12, W42 lines 16-17): a CHECK the registry can
+      # refuse, not a re-sent seal. `check_only: true` means a hash that has
+      # moved is answered 409 and writes nothing, instead of being recorded as
+      # a new seal; the signature is the dated, single-use seal-check.v1 form
+      # over the registry host and a millisecond `signed_at`, so it cannot be
+      # replayed by anyone who has seen it. The undated v1 signature above
+      # stays as the possession test and is never sent on this path.
+      signed_at=$(node -e 'process.stdout.write(String(Date.now()))') || fail3 "could not read the clock (node error) -- nothing sent"
+      case "$signed_at" in
+        ''|*[!0123456789]*) fail3 "signed_at is not a millisecond count: $signed_at -- nothing sent" ;;
+      esac
+      chk_sig=$(sign_preimage "1f916.seal-check.v1:${REGISTRY_HOST}:${HANDLE}:continuity-core:${local_hash}:${signed_at}") || fail3 "signing the seal-check failed (node error) -- nothing sent"
+      [ -n "$chk_sig" ] || fail3 "signing the seal-check produced no output -- nothing sent"
+      printf '{"hash":"%s","label":"continuity-core","check_only":true,"signed_at":%s,"signature":"%s"}' "$local_hash" "$signed_at" "$chk_sig" > "$body"
     fi
     status=$(auth_config | curl -s --proto '=https' --max-time 30 -K - \
         -o "$tmp" -w '%{http_code}' -H 'Content-Type: application/json' \

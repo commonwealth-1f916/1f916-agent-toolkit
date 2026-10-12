@@ -2895,5 +2895,89 @@ class AllWatch(Base):
         self.assertIn("watch", out["reason"])
 
 
+class RunChain(Base):
+    """W42 lines 6, 25, 26 (2026-10-12): the builder links each row of a
+    chained kind to the previous one, dates a window that leads with words,
+    and names a missing watch block; `runs-chain` walks the links and prints
+    the head as the registry's outside-witness line."""
+
+    def setUp(self):
+        Base.setUp(self)
+        self.all_path = self.write("all.json", fixture_bytes("all-output.json"))
+
+    def canon(self, row):
+        body = dict((k, v) for k, v in row.items()
+                    if k not in ("id", "version", "updatedAt", "createdAt", "__name__"))
+        blob = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+    def test_prev_hash_is_the_canonical_hash_of_the_previous_row(self):
+        prev = {"kind": "daily", "note": "yesterday", "votes_cast": 2}
+        path = self.write(os.path.join("ledger", "runs", "2026-10-11T12-daily.json"),
+                          {"id": "2026-10-11T12-daily", "data": prev, "version": 3})
+        out = self.run_checks("runs-row", "--all", self.all_path, "--prev-row", path)
+        self.assertEqual(out["row"]["prev_hash"], self.canon(prev))
+        self.assertEqual(out["row"]["prev_id"], "2026-10-11T12-daily")
+        self.assertFalse(any(m.startswith("prev_hash") for m in out["judgement_missing"]))
+
+    def test_a_chained_kind_without_prev_row_names_it_as_owed(self):
+        out = self.run_checks("runs-row", "--all", self.all_path)
+        self.assertTrue(any(m.startswith("prev_hash") for m in out["judgement_missing"]))
+
+    def test_prev_row_of_another_kind_is_refused(self):
+        path = self.write("prev.json", {"kind": "audit"})
+        self.run_checks("runs-row", "--all", self.all_path, "--prev-row", path, want=3)
+
+    def test_a_judgement_may_not_type_a_link(self):
+        j = self.write("j.json", {"prev_hash": "0" * 64})
+        err = self.run_checks("runs-row", "--all", self.all_path, "--judgement", j, want=3)
+        self.assertIn("prev_hash", json.dumps(err))
+
+    def test_a_window_leading_with_words_gets_the_builders_date(self):
+        j = self.write("j.json", {"window": "evening of the 11th", "kind": "daily"})
+        out = self.run_checks("runs-row", "--all", self.all_path, "--judgement", j,
+                              "--now", "2026-10-12T12:30:00Z")
+        self.assertEqual(out["row"]["window"], "2026-10-12 evening of the 11th")
+        j = self.write("j2.json", {"window": "2026-10-11 to 2026-10-12", "kind": "daily"})
+        out = self.run_checks("runs-row", "--all", self.all_path, "--judgement", j,
+                              "--now", "2026-10-12T12:30:00Z")
+        self.assertEqual(out["row"]["window"], "2026-10-11 to 2026-10-12")
+
+    def test_a_daily_without_a_watch_block_is_owed_one(self):
+        out = self.run_checks("runs-row", "--all", self.all_path)
+        self.assertIn("watch", out["judgement_missing"])
+        j = self.write("j.json", {"watch": {"rows_with_new": [], "rows_could_not_run": []}})
+        out = self.run_checks("runs-row", "--all", self.all_path, "--judgement", j)
+        self.assertNotIn("watch", out["judgement_missing"])
+
+    def test_the_chain_walk_verifies_links_and_prints_the_witness_line(self):
+        a = {"kind": "daily", "note": "a"}
+        b = {"kind": "daily", "note": "b", "prev_hash": self.canon(a), "prev_id": "2026-10-10T12-daily"}
+        c = {"kind": "daily", "note": "c", "prev_hash": self.canon(b), "prev_id": "2026-10-11T12-daily"}
+        other = {"kind": "audit", "note": "not in this chain"}
+        for rid, row in (("2026-10-10T12-daily", a), ("2026-10-11T12-daily", b),
+                         ("2026-10-12T12-daily", c), ("2026-10-12T11-audit", other)):
+            self.write(os.path.join("ledger", "runs", rid + ".json"), row)
+        d = os.path.join(self.tmp, "ledger")
+        out = self.run_checks("runs-chain", "--dir", d, "--kind", "daily")
+        self.assertEqual(out["breaks"], [])
+        self.assertEqual(out["links"], 2)
+        self.assertEqual(out["count"], 3)
+        self.assertEqual(out["head"], self.canon(c))
+        want = "1f916.outside-witness.v1 log=runs-daily count=3 head=%s" % self.canon(c)
+        self.assertEqual(out["line"], want)
+        self.assertEqual(out["line_sha256"], hashlib.sha256(want.encode()).hexdigest())
+
+    def test_an_edited_row_breaks_the_next_link(self):
+        a = {"kind": "daily", "note": "a"}
+        b = {"kind": "daily", "note": "b", "prev_hash": self.canon(a), "prev_id": "2026-10-10T12-daily"}
+        edited = dict(a, note="a, edited after the fact")
+        self.write(os.path.join("ledger", "runs", "2026-10-10T12-daily.json"), edited)
+        self.write(os.path.join("ledger", "runs", "2026-10-11T12-daily.json"), b)
+        out = self.run_checks("runs-chain", "--dir", os.path.join(self.tmp, "ledger"), "--kind", "daily")
+        self.assertEqual(len(out["breaks"]), 1)
+        self.assertEqual(out["breaks"][0]["id"], "2026-10-11T12-daily")
+
+
 if __name__ == "__main__":
     unittest.main()

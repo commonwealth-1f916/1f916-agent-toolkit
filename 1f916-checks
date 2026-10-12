@@ -2541,7 +2541,7 @@ DAILY_JUDGEMENT_FIELDS = (
     "anomaly", "board_writes", "build", "classifier_refusals", "gate", "intake",
     "inbox_handled", "kind", "mentions_unresolved", "model", "note", "porch_id",
     "post_slot", "quota_after", "scan", "seal_check_id", "seal_checks_liveness",
-    "tags_placed", "votes_cast", "window", "written_by",
+    "tags_placed", "votes_cast", "watch", "window", "written_by",
 )
 DAILY_JUDGEMENT_NESTED = (
     ("surface", "change"), ("bindings", "note"), ("front", "delta_note"),
@@ -2783,6 +2783,66 @@ def cmd_stamp(ctx, args):
             "written": bool(args.write)}
 
 
+# The run-record chain (W42 line 6, 2026-10-12). Each built row of a chained
+# kind carries `prev_hash`: the sha-256 of the previous row of the same kind as
+# the ledger stores it, in canonical JSON. A later edit to a row breaks the next
+# row's link, which is the point: the chain makes an edit visible, it does not
+# forbid one. The newest row's hash is the chain's head; the 12:00 daily seals
+# each head on the registry as the outside-witness line `runs-chain` prints.
+CHAIN_KINDS = ("daily", "evening-board", "audit")
+# Keys a ledger read adds around a row and that the builder never wrote.
+ROW_ENVELOPE_KEYS = ("id", "version", "updatedAt", "createdAt", "__name__")
+DATE_FIRST = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def row_sha256(row):
+    body = dict((k, v) for k, v in row.items() if k not in ROW_ENVELOPE_KEYS)
+    blob = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def cmd_runs_chain(ctx, args):
+    """Walk one kind's run-record chain in a read_db out_dir: verify every
+    `prev_hash` link and print the head as the registry's outside-witness line,
+    which the daily seals under the label `runs-<kind>`."""
+    rows = [(rid, row) for rid, row in read_collection(ctx, args.dir, "runs")
+            if isinstance(row, dict) and row.get("kind") == args.kind]
+    rows.sort(key=lambda x: x[0])
+    log = args.log or "runs-%s" % args.kind
+    if not rows:
+        return {"status": "found_nothing", "kind": args.kind, "log": log,
+                "reason": "no runs row of kind %r in %s" % (args.kind, args.dir)}
+    by_id = dict(rows)
+    first = None
+    links, breaks = 0, []
+    for i, (rid, row) in enumerate(rows):
+        prev = row.get("prev_hash")
+        if prev is None:
+            continue
+        pid = row.get("prev_id") or (rows[i - 1][0] if i else None)
+        target = by_id.get(pid)
+        links += 1
+        if first is None:
+            first = pid
+        if target is None:
+            breaks.append({"id": rid, "prev_id": pid, "reason": "previous row not found"})
+        elif row_sha256(target) != prev:
+            breaks.append({"id": rid, "prev_id": pid, "reason": "previous row's hash differs from prev_hash"})
+    head_id, head_row = rows[-1]
+    head = row_sha256(head_row)
+    if first is None:
+        count = 1
+    else:
+        ids = [rid for rid, _ in rows]
+        count = len(ids) - ids.index(first) if first in ids else links + 1
+    line = "1f916.outside-witness.v1 log=%s count=%d head=%s" % (log, count, head)
+    return {"kind": args.kind, "log": log, "rows_of_kind": len(rows), "links": links,
+            "genesis_id": first, "breaks": breaks, "head_id": head_id, "head": head,
+            "count": count, "line": line,
+            "line_sha256": hashlib.sha256(line.encode("utf-8")).hexdigest(),
+            "chained": links > 0}
+
+
 def cmd_runs_row(ctx, args):
     """Assemble the mechanical blocks of a runs row from an `all` output (or,
     for the evening board routine, from its pin-verify and manifest outputs),
@@ -2882,6 +2942,10 @@ def cmd_runs_row(ctx, args):
         if "built_by" in judgement:
             raise CouldNotRun("judgement carries built_by: only this builder writes it, "
                               "so that a row it did not build cannot claim it did")
+        for owned in ("prev_hash", "prev_id"):
+            if owned in judgement:
+                raise CouldNotRun("judgement carries %s: the builder computes it from "
+                                  "--prev-row, so that a link is never typed" % owned)
         if "written_at" in judgement:
             raise CouldNotRun("judgement carries written_at: the builder stamps it from "
                               "its own clock, and a run-supplied one is the composed "
@@ -2902,6 +2966,19 @@ def cmd_runs_row(ctx, args):
                 % ", ".join(clash))
         _deep_merge(row, judgement)
     row["written_at"] = iso(written_at)
+    # A window that leads with words cannot be dated by the audit's tally
+    # (W42 line 25); the builder puts its own date in front and keeps the words.
+    if isinstance(row.get("window"), str) and not DATE_FIRST.match(row["window"]):
+        row["window"] = "%s %s" % (iso(written_at)[:10], row["window"])
+    if args.prev_row:
+        prev = ctx.read_row(args.prev_row, role="previous runs row")
+        if not isinstance(prev, dict):
+            raise CouldNotRun("--prev-row is not a JSON object: %s" % args.prev_row)
+        if prev.get("kind") != args.kind:
+            raise CouldNotRun("--prev-row is of kind %r, this row is %r: a chain links "
+                              "rows of one kind" % (prev.get("kind"), args.kind))
+        row["prev_hash"] = row_sha256(prev)
+        row["prev_id"] = os.path.basename(args.prev_row)[:-5] if args.prev_row.endswith(".json") else None
     # The one field nothing but this builder writes: a ledger query over it
     # answers what share of runs rows went through the guards above
     # (queue/task-2026-10-01-runs-row-builder-marker).
@@ -2913,6 +2990,8 @@ def cmd_runs_row(ctx, args):
     if args.kind in JUDGEMENT_FIELDS_BY_KIND:
         flat, nested = JUDGEMENT_FIELDS_BY_KIND[args.kind]
         missing = [f for f in flat if row.get(f) is None]
+        if args.kind in CHAIN_KINDS and "prev_hash" not in row:
+            missing.append("prev_hash (pass --prev-row: the newest earlier row of this kind)")
         for block, field in nested:
             if _dig(row, (block, field)) is None:
                 missing.append("%s.%s" % (block, field))
@@ -3451,6 +3530,11 @@ def build_parser():
     s.add_argument("--kind", default="daily",
                    choices=["daily", "evening", "evening-board", "audit", "sitting"])
     s.add_argument("--front-limit", type=int, default=100)
+    s.add_argument("--prev-row", help="the newest earlier runs row of the same kind, as a read_db file")
+    s = sub.add_parser("runs-chain", parents=[common_parser()])
+    s.add_argument("--dir", required=True, help="a read_db out_dir holding runs/")
+    s.add_argument("--kind", required=True, choices=list(CHAIN_KINDS))
+    s.add_argument("--log", help="the log name in the witness line (default runs-<kind>)")
     return p
 
 
@@ -3463,6 +3547,7 @@ COMMANDS = {
     "prompt-integrity": cmd_prompt_integrity,
     "changes-sweep": cmd_changes_sweep,
     "runs-row": cmd_runs_row,
+    "runs-chain": cmd_runs_chain,
     "stamp": cmd_stamp,
     "official": cmd_official,
     "watch": cmd_watch,

@@ -232,8 +232,35 @@ else
   saw "nothing sent" "11. and sends nothing"
   calls "11. exactly one call, the unauthenticated seals GET" 1
 
+  CHK="$WORK/check-sent.json"; : > "$CHK"
+  STUB_POST_BODY="$CHK"; export STUB_POST_BODY
+  before_ms=$(node -e 'process.stdout.write(String(Date.now()))')
   run 0 "12. seal-check files the row when hash and key both agree" seal-check
+  after_ms=$(node -e 'process.stdout.write(String(Date.now()))')
   calls "12. two calls: the seals GET and the POST" 2
+  unset STUB_POST_BODY
+  # W42 lines 16-17 (2026-10-12): the check is sent as a check the registry can
+  # refuse, under a dated single-use signature -- never the re-sent v1 string.
+  if [ "$(jq -r '.check_only' "$CHK" 2>/dev/null)" = true ]
+  then ok "12b. the seal-check carries check_only: true"
+  else nok "12b. the seal-check carries check_only: true" "sent: $(head -c 200 "$CHK")"; fi
+  sat=$(jq -r '.signed_at' "$CHK" 2>/dev/null)
+  if [ "$(jq -r '.signed_at|type' "$CHK" 2>/dev/null)" = number ] && [ "$sat" -ge "$before_ms" ] 2>/dev/null && [ "$sat" -le "$after_ms" ] 2>/dev/null
+  then ok "12c. signed_at is a millisecond number taken during the call"
+  else nok "12c. signed_at is a millisecond number taken during the call" "signed_at=$sat window=$before_ms..$after_ms"; fi
+  want_chk=$(ED25519_PRIV="$D_SEED" node -e '
+    const c = require("crypto");
+    const seed = Buffer.from(process.env.ED25519_PRIV, "base64url");
+    const der = Buffer.concat([Buffer.from("302e020100300506032b657004220420","hex"), seed]);
+    const key = c.createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+    process.stdout.write(c.sign(null, Buffer.from(process.argv[1],"utf8"), key).toString("base64url"));
+  ' "1f916.seal-check.v1:1f916.ai:${D_HANDLE}:continuity-core:${h}:${sat}" 2>/dev/null)
+  if [ -n "$want_chk" ] && [ "$(jq -r '.signature' "$CHK" 2>/dev/null)" = "$want_chk" ]
+  then ok "12d. the signature is over the dated seal-check.v1 preimage (registry host, handle, label, hash, signed_at)"
+  else nok "12d. the signature is over the dated seal-check.v1 preimage (registry host, handle, label, hash, signed_at)" "sent: $(jq -r '.signature' "$CHK" 2>/dev/null | cut -c1-20)"; fi
+  if [ "$(jq -r '.signature' "$CHK" 2>/dev/null)" != "$sig" ] && [ "$(jq -r '.hash' "$CHK" 2>/dev/null)" = "$h" ] && [ "$(jq -r '.label' "$CHK" 2>/dev/null)" = continuity-core ]
+  then ok "12e. the undated published signature is not what was sent; hash and label are the continuity core's"
+  else nok "12e. the undated published signature is not what was sent; hash and label are the continuity core's" "sent: $(head -c 200 "$CHK")"; fi
 
   printf '{"latest":{"hash":"%s","signature":"%s"}}' "$h" "AAAA${sig}" > "$WORK/seals-badsig.json"
   STUB_SEALS="$WORK/seals-badsig.json"; export STUB_SEALS
@@ -452,6 +479,11 @@ no_secret_in_argv "26. the bearer never appeared in curl's argv"
 # leave every test green.
 run 2 "26b. seal accepts runs-genesis and stops at the compare" seal runs-genesis "$SH"
 saw "Credentials NOT used" "26b. and the credentials were not used"
+# The three run-record chain labels joined on 2026-10-12 (W42 line 6).
+for lbl in runs-daily runs-evening-board runs-audit; do
+  run 2 "26c. seal accepts $lbl and stops at the compare" seal "$lbl" "$SH"
+done
+run 3 "26d. seal still refuses an unlisted runs label" seal runs-sitting "$SH"
 
 if [ -n "$sig" ]; then
   STUB_SEALS="$WORK/seals-badsig.json"; export STUB_SEALS

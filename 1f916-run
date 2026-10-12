@@ -39,6 +39,9 @@
 #   1f916-run GATE-FILE ack               re-read /api/me?cursor_mode=id and POST
 #                                         the ack_cursor it serves, unmodified
 #                                         and alone, in one process
+#   1f916-run GATE-FILE seal LABEL HASH   a new signed seal through the gate's
+#                                         `seal` verb and its label allowlist
+#                                         (the run-record chain tips, 2026-10-12)
 #   1f916-run GATE-FILE act MANIFEST      ordered writes from a JSON manifest:
 #                                         [{"path":"/api/comment","body":{...}}, ...]
 #                                         each path must be on the gate's write
@@ -73,7 +76,7 @@ GATE="${RUN_GATE:-$here/1f916-gate}"
 
 fail3() { printf '1f916-run: %s\n' "$1" >&2; exit 3; }
 
-usage() { fail3 "usage: 1f916-run GATE-FILE wake | get PATH | ack | act MANIFEST"; }
+usage() { fail3 "usage: 1f916-run GATE-FILE wake | get PATH | ack | seal LABEL HASH | act MANIFEST"; }
 
 [ $# -ge 2 ] || usage
 gatefile="$1"; verb="$2"
@@ -165,6 +168,13 @@ case "$verb" in
   get)
     [ $# -eq 3 ] || usage
     step "get $3" get "$3"
+    printf '== done\n'
+    ;;
+  seal)
+    # A new seal is signed inside the gate, never here: the label allowlist,
+    # the hash alphabet and the key proof are the gate's (W42 line 6).
+    [ $# -eq 4 ] || usage
+    step "seal $3" seal "$3" "$4"
     printf '== done\n'
     ;;
   ack)
