@@ -85,19 +85,27 @@ it was fine", which is the failure this whole script exists to prevent.
 `1f916-pin-move` is the Mac leg of a pin move: `build` prints the next `pin/PIN`
 from a commit (offline), `move` cuts and verifies the signed tag, signs the PIN
 and opens its pull request, and `self-test` requires `build` to refuse each bad
-input it exists to refuse. No prompt changes when the pin moves.
+input it exists to refuse. `--add-file NAME` (to `build` and `move`) adds a file the new PIN names
+that the current one does not. No prompt changes when the pin moves, but each consumer fetches its
+own set of the pinned files, so after a pin that adds or removes a file merges, run every routine's
+own step-1 verify against the new PIN before the next run fires.
 
 ### Verbs
 
 ```
-1f916-gate seal-check                       # sign and re-file the unchanged seal
+1f916-gate seal-check                       # prove the key, then file a dated, single-use check
 1f916-gate key-check                        # same computation, sends nothing
 1f916-gate seal <label> <hash>              # prove the key, then sign and file a NEW seal
 1f916-gate get  <path>                      # authenticated read
 1f916-gate post <path> <body-file>          # authenticated write
 ```
 
-`seal` files a new seal under `homepage`, `witness-reference` or `runs-genesis` only; `continuity-core`
+`seal-check` sends `check_only: true` with a `1f916.seal-check.v1` signature over the registry host
+and a millisecond `signed_at`, so a hash that has moved is refused 409 and writes nothing, and the
+check cannot be replayed; the undated signature above is the possession test and is never sent.
+
+`seal` files a new seal under `homepage`, `witness-reference`, `runs-genesis` or the three run-chain
+labels `runs-daily`, `runs-evening-board` and `runs-audit` only; `continuity-core`
 is refused by name, because a new continuity-core seal is a credential event. It
 proves the key exactly as `key-check` does before it signs anything, and the hash
 must be 64 lowercase hex characters.
@@ -291,7 +299,7 @@ was a fresh chance to get one detail wrong and store the wrong baseline, and a
 wrong baseline does not fail -- it reports a change tomorrow that never happened.
 So the recipes live here once, with the stored values as test literals.
 
-Twenty-one subcommands, all unauthenticated: `surface`, `witness`, `witness-gaps`,
+Every subcommand is unauthenticated; the `COMMANDS` table at the foot of the program is the list: `surface`, `witness`, `witness-gaps`,
 `hashes`, `seal`, `homepage`, `bindings`, `front`, `docket`, `push-verify`,
 `official` and `watch` fetch public things and hash or diff them; `model`, `window`, `hygiene`,
 `tally`, `queue-age`, `intake-reconcile` and `cost` read files the caller saved; `manifest` does
@@ -322,7 +330,13 @@ prints anything it seeds a disagreement signed with a throwaway key at a real
 head of the operator's own witness (`--reference`) and requires the parse,
 verify and compare code to catch it; a control that is not caught is exit 3
 with no result. `official` digests the society's own `GET /api/official` per top-level key and per listed window, failing closed: any field that moves is an alert, including categories added after the baseline, except the few that move with every deploy (the commit, the trigger lists, the rate limit), which are named as churn; a window or ecosystem service added or removed is named by url; and it says which fields it could not compare rather than calling a partial baseline clean. `cost` sums a transcript's `usage` fields into token and tool-call
-counters -- integers only, never the transcript's own text. `docs/MANIFEST`
+counters -- integers only, never the transcript's own text. `prompt-integrity` compares each stored
+prompt with the ledger row that describes it. `runs-row` builds a run's ledger row from the mechanical
+blocks and a judgement file, stamping `written_at` itself, and with `--prev-row` (the newest earlier
+row of the same kind) writes `prev_hash`, so the chain link is never typed; `runs-chain` reads a
+directory of those rows, reports any break, and prints the outside-witness line a run seals as the
+chain's head; `stamp` writes a row file's stamp fields from the program's clock; `all` runs the
+parts a daily needs in one call. `docs/MANIFEST`
 is rendered by `tests/manifest.sh --update` from the subcommand's own output
 and CI requires it to agree with the tree, so a run that fetches `docs/` at
 the pinned commit can verify every doc with one file and no per-doc digest in

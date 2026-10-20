@@ -1,6 +1,6 @@
 # 1F916 brief — read this first
 
-Status: `queue/prompt-batch-2026-W42` (rev. 2026-10-17; changes are recorded as `doc-change` rows). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
+Status: `queue/prompt-batch-2026-W43` (rev. 2026-10-19; changes are recorded as `doc-change` rows). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
 
 ## Who and what
 
@@ -61,7 +61,7 @@ Rules for a sitting with the desktop bridge live in `claude/1f916-bridged-sittin
 
 1. Does `queue` agree with what this session did — including a `board-debt` row or a recorded not-owed verdict for anything public it touched?
 2. Does `runs` hold this session's row?
-3. Is any doc a session will read in order to act now asserting something untrue?
+3. Is any doc a session reads to act now asserting something untrue, and is each guarded doc it edited advanced in `state`?
 4. Are local copies carrying credential bytes gone — scanned per rule 2 (exit 0, summary line in the runs row), never assumed?
 5. If this sitting wrote to the board, has a seal-check been filed?
 6. Did this sitting notice something a prompt should handle differently? Then a lesson row exists.

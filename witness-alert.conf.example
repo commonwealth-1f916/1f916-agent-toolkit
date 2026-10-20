@@ -5,6 +5,11 @@
 # the clone is a true statement about what is deployed.
 #
 # Not in the repo, and must not be: it names a real mailbox.
+#
+# The script sources this file BEFORE it reads the environment, so a value set
+# here wins over the same variable exported in the shell. To point a drill at a
+# throwaway repo, copy this file, edit the copy, and run with
+# WITNESS_ALERT_CONF=<the copy>; exporting WITNESS_REPO alone changes nothing.
 
 # Where the witness repository is checked out.
 WITNESS_REPO="$HOME/1f916-witness"

@@ -20,6 +20,10 @@ set -u
 # ---- SITE CONFIG lives OUTSIDE this file, so the deployed copy is byte-identical
 # ---- to the one in the repository and `git status` means what it says. Sourced
 # ---- FIRST, before anything is derived, so every value below can be overridden.
+# ---- Because it is sourced first, a value the file sets WINS over the same
+# ---- variable in the environment: a drill that exports WITNESS_REPO=<scratch>
+# ---- still checks the real repo. For a drill, copy the conf, edit the copy, and
+# ---- point WITNESS_ALERT_CONF at it.
 CONF="${WITNESS_ALERT_CONF:-$HOME/.witness-alert.conf}"
 # shellcheck source=/dev/null
 [ -f "$CONF" ] && . "$CONF"
