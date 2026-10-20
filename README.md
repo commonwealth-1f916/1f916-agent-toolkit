@@ -302,7 +302,7 @@ So the recipes live here once, with the stored values as test literals.
 Every subcommand is unauthenticated; the `COMMANDS` table at the foot of the program is the list: `surface`, `witness`, `witness-gaps`,
 `hashes`, `seal`, `homepage`, `bindings`, `front`, `docket`, `push-verify`,
 `official` and `watch` fetch public things and hash or diff them; `model`, `window`, `hygiene`,
-`tally`, `queue-age`, `intake-reconcile` and `cost` read files the caller saved; `manifest` does
+`tally`, `queue-age` (oldest open row of a tier, or of `--tier all`; `--per-row` lists each open row with its age, `updated_at` and any revisit or due field), `intake-reconcile` and `cost` read files the caller saved; `manifest` does
 either, verifying a set of documents against `docs/MANIFEST` from a directory
 (`--dir`) or from a raw URL at a commit (`--base`); `changes-sweep` walks the
 nulls log of `/api/changes` on its own cursor, paced and resumable, and counts
@@ -493,7 +493,7 @@ This citizen also has an account on The Colony (thecolony.ai), an agent forum. `
 
 ## `colony/colony_reply.py` — the Colony read's one write path
 
-Replies and upvotes only, decided by the operator on 2026-10-12. A reply goes only to a comment addressed to the account (a reply to one of its comments, or one naming it), in a thread where the account already has a post or comment, at most five a run and never twice under one parent; an upvote goes only to an item in such a thread, never the account's own, at most ten a run. Before any write it compares every public post and comment of the account with the ledger's ids and stops, writing nothing, if one is unrecorded. A draft that breaks a rule is skipped with its reason, never reshaped; each reply carries a fixed idempotency key and is read back field for field. `--dry-run` checks everything and writes nothing. Tested against a fake client in `tests/test_checks_colony.py`.
+Replies and upvotes, decided by the operator on 2026-10-12, and since 2026-10-19 new-thread comments. A reply goes only to a comment addressed to the account (a reply to one of its comments, or one naming it), in a thread where the account already has a post or comment, at most five a run and never twice under one parent; a new-thread comment is one top-level comment on someone else's post in a thread the account has not joined, at most two a run, after which the thread counts as joined; an upvote goes only to an item in a joined thread, never the account's own, at most ten a run. No new post, downvote, DM, follow or profile change has a code path. Before any write it compares every public post and comment of the account with the ledger's ids and stops, writing nothing, if one is unrecorded; it reads those ids itself from a read_db out_dir (`--ledger-dir`, both the `colony_id` and `id` field of every `colony` row) or, the older form, from a file of ids (`--ledger-ids`). A draft that breaks a rule is skipped with its reason, never reshaped; each reply or comment carries a fixed idempotency key and is read back field for field. `--dry-run` checks everything and writes nothing. Tested against a fake client in `tests/test_checks_colony.py`.
 
 | code | meaning |
 |---|---|

@@ -2,7 +2,8 @@
 
 No key and no network: a stand-in `colony_sdk` module is put in sys.modules
 before the script imports it, so every rule the routine's one write path
-claims is exercised against a thread built here (W42 line 14, 2026-10-12).
+claims is exercised against a thread built here (W42 line 14, 2026-10-12;
+new-thread comments and --ledger-dir, the operator's follow-ups of 2026-10-19).
 """
 import importlib.util
 import io
@@ -94,19 +95,24 @@ class ColonyReply(unittest.TestCase):
             "post-b": [
                 {"id": "c-b1", "parent_id": None, "author": OTHER, "body": "@commonwealth hello"},
             ],
+            "post-c": [],
+            "p-ours": [],
         }
         FakeClient.posts = {"post-a": {"id": "post-a", "author": THEM},
-                            "post-b": {"id": "post-b", "author": OTHER}}
+                            "post-b": {"id": "post-b", "author": OTHER},
+                            "post-c": {"id": "post-c", "author": THEM},
+                            "p-ours": {"id": "p-ours", "author": US}}
         os.environ["COLONY_API_KEY"] = "dummy-not-a-key"
 
-    def run_script(self, drafts, ids=("c-ours-1", "p-ours"), dry=False):
+    def run_script(self, drafts, ids=("c-ours-1", "p-ours"), dry=False, ledger_dir=None):
         dp = os.path.join(self.tmp, "drafts.json")
         ip = os.path.join(self.tmp, "ids.txt")
         with open(dp, "w") as f:
             json.dump(drafts, f)
         with open(ip, "w") as f:
             f.write("\n".join(ids) + "\n")
-        argv = ["colony_reply.py", "--drafts", dp, "--ledger-ids", ip] + (["--dry-run"] if dry else [])
+        src = ["--ledger-dir", ledger_dir] if ledger_dir else ["--ledger-ids", ip]
+        argv = ["colony_reply.py", "--drafts", dp] + src + (["--dry-run"] if dry else [])
         old = sys.argv
         sys.argv = argv
         buf = io.StringIO()
@@ -184,6 +190,83 @@ class ColonyReply(unittest.TestCase):
         rc, lines, client = self.run_script([self.reply("c-to-us")], dry=True)
         self.assertEqual(lines[0]["status"], "WOULD WRITE")
         self.assertEqual(client.writes, [])
+
+    def comment(self, post="post-b", body="a first word in this thread"):
+        return {"kind": "comment", "post_id": post, "body": body}
+
+    def test_a_new_thread_comment_is_written_top_level_and_read_back(self):
+        rc, lines, client = self.run_script([self.comment()])
+        self.assertEqual(rc, 0)
+        self.assertEqual(lines[0]["kind"], "comment")
+        self.assertEqual(lines[0]["status"], "OK")
+        self.assertIsNone(lines[0]["parent_id"])
+        self.assertTrue(all(lines[0]["checks"].values()))
+        self.assertEqual(client.writes, [("comment", "post-b", None, client.writes[0][3])])
+        self.assertEqual(lines[-1]["summary"]["comments"], 1)
+
+    def test_a_new_thread_comment_where_we_already_are_is_skipped(self):
+        rc, lines, client = self.run_script([self.comment(post="post-a")])
+        self.assertEqual(lines[0]["status"], "SKIP")
+        self.assertIn("use a reply", lines[0]["reason"])
+        self.assertEqual(client.writes, [])
+
+    def test_never_a_new_thread_comment_on_our_own_post(self):
+        rc, lines, client = self.run_script([self.comment(post="p-ours")])
+        self.assertEqual(lines[0]["status"], "SKIP")
+        self.assertEqual(client.writes, [])
+
+    def test_a_second_comment_on_the_same_new_thread_is_skipped(self):
+        rc, lines, client = self.run_script([self.comment(), self.comment(body="and again")])
+        self.assertEqual([l["status"] for l in lines[:2]], ["OK", "SKIP"])
+        self.assertEqual(len(client.writes), 1)
+
+    def test_an_empty_new_thread_comment_is_skipped(self):
+        rc, lines, client = self.run_script([self.comment(body="   ")])
+        self.assertEqual(lines[0]["status"], "SKIP")
+        self.assertEqual(client.writes, [])
+
+    def test_more_than_two_new_thread_comments_writes_nothing_and_reads_nothing(self):
+        drafts = [self.comment(post=p) for p in ("post-b", "post-c", "post-b")]
+        rc, lines, client = self.run_script(drafts)
+        self.assertEqual(rc, 2)
+        self.assertIn("new-thread comments", lines[-1]["summary"]["reason"])
+        self.assertIsNone(client)
+
+    def write_ledger_dir(self, rows, nested=True):
+        base = os.path.join(self.tmp, "ledger")
+        rows_dir = os.path.join(base, "colony") if nested else base
+        os.makedirs(rows_dir, exist_ok=True)
+        for i, r in enumerate(rows):
+            with open(os.path.join(rows_dir, "row-%d.json" % i), "w") as f:
+                json.dump(r, f)
+        return base
+
+    def test_the_ledger_dir_supplies_ids_from_both_fields(self):
+        base = self.write_ledger_dir([{"colony_id": "c-ours-1", "id": "2026-10-01-row"},
+                                      {"id": "p-ours"}])
+        rc, lines, client = self.run_script([self.reply("c-to-us")], ledger_dir=base)
+        self.assertEqual(rc, 0)
+        self.assertEqual(lines[0]["status"], "OK")
+
+    def test_the_ledger_dir_reads_rows_wrapped_in_data_and_a_flat_dir(self):
+        base = self.write_ledger_dir([{"data": {"colony_id": "c-ours-1"}}, {"data": {"colony_id": "p-ours"}}],
+                                     nested=False)
+        rc, lines, client = self.run_script([self.reply("c-to-us")], ledger_dir=base)
+        self.assertEqual(lines[0]["status"], "OK")
+
+    def test_the_ledger_dir_missing_a_row_stops_everything(self):
+        base = self.write_ledger_dir([{"colony_id": "c-ours-1"}])
+        rc, lines, client = self.run_script([self.reply("c-to-us")], ledger_dir=base)
+        self.assertEqual(rc, 3)
+        self.assertIn("p-ours", lines[-1]["summary"]["unrecorded"])
+        self.assertEqual(client.writes, [])
+
+    def test_an_empty_ledger_dir_cannot_run(self):
+        base = self.write_ledger_dir([])
+        rc, lines, client = self.run_script([self.reply("c-to-us")], ledger_dir=base)
+        self.assertEqual(rc, 2)
+        self.assertEqual(lines[-1]["summary"]["status"], "could_not_run")
+        self.assertIsNone(client)
 
 
 if __name__ == "__main__":

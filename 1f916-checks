@@ -1748,25 +1748,44 @@ def parse_date_loose(value):
     return None
 
 
+QUEUE_AGE_DATE_FIELDS = ("revisit", "revisit_on", "revisit_by", "due", "due_by")
+
+
 def cmd_queue_age(ctx, args):
+    """The oldest open row of one tier (or of every tier with --tier all); with
+    --per-row, every open row as well, oldest first, so a reading of the backlog
+    is the tool's and not a reader's count (operator's follow-up, 2026-10-19).
+    `updated_at` is the row's own field when it carries one, else null: the
+    read_db files hold the row, and a stamp the row does not carry is not made up."""
     rows = read_collection(ctx, args.dir, args.collection)
     open_rows, unparseable = [], []
     for rid, row in rows:
-        if row.get("state") != "open" or row.get("tier") != args.tier:
+        if row.get("state") != "open" or (args.tier != "all" and row.get("tier") != args.tier):
             continue
         parsed = parse_date_loose(row.get("opened"))
         if parsed is None:
-            unparseable.append(rid)
+            unparseable.append((rid, row))
             continue
-        open_rows.append((parsed[0], rid, row.get("opened"), parsed[1]))
+        open_rows.append((parsed[0], rid, row.get("opened"), parsed[1], row))
     out = {"collection": args.collection, "tier": args.tier, "rows_read": len(rows),
-           "open_rows": len(open_rows) + len(unparseable), "unparseable_ids": unparseable,
-           "oldest": None}
+           "open_rows": len(open_rows) + len(unparseable),
+           "unparseable_ids": [rid for rid, _ in unparseable], "oldest": None}
+    open_rows.sort(key=lambda t: (t[0], t[1]))
     if open_rows:
-        open_rows.sort()
-        dt, rid, raw, how = open_rows[0]
+        dt, rid, raw, how, _ = open_rows[0]
         out["oldest"] = {"id": rid, "opened": raw, "parsed_as": how,
                          "age_days": round((ctx.now - dt).total_seconds() / 86400.0, 2)}
+    if args.per_row:
+        def entry(rid, row, dt, how):
+            e = {"id": rid, "tier": row.get("tier"), "opened": row.get("opened"), "parsed_as": how,
+                 "age_days": round((ctx.now - dt).total_seconds() / 86400.0, 2) if dt else None,
+                 "updated_at": row.get("updated_at", row.get("updatedAt"))}
+            for k in QUEUE_AGE_DATE_FIELDS:
+                if row.get(k) is not None:
+                    e[k] = row.get(k)
+            return e
+        out["rows"] = ([entry(rid, row, dt, how) for dt, rid, _, how, row in open_rows]
+                       + [entry(rid, row, None, None) for rid, row in unparseable])
     return out
 
 
@@ -3515,7 +3534,9 @@ def build_parser():
     s = sub.add_parser("queue-age", parents=[common_parser()])
     s.add_argument("--dir", required=True)
     s.add_argument("--collection", default="queue")
-    s.add_argument("--tier", default="owed")
+    s.add_argument("--tier", default="owed", help="one tier, or 'all' (default owed)")
+    s.add_argument("--per-row", action="store_true",
+                   help="also list every open row: id, tier, opened, age_days, updated_at, revisit/due")
 
     s = sub.add_parser("intake-reconcile", parents=[common_parser()])
     s.add_argument("--drained", required=True, help="ids the unread search returned when the drain began (JSON list)")
