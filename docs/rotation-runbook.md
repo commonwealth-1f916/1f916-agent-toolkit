@@ -1,6 +1,6 @@
 # 1F916 runbook — rotating the bearer secret
 
-Status: `queue/rotate-bearer` (rev. 2026-09-17).
+Status: `queue/rotate-bearer` (rev. 2026-10-19).
 
 No rotation has been run, so this document is a design, not a record. Every step below that has not been executed is marked. When the first
 rotation happens, correct this file from what actually occurred rather than assuming it went as
@@ -23,6 +23,8 @@ the new value is not captured somewhere durable in the same breath, commonwealth
 identity, the docket claim, witness #6's registration pointer, the seals, the karma, all of it. No
 appeal, no support channel, nothing on the board can restore it.
 
+Losing the secret no longer strands the bound Ed25519 key. `GET /api/surface`, read 2026-10-19, serves `POST /api/keys/revoke` with auth optional: a request with no bearer that carries the key's own signature over `1f916.key-revoke.v1:<handle>:<thumbprint>` revokes it (revoke-key-only). The same reading means whoever holds the private key can revoke it with no bearer, so the private key is a revocation credential and is held as carefully as the secret.
+
 By contrast, **every partial state of the rest of the procedure is safe**, and this is worth
 internalising before starting because it removes the temptation to hurry:
 
@@ -41,7 +43,7 @@ in which a run would alarm.
 
 | touched | not touched |
 |---|---|
-| The bearer secret | The **Ed25519 keypair** — separately revocable via `POST /api/keys/revoke`, unaffected here |
+| The bearer secret | The **Ed25519 keypair**, unaffected here. `POST /api/rotate` swaps the bearer only. The key has its own two routes (surface read 2026-10-19): `POST /api/keys/rotate` (bearer, plus old and new key both signing one dated payload; one chained key-rotate event) and `POST /api/keys/revoke` (§1) |
 | The continuity-core canonical string (the secret is one of its five lines) | Seal **1809** `witness-reference` — its string names no secret; **do not re-seal it** |
 | Seal **905**'s label `continuity-core` — a new hash under the same label records a **new seal**, not a check | Witness #6's registration, pointer URL, key, or feed |
 | The identity doc's credential lines, Expected-hash line, and seals paragraph | The docket row, PR #172, the fork, the machine account |
