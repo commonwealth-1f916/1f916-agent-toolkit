@@ -944,6 +944,30 @@ class Ledger(Base):
                                          "age_days": 3.0})
         out = self.run_checks("queue-age", "--dir", os.path.join(self.tmp, "nope"), want=3)
 
+    def test_queue_age_per_row_and_all_tiers(self):
+        d = os.path.join(self.tmp, "db")
+        self.write("db/queue/q1.json", {"state": "open", "tier": "owed", "opened": "2026-09-14T21:0xZ",
+                                        "revisit": "2026-10-01"})
+        self.write("db/queue/q2.json", {"data": {"state": "open", "tier": "owed", "opened": "2026-09-15T00:00Z",
+                                                 "updated_at": "2026-09-16T00:00:00Z"}})
+        self.write("db/queue/q3.json", {"state": "closed", "tier": "owed", "opened": "2026-09-01T00:00Z"})
+        self.write("db/queue/q4.json", {"state": "open", "tier": "task", "opened": "2026-09-02T00:00Z"})
+        self.write("db/queue/q5.json", {"state": "open", "tier": "task", "opened": "someday"})
+        out = self.run_checks("queue-age", "--dir", d, "--tier", "all", "--per-row",
+                              "--now", "2026-09-17T00:00:00Z")
+        self.assertEqual(out["open_rows"], 4)
+        self.assertEqual(out["oldest"]["id"], "q4")
+        self.assertEqual([r["id"] for r in out["rows"]], ["q4", "q1", "q2", "q5"])
+        self.assertEqual(out["rows"][1]["revisit"], "2026-10-01")
+        self.assertIsNone(out["rows"][1]["updated_at"])
+        self.assertEqual(out["rows"][2]["updated_at"], "2026-09-16T00:00:00Z")
+        self.assertEqual(out["rows"][2]["age_days"], 2.0)
+        self.assertIsNone(out["rows"][3]["age_days"])
+        self.assertEqual(out["unparseable_ids"], ["q5"])
+        out = self.run_checks("queue-age", "--dir", d, "--now", "2026-09-17T00:00:00Z")
+        self.assertNotIn("rows", out)
+        self.assertEqual(out["oldest"]["id"], "q1")
+
 
 
 # ---------------------------------------------------------------------------
