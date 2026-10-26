@@ -1,16 +1,16 @@
-# 1F916 — editing the project docs and the prompts
+# 1F916 — editing the docs and the prompts
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-30). Read before writing any project doc or any trigger prompt.
+Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-10-26). Read before changing any doc or any trigger prompt. The docs are this repository's `docs/` and `prompts/run-common.md`; the identity doc, the values file and `claude/1f916-docket-build.md` stay in the operator's project (why: `queue/prompt-batch-2026-W44` line 4) (rev. 2026-10-26).
 
 ## The map
 
 | doc | temperature | who writes it | what goes in it |
 |---|---|---|---|
 | the **ledger** (artifact database) | hot | every run and sitting, as it goes | the record: `runs`, `board`, `queue`, `notes`, `neighbours`. Nothing in it is an instruction. |
-| `1f916-brief.md` | warm | rarely | doc map, standing rules, charter summary, close-check |
-| `1f916-state.md` | warm | when a pointer changes | pointers; the project-instructions baseline |
-| `1f916-identity.md` | frozen | credential events only, under rule 5 | credentials, continuity core, seal preimages |
-| `1f916-docket-build.md` | cold | stubs and index lines only | environment facts, session rules; never longer after an edit |
+| `docs/brief.md` | warm | rarely | doc map, standing rules, charter summary, close-check |
+| `docs/state.md` | warm | when a pointer changes | pointers; the project-instructions baseline |
+| `claude/1f916-identity.md` (project) | frozen | credential events only, under rule 5 | credentials, continuity core, seal preimages |
+| `claude/1f916-docket-build.md` (project) | cold | stubs and index lines only | environment facts, session rules; never longer after an edit |
 | probes, runbooks, specs | cold | when a probe answers or a procedure changes | dated findings; a stub at anything moved |
 | dated docs (`*-review-*`, `*-plan-*`, `*-shape-*`) | cold | their author | reasoning; archived by the archive test (why: `notes/2026-09-06-budgets-become-a-delta-rule`) |
 | `archive/` | frozen | nobody | a changed archive is an incident |
@@ -19,7 +19,7 @@ A fact's home is decided by this table, not by which doc is open. Narrative goes
 
 ## What a sentence may be
 
-These bind every write to a doc or a prompt, and are checked on the diff before `project_write` or `update_trigger`.
+These bind every write to a doc or a prompt, and are checked on the diff before the commit, `project_write` or `update_trigger`.
 
 1. A sentence is an instruction, a pointer, or a value the doc owns. A reason is a `notes` row, cited by one token: `(why: notes/<id>)`.
 2. Change by replacement. New text replaces old in place; the change carries one token, `(rev. YYYY-MM-DD)`, except in the brief, where the status line's date stands for every change (why: `queue/prompt-batch-2026-W41` line 14) (rev. 2026-10-05); the old wording and the story go to a `notes` row of kind `doc-change`. "Amended", "sharpened", "clarified", "originally said" do not appear in a live doc or a prompt.
@@ -34,7 +34,7 @@ These bind every write to a doc or a prompt, and are checked on the diff before 
 ## The five editing rules
 
 1. **Batch per instruction, write once.** Collect every change the work in front of you needs, then write. A new instruction is a new write. Never hold state back for a tidier write count; the ledger holds state.
-2. **Never retype.** Extract the doc's bytes from the transcript (`/root/.claude/projects/<project>/<session>.jsonl`, the `project_read` tool-result line, field `content`) to a local file; apply replacements in python with `assert doc.count(old) == 1`; upload with `project_write` + `local_path`. A scheduled run without a transcript rebuilds the file in chunks whose byte counts and sha-256 are compared against the source of each chunk.
+2. **Never retype.** A repository doc is changed in a clone on a `claude/` branch, by replacements in python with `assert doc.count(old) == 1`, and `git diff` is read before the commit; `sh tests/manifest.sh --update` rewrites `docs/MANIFEST` in the same commit. A project doc that stays in the project is changed by extracting its bytes from the transcript (`/root/.claude/projects/<project>/<session>.jsonl`, the `project_read` tool-result line, field `content`) to a local file, the same replacements, and `project_write` + `local_path` (why: `queue/prompt-batch-2026-W44` line 4) (rev. 2026-10-26).
 3. **Verify by invariants.** Byte count in range, header count, a grep for each edit's new text and the old text's absence, a recorded hash where one exists, and each edited span read as rendered text, because an assert-once replacement cannot see a broken sentence around it (why: `notes/lesson-2026-09-21-an-assert-once-replacement-cannot-see-a-broken-sentence`) (rev. 2026-09-29). A full read-back is for the identity doc only.
 4. **Respect temperature.** Daily state goes only in hot docs. An edit that lengthens a cold doc stops: narrative goes to the ledger, state to `queue`, and a new finding replaces the stale text it corrects. Growth in a cold doc since the last audit is a finding.
 5. **The identity doc.** Written only on credential events. Credential lines are carried through byte-exact, never retyped; both sealed hashes recorded in the doc are re-derived from the written file before upload; if either fails, do not upload and report. Local copies holding secrets are scanned with `1f916-scan` and deleted in the same sitting (brief, rule 2).
@@ -67,6 +67,8 @@ No proposed wording. Security findings do not wait for the batch; they go to <OP
 
 **Deciding.** <OPERATOR-NAME> decides every item. Cadence and scope reviewed 2026-10-07 (`queue/task-doc-hygiene-and-prompt-feedback-loop`).
 
+**Docs reach the runs by the pin.** A run reads the docs at the commit the signed `pin/PIN` names, so a doc change is live for the runs only when the pin moves: the sitting's one PR carries it, the operator merges, and the pin move that follows is the operator's, signed. Until then the runs read the previous pin's docs, which is the property the pin exists for; a change that must reach a run before the next pin move is a pin move of its own. `doc-change` rows cite the commit (why: `queue/prompt-batch-2026-W44` line 4) (rev. 2026-10-26).
+
 **Applying.** One sitting, one revision per prompt, by replacement: live bytes → file → `update_trigger` → byte-diff against a fresh `list_triggers` → commit under `prompts/` in the toolkit → the trigger's `prompts` row in the ledger, its bytes and sha-256 taken from `1f916-checks prompt-integrity --emit-rows`, never typed (rev. 2026-09-23). Every ledger write by a sitting passes the version it last read as `if_version`, and a conflict is re-read and merged, never forced (rev. 2026-09-23). Close the batch row naming the commit and the lesson rows it consumed; set each consumed row `status: applied`; close rejected rows with a one-line verdict, `status: rejected`. The change log is git and the `doc-change` rows; a prompt carries no annotation of when a step was added.
 
 **Checking.** The next audit reads every row with `status: applied` and no `outcome`, checks its observable against that week's runs, and writes `outcome: held` or `outcome: missed`. A missed row is a candidate in the next batch, for reversal or another attempt.
@@ -80,6 +82,6 @@ The audit runs this over every live prompt (`list_triggers`) and every tier-A an
     [0-9]{2}Z\b|xxZ                                  (timestamps finer than a date)
     \b[A-Z]{3,}( [A-Z]{3,}){2,}\b                    (three or more capitalised words in a row)
 
-A hit is a sentence to move or delete, and joins the week's batch. Patterns are tuned from batch evidence, by the same batch process.
+Text inside backticks is skipped by every pattern: an identifier, a verdict value or a quoted literal is a name, not emphasis (why: queue/prompt-batch-2026-W44 line 13) (rev. 2026-10-26). A hit is a sentence to move or delete, and joins the week's batch. Patterns are tuned from batch evidence, by the same batch process.
 
-**Exemptions, and they are narrow.** This file's rule 2 and this section: they name the patterns. The live prompts: the capitalised-words pattern only — capitals are emphasis to a model, not shouting at a reader. `1f916-docket-build.md`, `1f916-probes.md`, `1f916-op-run-spec.md` and `1f916-rotation-runbook.md`: every pattern — dated records in which fine timestamps, capitals and quoted history are native, and counting them every week buries the hits that matter (why: queue/prompt-batch-2026-W40 gavin_decisions_2026_09_28_second) (rev. 2026-09-30).
+**Exemptions, and they are narrow.** This file's rule 2 and this section: they name the patterns. The live prompts: the capitalised-words pattern only — capitals are emphasis to a model, not shouting at a reader. `claude/1f916-docket-build.md`, `docs/probes.md`, `docs/op-run-spec.md` and `docs/rotation-runbook.md`: every pattern — dated records in which fine timestamps, capitals and quoted history are native, and counting them every week buries the hits that matter (why: queue/prompt-batch-2026-W40 gavin_decisions_2026_09_28_second) (rev. 2026-09-30).

@@ -24,7 +24,7 @@ asked twice. This is the OWED-FROM-THE OPERATOR tier design applied to acting in
 **The default is fail-closed:** a contemplated act that fits neither §1 nor §2 is treated as §2
 (escalate), and the gap is what gets raised.
 
-**COLD doc** (see the map in `claude/1f916-doc-editing.md`): it changes when <OPERATOR-NAME>'s boundary
+**COLD doc** (see the map in `docs/doc-editing.md`): it changes when <OPERATOR-NAME>'s boundary
 changes or a gap is folded in, never as routine. All three scheduled prompts point here.
 
 ## 1. Pre-authorized — act, record, never ask
@@ -68,7 +68,7 @@ that skips its gates is not authorized by this section.
 - **Drafting correspondence from this identity's address, never sending it** (rev. 2026-09-08;
   decided at `queue/resource-correspondence-permission`). Gates, and they are the authorization:
   `draft_email` only and `send_email` never; the sending identity set explicitly on every draft,
-  per `claude/1f916-intake-rules.md`; the draft id reported in the run report and carried in a
+  per `docs/intake-rules.md`; the draft id reported in the run report and carried in a
   ledger row with the draft's recipient and subject. A draft is a proposal until the operator
   sends it, so a run never treats one as an answer given, and never drafts a commitment in his
   name. Anything the draft would touch that §2 owns — money, his person, a third party's conduct
@@ -143,7 +143,7 @@ OWED-FROM-THE OPERATOR tiers: BLOCKING notifies once; DECISION waits for him and
   A capability that turned out to be available is a finding to record, never a thing to adopt
   silently — adoption is his call. **Adding a path to the gate's write allowlist is this class**
   (the list is the write oracle's blast radius); the list and the named exclusions are in
-  `claude/1f916-op-run-spec.md` §11, which carries the rule for reading it rather than a copy
+  `docs/op-run-spec.md` §11, which carries the rule for reading it rather than a copy
   (rev. 2026-09-08). `/api/attestations` was authorized 2026-09-07, deployed 2026-09-08 and first
   exercised the same day; the class it serves is §1's, and a scheduled run does not hold it.
 - **Classifier refusals.** Never worked around, rephrased, or split; reported to him and recorded.

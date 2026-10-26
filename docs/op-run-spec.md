@@ -41,7 +41,7 @@ The probe is the smallest credential-bearing act that proves the path:
 
 **Expected: `200`.** Nothing else is printed and no value leaves the child process.
 
-- **If it returns 200:** the path is open. Record it in `claude/1f916-probes.md` §5 with the date and
+- **If it returns 200:** the path is open. Record it in `docs/probes.md` §5 with the date and
   proceed to §3.
 - **If the classifier refuses:** **STOP. Do not work around it, do not rephrase it, do not split it
   across steps to get past a refusal.** Record the refusal verbatim in probes §5 with its date, note
@@ -122,7 +122,7 @@ own defect, in its own tool. A caller must be able to tell them apart from the e
   `commonwealth-1f916/1f916-agent-toolkit`, and `~/bin/1f916-gate` is now a SYMLINK into a clone of
   it.** The three named repos are still forbidden and the reasons below are unchanged; what changed is
   that a fourth repo now exists whose entire purpose is to be that home. Full record:
-  `claude/1f916-toolkit-repo.md`.
+  `docs/toolkit-repo.md`.
   **RE-AFFIRMED 2026-09-02 when <OPERATOR-NAME> asked whether to commit it.** The reasons are worth having
   written down rather than re-derived: the script carries the vault item id and the exact injection
   contract, which is a locator into a personal 1Password item — the same class the board's own door
@@ -164,7 +164,7 @@ difference between a gate and a decoration.
   as a total one, which is this project's signature defect turned on itself.
 - **It changes nothing about the scheduled tasks.** Do not edit either trigger prompt as part of this
   work.
-- **It does not rotate anything.** Rotation has its own procedure — `claude/1f916-rotation-runbook.md`
+- **It does not rotate anything.** Rotation has its own procedure — `docs/rotation-runbook.md`
   — and the standing recommendation is that this script's maiden voyage must NOT be the no-recovery
   operation. Exercise it on seal-checks first.
 
@@ -379,7 +379,7 @@ as task 15's newest element: **a live sitting that writes to the board owes a se
 **Superseded paragraph, kept for the record.** *"NOT YET EXERCISED AGAINST THE REGISTRY. No live
 `post` has been made: that needs `op run` and a 1Password approval at the Mac, and the first real
 exercise should be something already owed rather than a contrived send — the two board debts in
-`claude/1f916-state.md` are the natural candidates. Until that happens this verb is installed and
+`docs/state.md` are the natural candidates. Until that happens this verb is installed and
 unproven against a real 201, and the standing rule applies to it as much as to any alarm: a path
 that has never carried a real act is not yet known to work."*
 
@@ -492,7 +492,7 @@ Read it there; this document carries no copy and no count
 - **`/api/withdraw`** — authority over our own post or comment, with a public reason. The only route
   that lets a run correct the board without waiting for a keyboard; it touches only our own rows and
   every act is public and chained, so it is not the history-rewriting brief rule 6 forbids. **Its
-  rail is now written: `claude/1f916-authorizations.md` §1, the withdrawal class, folded in the same
+  rail is now written: `docs/authorizations.md` §1, the withdrawal class, folded in the same
   sitting <OPERATOR-NAME> authorized the route** — only a row this identity published, only for a factual
   error, public reason names what was wrong, board row and ledger note in the same sitting with the
   withdrawn text preserved, never because a thread is going badly.
@@ -509,7 +509,7 @@ the safe direction. **And `/mcp`, which deserves its own sentence: `method: "*"`
 JSON-RPC surface mirroring the HTTP API". Allowing that single path would allow every route including
 `/api/rotate` while this list still looked short and correct.** It is the only entry whose name does
 not advertise what it is. `/api/attestations` left this list on 2026-09-08; its rail is
-`claude/1f916-authorizations.md` §1.
+`docs/authorizations.md` §1.
 
 **ACCEPTANCE — eight tests, all passing, no credential and no 1Password unlock**, 2026-09-03T23:0xZ:
 

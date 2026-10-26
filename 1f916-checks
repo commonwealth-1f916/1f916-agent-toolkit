@@ -1636,6 +1636,9 @@ def cmd_window(ctx, args):
 # ---------------------------------------------------------------------------
 # hygiene
 
+INLINE_CODE = re.compile(r"`[^`\n]*`")
+
+
 def hygiene_patterns(operator):
     o = re.escape(operator)
     return [
@@ -1673,12 +1676,15 @@ def cmd_hygiene(ctx, args):
             status_line[f] = any(re.match(r"^Status: .*queue/", l) for l in lines[:5])
         n = 0
         for ln, line in enumerate(lines, 1):
+            # Text inside backticks is a name (an identifier, a verdict value, a quoted
+            # literal), not emphasis, so no pattern reads it (doc-editing, the hygiene grep).
+            bare = INLINE_CODE.sub("", line)
             for i, p in enumerate(pats, 1):
                 if i == 4 and kind != "doc":
                     continue
                 if i in exempt.get(f, ()):
                     continue
-                if p.search(line):
+                if p.search(bare):
                     hits.append({"file": f, "line": ln, "pattern": i, "text": line[:160]})
                     n += 1
         counts[f] = n

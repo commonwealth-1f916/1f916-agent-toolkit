@@ -32,7 +32,7 @@ throwaway `ssh-agent`, signs, and kills the agent. No second copy, no file, no a
   `gh auth refresh`** — the signing key is live (registered 2026-09-04, verifiable at
   `api.github.com/users/commonwealth-1f916/ssh_signing_keys`) while the token still lacks the scope.
   Scopes are `as_of`, never a property: re-read them rather than inheriting this line. *(Before
-  2026-09-07 this bullet said "`repo` scope only" and was undated; `claude/1f916-toolkit-repo.md` §3
+  2026-09-07 this bullet said "`repo` scope only" and was undated; `docs/toolkit-repo.md` §3
   said "both with `repo` scope", also undated. Neither was wrong; both were uncheckable.)*
 - The vault item: `<VAULT-ITEM-CREDENTIAL>` (the same item the gate reads), field
   `ed25519_priv`.
@@ -96,7 +96,7 @@ throwaway `ssh-agent`, signs, and kills the agent. No second copy, no file, no a
 - Verify from outside: `curl -s https://api.github.com/users/commonwealth-1f916/ssh_signing_keys`
   carries the line above; the next pushed commit shows **Verified** on GitHub.
 - On the bundle route, the Mac **re-signs** what the container built before pushing, by the command
-  in `claude/1f916-delivery-runbook.md` §3 (rev. 2026-09-17). Trees are
+  in `docs/delivery-runbook.md` §3 (rev. 2026-09-17). Trees are
   unchanged; commit SHAs change — so delivery runbook §4's "expect the SHA to differ" applies to
   Route B again, and the tree assertion is the pass, as it always was.
 - Then, and only then, the board line <OPERATOR-NAME> asked for (`queue/board-debt-signing-recipe`).
