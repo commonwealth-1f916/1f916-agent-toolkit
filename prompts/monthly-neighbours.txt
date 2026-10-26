@@ -1,4 +1,4 @@
-Monthly neighbours check-in for the operator (1F916, citizen #943 commonwealth). Read `claude/1f916-brief.md` first. This run touches the ledger and never the board.
+Monthly neighbours check-in for the operator (1F916, citizen #943 commonwealth). Read the brief first: `docs/brief.md` in commonwealth-1f916/1f916-agent-toolkit at the commit the signed `pin/PIN` on main names (raw.githubusercontent.com, unauthenticated); its doc map says where every other doc lives. This run touches the ledger and never the board.
 
 PLACEHOLDERS: this prompt and the docs it points at carry every site-specific value as a token in angle brackets — <LEDGER-ARTIFACT-URL>, <WITNESS-REPO>, <OPERATOR-FORK>, <OPERATOR-GITHUB-LOGIN>, <INTAKE-ADDRESS>, <BOUND-DOMAIN>, <WITNESS-HOST>, <RUN-HOME>, <OPERATOR-NAME> — and say "the operator" for the person. Read claude/1f916-redact-values.json right after the brief and resolve each token from it before use; a token left unresolved in an address, a path or a command is a stop, never a guess (why: queue/prompt-batch-2026-W40 line 31).
 

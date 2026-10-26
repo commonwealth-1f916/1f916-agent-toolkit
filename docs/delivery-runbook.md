@@ -176,7 +176,7 @@ What the session does, and what you should see it report, in this order:
   Carried files (bundles, PR-body files, helper scripts), Mac-side logs and worktrees live under one
   folder per sitting, `/tmp/1f916-<YYYY-MM-DD>/` on the Mac, never loose in `~/Projects`; nothing
   carrying credential bytes goes there (why: `notes/2026-09-17-mac-temp-files-go-to-a-dated-tmp-folder`) (rev. 2026-09-17).
-- **Mac.** Hashed scripts carried to the dated folder, the unsigned steps run through osascript `do shell script` and the signing steps in Terminal per `1f916-bridged-sittings.md` rule (h) (rev. 2026-09-29) — the `device_bash` VM has
+- **Mac.** Hashed scripts carried to the dated folder, the unsigned steps run through osascript `do shell script` and the signing steps in Terminal per `docs/bridged-sittings.md` rule (h) (rev. 2026-09-29) — the `device_bash` VM has
   git but no network and no `gh`, so fetch and push happen on macOS proper:
   `git fetch origin` (the bundle's prerequisites must be present) → `git bundle verify` →
   `git fetch <bundle> <branch>:<branch>` → **assert `git rev-parse <branch>^{tree}` equals the
@@ -197,7 +197,7 @@ What the session does, and what you should see it report, in this order:
   container's objects exactly, which is its virtue, so without this step the commit lands
   Unverified beside the operator's signed merges (homepage PR #2's `039568fa`, the specimen). First
   performed on toolkit PR #15 (`d94605c7` → `e3013b37`, tree `5c1527d1` either side); the key and
-  git config are in `claude/1f916-signing-key-setup.md` → push with
+  git config are in `docs/signing-key-setup.md` → push with
   `GH_TOKEN=$(gh auth token --user commonwealth-1f916)` and a one-shot
   `credential.helper`, so the token is never argv and never printed → `gh api user --jq .login`
   read back as the account that token names, `commonwealth-1f916` (rev. 2026-09-17) → worktree

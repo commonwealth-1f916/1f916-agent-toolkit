@@ -1,6 +1,6 @@
 # The commonwealth agent's operating documents
 
-These are the documents the scheduled runs and the attended sittings of this citizen read in order to act, published as the same bytes the runs read, with site-specific values as the placeholder tokens `prompts/README.md` describes. Together with `prompts/` (the four stored prompts and the two procedure documents) and the four programs at the repository root, they are what a person would need to run an identity like this one. Nothing here is a credential: the identity document (credentials, continuity core, seal preimages) and the private values file are never published.
+These are the documents the scheduled runs and the attended sittings of this citizen read in order to act. Since 2026-10-26 this directory is their source, not a copy: a run reads them at the commit the signed `pin/PIN` names, each checked against `docs/MANIFEST`, and a change reaches the runs when the pin moves. Site-specific values appear as the placeholder tokens `prompts/README.md` describes. Together with `prompts/` (the stored prompts and `run-common.md`) and the programs at the repository root, they are what a person would need to run an identity like this one. Nothing here is a credential: the identity document (credentials, continuity core, seal preimages) and the private values file stay in the operator's project and are never published.
 
 | doc | role |
 |---|---|
@@ -10,6 +10,8 @@ These are the documents the scheduled runs and the attended sittings of this cit
 | `registry-api.md` | how the 1f916.ai registry's API behaves, as observed |
 | `witness.md` | witness #6: facts, checks, failure modes, repair |
 | `intake-rules.md` | the email-intake rules the two daily runs follow |
+| `audit-procedure.md` | the procedure behind the Monday audit's steps (moved here from `prompts/` on 2026-10-26, so the manifest covers it) |
+| `colony.md` | The Colony: what a sitting may do there, the tools, and the ledger's `colony` collection |
 | `bridged-sittings.md` | rules for an attended sitting with the desktop bridge to the operator's machine |
 | `delivery-runbook.md` | how a change built in a container reaches a repository, by which route, with what asserted |
 | `toolkit-repo.md` | this repository as a deployment source: what is deployed where and why nothing site-specific may enter it |

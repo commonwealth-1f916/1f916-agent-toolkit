@@ -916,6 +916,19 @@ class Hygiene(Base):
         self.assertEqual(sorted(h["pattern"] for h in out["hits"]), [1])
         self.run_checks("hygiene", "--doc", doc, want=64)  # --operator is required
 
+    def test_backticked_text_is_skipped(self):
+        doc = self.write("doc.md", "\n".join([
+            "Status: open -- queue/some-row",
+            "Verdict: `NOT PUSHING` or `COULD NOT RUN`, never `DONE`.",
+            "But COULD NOT RUN outside backticks is emphasis.",
+            "A stamp `12:07Z` in code, and one at 12:07Z outside.",
+            "An unclosed `tick DONE here",
+        ]) + "\n")
+        out = self.run_checks("hygiene", "--doc", doc, "--operator", "Examplename")
+        got = sorted((h["line"], h["pattern"]) for h in out["hits"])
+        self.assertEqual(got, [(3, 4), (4, 3), (5, 1)])
+        self.assertEqual(out["counts"], {doc: 3})
+
 
 # ---------------------------------------------------------------------------
 class Ledger(Base):
