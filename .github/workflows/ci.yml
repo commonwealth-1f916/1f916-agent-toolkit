@@ -40,7 +40,7 @@ jobs:
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
-        run: shellcheck -s sh 1f916-gate && shellcheck -s sh 1f916-run && shellcheck -s sh 1f916-proxy && shellcheck -s sh 1f916-scan && shellcheck witness-alert.sh && shellcheck 1f916-ssh-sign && shellcheck -s sh 1f916-pin-move
+        run: shellcheck -s sh 1f916-gate && shellcheck -s sh 1f916-run && shellcheck -s sh 1f916-proxy && shellcheck -s sh 1f916-scan && shellcheck witness-alert.sh && shellcheck 1f916-ssh-sign && shellcheck -s sh 1f916-pin-move && shellcheck -s sh sitting/colony-write.sh && shellcheck -s sh sitting/board-write.sh
 
   hygiene:
     # Properties of the TREE rather than of the programs: the shipped scripts
