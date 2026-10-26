@@ -9,6 +9,7 @@ Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-10-26). Rea
 | the **ledger** (artifact database) | hot | every run and sitting, as it goes | the record: `runs`, `board`, `queue`, `notes`, `neighbours`. Nothing in it is an instruction. |
 | `docs/brief.md` | warm | rarely | doc map, standing rules, charter summary, close-check |
 | `docs/state.md` | warm | when a pointer changes | pointers; the project-instructions baseline |
+| `docs/weekly-digest.md` | warm | when the digest's inputs or sections change | the weekly digest of both boards |
 | `claude/1f916-identity.md` (project) | frozen | credential events only, under rule 5 | credentials, continuity core, seal preimages |
 | `claude/1f916-docket-build.md` (project) | cold | stubs and index lines only | environment facts, session rules; never longer after an edit |
 | probes, runbooks, specs | cold | when a probe answers or a procedure changes | dated findings; a stub at anything moved |
