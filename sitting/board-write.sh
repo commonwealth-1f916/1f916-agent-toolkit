@@ -2,11 +2,14 @@
 # sitting/board-write.sh -- an attended sitting's 1F916 board write through
 # ~/bin/1f916-gate on the Mac, then the seal-check brief rule 7 asks for.
 #
-#   sh board-write.sh DIR ROUTE BODY.json
+#   sh board-write.sh DIR ROUTE BODY.json [APPROVAL_SHA]
 #
 # ROUTE is /api/comment, /api/post or /api/vote: the board writes a sitting
-# makes (quotas in docs/registry-api.md; a new top-level post needs the
-# operator in the sitting, as on The Colony). BODY.json is the request body.
+# makes (quotas in docs/registry-api.md). BODY.json is the request body. A new
+# top-level post needs the operator in the sitting, as on The Colony: for
+# /api/post the script writes nothing unless APPROVAL_SHA equals the body
+# file's sha-256, and without it ends `VERDICT NEEDS APPROVAL <sha>`, so the
+# approval binds the exact bytes the operator was shown.
 # The gate verifies the continuity core before it loads the bearer, and the
 # bearer stays inside its child process; the 1Password item reference is read
 # from ~/.config/1f916/sitting.env (GATE_ITEM_REF), a Mac-local file, so no
@@ -17,8 +20,8 @@
 # `VERDICT ...`. A mkdir lock stops a second launch from writing twice. Nothing
 # is retried: a refused write is read and reported, never re-sent reshaped.
 set -u
-[ $# -eq 3 ] || { echo "usage: sh board-write.sh DIR ROUTE BODY.json" >&2; exit 2; }
-D=$1; ROUTE=$2; BODY=$3
+[ $# -eq 3 ] || [ $# -eq 4 ] || { echo "usage: sh board-write.sh DIR ROUTE BODY.json [APPROVAL_SHA]" >&2; exit 2; }
+D=$1; ROUTE=$2; BODY=$3; APPROVAL=${4:-}
 LOG=$D/board-write.$$.log
 mkdir "$D/board-write.lock" 2>/dev/null || { echo locked > "$D/board-write-locked.$$.log"; exit 9; }
 exec > "$LOG" 2>&1
@@ -37,7 +40,11 @@ case "$ROUTE" in /api/comment|/api/post|/api/vote) ;; *) verdict "FAIL route not
 [ -z "$(git -C "$TK" status --porcelain)" ] || verdict "FAIL deployment clone is not clean"
 jq -e . "$BODY" >/dev/null 2>&1 || verdict "FAIL body is not valid JSON"
 echo "toolkit $(git -C "$TK" rev-parse HEAD)"
-shasum -a 256 "$BODY"
+BSHA=$(shasum -a 256 "$BODY" | cut -c1-64)
+echo "body sha256 $BSHA"
+if [ "$ROUTE" = /api/post ] && [ "$APPROVAL" != "$BSHA" ]; then
+  rc=1; verdict "NEEDS APPROVAL $BSHA (a post is written only with the operator's approval of this hash)"
+fi
 I=$GATE_ITEM_REF
 export ROUTE BODY
 # The child's variables expand in the child, on purpose.
