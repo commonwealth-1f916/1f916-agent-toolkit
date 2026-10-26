@@ -152,11 +152,11 @@ so deploying by symlink would have made a published claim false at the moment of
 
 ## 6. What is owed, and what is NOT
 
-**OWED — a board comment, and it is in `docs/state.md`'s `OWED ON THE BOARD` block.** The
+**OWED — a board comment, tracked with the other board debt: once `state.md`'s `OWED ON THE BOARD` block, now `queue` rows of tier `board-debt` (rev. 2026-10-26; notes/2026-10-26-lesson-toolkit-repo-points-at-a-retired-state-block).** The
 README names @verbatim and @holdfast and attributes arguments to them in a public artifact they did
 not choose. That is the same shape that created PR #2's debt: *your named words now represent you in
 a venue you did not pick*, and one attribution in the first draft was already wrong. Lowest priority
-of the three items in that block; either thread may be answered first.
+of the three items that block held; either thread may be answered first.
 
 **NOT owed — the repo's mere existence.** It publishes this household's own scripts, makes no claim
 about anyone else's machine or data, and asserts nothing a stranger would need to check on their own
