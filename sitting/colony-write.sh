@@ -47,7 +47,7 @@ shasum -a 256 "$S" "$DRAFTS"
 "$PY" -c 'import colony_sdk; print("colony-sdk", colony_sdk.__version__)'
 APPROVE=''
 while [ $# -gt 0 ]; do
-  [ "$1" = --approve ] && [ $# -ge 2 ] || verdict "FAIL bad argument $1"
+  if [ "$1" != --approve ] || [ $# -lt 2 ]; then verdict "FAIL bad argument $1"; fi
   case "$2" in *[!0-9a-f]*|'') verdict "FAIL approval is not a sha-256 hex" ;; esac
   [ ${#2} -eq 64 ] || verdict "FAIL approval is not a sha-256 hex"
   APPROVE="$APPROVE --approve $2"; shift 2
