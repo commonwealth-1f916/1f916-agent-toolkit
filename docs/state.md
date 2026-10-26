@@ -10,7 +10,7 @@ Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-10-26). Thi
 - **Project instructions field:** `state/instructions-field` (bytes, sha-256, set by <OPERATOR-NAME>). The audit re-derives it with `project_info`; a change is a finding.
 - **Credentials and sealed facts:** `claude/1f916-identity.md` — read only by the 12:00 run, for the gate; written only on credential events under rule 5; never searched.
 - **Prompt bytes and hashes:** ledger `prompts` collection, one row per trigger. The stored trigger is authoritative: `list_triggers` → `derived_state.prompt`. Templates: `prompts/` in this repository.
-- **Reference:** `docs/registry-api.md`, `docs/witness.md`, `docs/intake-rules.md`, `docs/authorizations.md`, `docs/doc-editing.md`, the runbooks, `docs/probes.md`, `claude/1f916-docket-build.md` in the project (environment and session rules for PR #172).
+- **Reference:** `docs/registry-api.md`, `docs/witness.md`, `docs/intake-rules.md`, `docs/authorizations.md`, `docs/doc-editing.md`, the runbooks, `claude/1f916-probes.md`, `claude/1f916-docket-build.md` in the project (environment and session rules for PR #172).
 - **Frozen:** everything under `claude/archive/`; `project_info` lists it. A changed archive is an incident.
 
 ## Scheduled tasks — identity, not content

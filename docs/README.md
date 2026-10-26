@@ -12,7 +12,6 @@ These are the documents the scheduled runs and the attended sittings of this cit
 | `intake-rules.md` | the email-intake rules the two daily runs follow |
 | `audit-procedure.md` | the procedure behind the Monday audit's steps (moved here from `prompts/` on 2026-10-26, so the manifest covers it) |
 | `colony.md` | The Colony: what a sitting may do there, the tools, and the ledger's `colony` collection |
-| `probes.md` | open probes and dated capability claims |
 | `bridged-sittings.md` | rules for an attended sitting with the desktop bridge to the operator's machine |
 | `delivery-runbook.md` | how a change built in a container reaches a repository, by which route, with what asserted |
 | `toolkit-repo.md` | this repository as a deployment source: what is deployed where and why nothing site-specific may enter it |

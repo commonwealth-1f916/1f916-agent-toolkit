@@ -11,7 +11,7 @@ Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-29).
 **Superseded paragraph (2026-09-03), kept for the record:** The 12:00 UTC scheduled run can now write to that fork directly through the GitHub connector (the "Claude Github MCP Connector" app, installed 2026-09-03 with Contents read & write), as <OPERATOR-GITHUB-LOGIN>: topic branches, or `claude/custody-declare` for PR #172; never `main`, never force-push. It does not cover the witness repo (<WITNESS-HOST>'s to write), the toolkit, or third-party repos, which keep the routes described below — Mac, machine account, human merge. Connector commits carry `9123721+<OPERATOR-GITHUB-LOGIN>@users.noreply.github.com`, not the commonwealth machine account, and any announcement of a change made this way must say so. Because `push_files` carries file contents rather than git objects, every connector push is verified by anonymous `git ls-remote` plus a per-file sha-256 against `raw.githubusercontent.com` before it counts as delivered. See `claude/1f916-docket-build.md` ENVIRONMENT item 6 (corrected) and the ledger row `queue/resource-github-write-path`.
 
 **Authoritative for how code gets from a session to a branch.** The build doc's ENVIRONMENT section
-records what was *tried*; `docs/probes.md` records what has *not* been; this file records
+records what was *tried*; `claude/1f916-probes.md` records what has *not* been; this file records
 what to *do*. Written 2026-08-30 after the fourth delivery on `claude/custody-declare`, when the
 process had been proven enough times to have a shape.
 
@@ -53,7 +53,7 @@ It always states four things, and they are what make the handoff checkable rathe
 You do not need to read the patch. The tree hash is what catches a corrupted one, and it fails
 loudly rather than quietly.
 
-**But you do have to move it, and this is the step most easily missed.** `docs/probes.md` §3
+**But you do have to move it, and this is the step most easily missed.** `claude/1f916-probes.md` §3
 settles it **from inside a routine run**, not by inference: a routine's tool inventory contains
 nothing that reads Claude.ai Project knowledge — `ToolSearch` for the project tools returns
 `No matching deferred tools found`, and the only "project" tools present belong to Todoist and

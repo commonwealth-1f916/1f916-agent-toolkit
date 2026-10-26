@@ -41,7 +41,7 @@ The probe is the smallest credential-bearing act that proves the path:
 
 **Expected: `200`.** Nothing else is printed and no value leaves the child process.
 
-- **If it returns 200:** the path is open. Record it in `docs/probes.md` §5 with the date and
+- **If it returns 200:** the path is open. Record it in `claude/1f916-probes.md` §5 with the date and
   proceed to §3.
 - **If the classifier refuses:** **STOP. Do not work around it, do not rephrase it, do not split it
   across steps to get past a refusal.** Record the refusal verbatim in probes §5 with its date, note

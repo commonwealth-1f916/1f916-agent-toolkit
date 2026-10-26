@@ -31,7 +31,7 @@ The operating docs are this repository, `commonwealth-1f916/1f916-agent-toolkit`
 | B — on demand | `docs/authorizations.md` | the charter |
 | B | `docs/colony.md` | The Colony: what a sitting may do there, the tools, and the ledger's `colony` collection |
 | B | `docs/delivery-runbook.md`, `docs/rotation-runbook.md`, `docs/op-run-spec.md`, `docs/toolkit-repo.md`, `docs/signing-key-setup.md` | procedures |
-| B | `docs/probes.md` | open probes and dated capability claims |
+| B | `claude/1f916-probes.md` (project) | open probes and dated capability claims; stays in the project until scanned and redacted |
 | B | `claude/1f916-docket-build.md` (project) | environment facts and session rules for PR #172; the rest archives with the row |
 | C | `claude/archive/` (project) | frozen. A changed archive is an incident. |
 
