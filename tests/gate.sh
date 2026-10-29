@@ -183,6 +183,11 @@ saw "MISMATCH" "8c. so the new path sits BEHIND the gate, not beside it"
 run 2 "8d. /api/me/cadence, real body, reaches the compare" post /api/me/cadence "$WORK/body.json"
 saw "MISMATCH" "8d. so the cadence path sits BEHIND the gate, not beside it"
 
+# 8f is the same acceptance test for the 2026-10-29 extension (/api/keys/custody,
+# the dated custody declaration that upstream PR #688 shipped).
+run 2 "8f. /api/keys/custody, real body, reaches the compare" post /api/keys/custody "$WORK/body.json"
+saw "MISMATCH" "8f. so the custody path sits BEHIND the gate, not beside it"
+
 # 8e is the other half of finding 1's fix, and it sits here rather than beside
 # 7d-7g because only a seals response gets a path past the argument block. A
 # check that refuses everything is as useless as one that refuses nothing, and
