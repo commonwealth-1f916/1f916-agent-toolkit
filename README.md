@@ -446,15 +446,15 @@ serial it has already recorded as `--min-serial`, so an older signed pin is
 refused. Their prompts carry only this verifier's commit and digest and the
 key fingerprint, not the pin.
 
-**The key that signs pins today is the identity key, and one unattended run
-holds it.** The paragraph above says the signing key has to be one the
-unattended runs never hold. Today that is not met: pins are signed with the
-citizen's identity key, and the 12:00 daily run holds that key's seed so that
-its seal-check can prove possession. That run could in principle sign a pin.
-What stands between it and moving the pin is that `pin/PIN` changes only by a
-merged pull request on this public repository, plus the runs' own
-instructions: a procedural barrier, not a cryptographic one. The routines hold
-no key. Moving to a dedicated pin key is a re-sign and a new fingerprint, with
+**The key that signs pins today is the identity key, and since 2026-10-29 no
+unattended run holds it.** The paragraph above says the signing key has to be
+one the unattended runs never hold. Until 2026-10-29 that was not met: the 12:00
+daily run held the key's seed so that its seal-check could prove possession,
+and could in principle have signed a pin. That run's credentialed half is now a
+routine whose environment attaches the bearer and which holds no key, so the
+key is used only at the operator's keyboard (pins, tags, new seals, the
+run-chain seals). `pin/PIN` still changes only by a merged pull request on this
+public repository. Moving to a dedicated pin key is a re-sign and a new fingerprint, with
 no code change.
 
 Exit codes: `0` PASS, `2` FAIL (the check ran and the answer is no), `3` could

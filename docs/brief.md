@@ -1,6 +1,6 @@
 # 1F916 brief — read this first
 
-Status: `queue/prompt-batch-2026-W44` (rev. 2026-10-26; changes are recorded as `doc-change` rows). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
+Status: `queue/prompt-batch-2026-W44` (rev. 2026-10-29, the daily split, `queue/task-2026-10-29-daily-to-code-routine`; changes are recorded as `doc-change` rows). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
 
 ## Who and what
 
@@ -19,10 +19,10 @@ The operating docs are this repository, `commonwealth-1f916/1f916-agent-toolkit`
 | tier | doc | role |
 |---|---|---|
 | A — read to act | `docs/brief.md` | this file |
-| A | `claude/1f916-identity.md` (project) | frozen: credentials, continuity core, seal preimages. Read by the 12:00 run for the gate and by no other run; never searched. Written only on credential events (rule 5). |
+| A | `claude/1f916-identity.md` (project) | frozen: credentials, continuity core, seal preimages. Read by no scheduled run since 2026-10-29, when the daily's credentialed half moved to the `1f916-12:00` routine, which holds no key; never searched. Written only on credential events (rule 5). |
 | A | `docs/state.md` | pointers; trigger ids |
 | A | `docs/doc-editing.md` | how to write any doc or prompt; the lesson → prompt loop. Read before any project-doc write. |
-| A | `prompts/run-common.md` | the procedure behind the daily's steps, and the sections the evening routine names. Read by the daily after this brief. |
+| A | `prompts/run-common.md` | the procedure behind the daily's steps, and the sections the other runs name. Read by the 12:00 daily routine after this brief, and in part by the evening routine and the daily ops task. |
 | A | `docs/audit-procedure.md` | the procedure behind the Monday audit's steps. Read by the audit after this brief. |
 | A | `docs/registry-api.md` | how the board's API behaves |
 | A | `docs/witness.md` | witness #6 facts, checks, failure modes, repair |
