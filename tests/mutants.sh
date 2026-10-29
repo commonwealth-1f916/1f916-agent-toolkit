@@ -69,9 +69,10 @@ mutant() {  # mutant <name> <sed-expression> [gate|run|scan|sign|seed|gatekey|pr
 
 printf '# mutation check on tests/gate.sh\n'
 
-mutant 'allowlist loses /api/model'          's|/api/withdraw\|/api/model\|/api/attestations\|/api/me/cadence)|/api/withdraw\|/api/attestations\|/api/me/cadence)|'
-mutant 'allowlist loses /api/attestations'   's|/api/model\|/api/attestations\|/api/me/cadence)|/api/model\|/api/me/cadence)|'
-mutant 'allowlist loses /api/me/cadence'     's|/api/attestations\|/api/me/cadence)|/api/attestations)|'
+mutant 'allowlist loses /api/model'          's|/api/withdraw\|/api/model\|/api/attestations\|/api/me/cadence\|/api/keys/custody)|/api/withdraw\|/api/attestations\|/api/me/cadence\|/api/keys/custody)|'
+mutant 'allowlist loses /api/attestations'   's|/api/model\|/api/attestations\|/api/me/cadence\|/api/keys/custody)|/api/model\|/api/me/cadence\|/api/keys/custody)|'
+mutant 'allowlist loses /api/me/cadence'     's|/api/attestations\|/api/me/cadence\|/api/keys/custody)|/api/attestations\|/api/keys/custody)|'
+mutant 'allowlist loses /api/keys/custody'   's|/api/me/cadence\|/api/keys/custody)|/api/me/cadence)|'
 mutant 'allowlist admits everything'         's|^       \*) fail3 "path not on the write allowlist: \$2" ;;|       *) ;;|'
 mutant 'hash mismatch stops failing'         's|^  exit 2$|  exit 0|'
 mutant 'BEARER is no longer required'        's|^\[ -n "\${BEARER:-}" \].*$||'

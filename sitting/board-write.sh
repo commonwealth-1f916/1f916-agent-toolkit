@@ -4,12 +4,14 @@
 #
 #   sh board-write.sh DIR ROUTE BODY.json [APPROVAL_SHA]
 #
-# ROUTE is /api/comment, /api/post or /api/vote: the board writes a sitting
-# makes (quotas in docs/registry-api.md). BODY.json is the request body. A new
-# top-level post needs the operator in the sitting, as on The Colony: for
-# /api/post the script writes nothing unless APPROVAL_SHA equals the body
-# file's sha-256, and without it ends `VERDICT NEEDS APPROVAL <sha>`, so the
-# approval binds the exact bytes the operator was shown.
+# ROUTE is /api/comment, /api/post, /api/vote or /api/keys/custody: the board
+# writes a sitting makes (quotas in docs/registry-api.md). BODY.json is the
+# request body. A new top-level post, and a custody declaration (a dated
+# statement about who holds the key, which also decides whether the key may
+# authorize a payout), need the operator in the sitting: for those two routes
+# the script writes nothing unless APPROVAL_SHA equals the body file's sha-256,
+# and without it ends `VERDICT NEEDS APPROVAL <sha>`, so the approval binds the
+# exact bytes the operator was shown.
 # The gate verifies the continuity core before it loads the bearer, and the
 # bearer stays inside its child process; the 1Password item reference is read
 # from ~/.config/1f916/sitting.env (GATE_ITEM_REF), a Mac-local file, so no
@@ -30,7 +32,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 TK=$HOME/Projects/1f916-agent-toolkit
 CONF=$HOME/.config/1f916/sitting.env
 rc=2
-case "$ROUTE" in /api/comment|/api/post|/api/vote) ;; *) verdict "FAIL route not a sitting write: $ROUTE" ;; esac
+case "$ROUTE" in /api/comment|/api/post|/api/vote|/api/keys/custody) ;; *) verdict "FAIL route not a sitting write: $ROUTE" ;; esac
 [ -f "$CONF" ] || verdict "FAIL no $CONF"
 # shellcheck disable=SC1090
 . "$CONF"
@@ -42,9 +44,12 @@ jq -e . "$BODY" >/dev/null 2>&1 || verdict "FAIL body is not valid JSON"
 echo "toolkit $(git -C "$TK" rev-parse HEAD)"
 BSHA=$(shasum -a 256 "$BODY" | cut -c1-64)
 echo "body sha256 $BSHA"
-if [ "$ROUTE" = /api/post ] && [ "$APPROVAL" != "$BSHA" ]; then
-  rc=1; verdict "NEEDS APPROVAL $BSHA (a post is written only with the operator's approval of this hash)"
-fi
+case "$ROUTE" in
+  /api/post|/api/keys/custody)
+    if [ "$APPROVAL" != "$BSHA" ]; then
+      rc=1; verdict "NEEDS APPROVAL $BSHA (a $ROUTE write is made only with the operator's approval of this hash)"
+    fi ;;
+esac
 I=$GATE_ITEM_REF
 export ROUTE BODY
 # The child's variables expand in the child, on purpose.

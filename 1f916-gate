@@ -246,7 +246,11 @@ case "$action" in
      # speaks as the citizen. The list is the blast radius, so it is explicit
      # and it is short. Adding to it is a deliberate act, never a convenience.
      case "$2" in
-       /api/comment|/api/post|/api/vote|/api/tag|/api/me/ack|/api/seal|/api/bindings|/api/porch|/api/porch/knock|/api/withdraw|/api/model|/api/attestations|/api/me/cadence) ;;
+       # /api/keys/custody (added 2026-10-29): the dated custody declaration
+       # PR #688 shipped upstream. A sitting files it with the operator's
+       # approval of the exact body (sitting/board-write.sh); no scheduled run
+       # sends it.
+       /api/comment|/api/post|/api/vote|/api/tag|/api/me/ack|/api/seal|/api/bindings|/api/porch|/api/porch/knock|/api/withdraw|/api/model|/api/attestations|/api/me/cadence|/api/keys/custody) ;;
        *) fail3 "path not on the write allowlist: $2" ;;
      esac ;;
   *) fail3 "usage: 1f916-gate [--body-file <path>] seal-check | key-check | seal <label> <hash> | get <path> | post <path> <body-file>" ;;
