@@ -33,11 +33,23 @@ class FakeClient:
         self.posts = json.loads(json.dumps(FakeClient.posts))
         FakeClient.instances.append(self)
 
+    # Listing behaviour for the precheck; a test may replace `pages` with a
+    # function (kind, limit, offset) -> envelope to serve something odd.
+    pages = None
+
     def _raw_request(self, method, path, body=None):
         assert method == "GET"
-        if path.startswith("/posts?author_id="):
-            return {"items": [{"id": i} for i in sorted(self.public) if i.startswith("p")], "has_more": False}
-        return {"items": [{"id": i} for i in sorted(self.public) if not i.startswith("p")], "has_more": False}
+        self.listing_paths = getattr(self, "listing_paths", []) + [path]
+        q = dict(kv.split("=", 1) for kv in path.split("?", 1)[1].split("&"))
+        assert "page" not in q, "listings page by limit/offset, never page="
+        limit, offset = int(q["limit"]), int(q.get("offset", "0"))
+        kind = "posts" if path.startswith("/posts?author_id=") else "comments"
+        if FakeClient.pages:
+            return FakeClient.pages(kind, limit, offset)
+        mine = [i for i in sorted(self.public) if i.startswith("p") == (kind == "posts")]
+        rows = mine[offset:offset + limit]
+        return {"items": [{"id": i} for i in rows], "total": len(mine),
+                "has_more": offset + len(rows) < len(mine)}
 
     def get_all_comments(self, pid):
         return self.threads[pid]
@@ -81,6 +93,8 @@ class ColonyReply(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.mod = load_script()
         FakeClient.instances = []
+        FakeClient.pages = None
+        self.mod.time.sleep = lambda s: None
         FakeClient.public = {"c-ours-1", "p-ours"}
         # Thread A: we commented (c-ours-1); rosetta replied to us (c-to-us);
         # someone posted an unrelated top-level comment (c-unaddressed) and one
@@ -267,6 +281,76 @@ class ColonyReply(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertEqual(lines[-1]["summary"]["status"], "could_not_run")
         self.assertIsNone(client)
+
+    # The precheck reads the account's listings to the end and fails closed
+    # (queue/task-2026-10-24-colony-public-ids-fails-open).
+
+    def precheck_stops(self, why):
+        rc, lines, client = self.run_script([self.reply("c-to-us")])
+        self.assertEqual(rc, 3)
+        self.assertEqual(lines[-1]["summary"]["status"], "could_not_run")
+        self.assertIn(why, lines[-1]["summary"]["reason"])
+        self.assertEqual(client.writes, [])
+
+    def test_past_one_hundred_comments_the_walk_pages_by_offset_and_sees_them_all(self):
+        many = ["c-%03d" % i for i in range(150)]
+        FakeClient.public = {"c-ours-1", "p-ours"} | set(many)
+        rc, lines, client = self.run_script([self.reply("c-to-us")], ids=["c-ours-1", "p-ours"] + many)
+        self.assertEqual(rc, 0)
+        comment_paths = [p for p in client.listing_paths if "/comments" in p]
+        self.assertEqual(comment_paths, ["/users/%s/comments?limit=100&offset=0" % ME,
+                                         "/users/%s/comments?limit=100&offset=100" % ME])
+
+    def test_an_unrecorded_comment_on_the_second_page_stops_everything(self):
+        many = ["c-%03d" % i for i in range(150)]
+        FakeClient.public = {"c-ours-1", "p-ours"} | set(many)
+        rc, lines, client = self.run_script([self.reply("c-to-us")], ids=["c-ours-1", "p-ours"] + many[:-1])
+        self.assertEqual(rc, 3)
+        self.assertEqual(lines[-1]["summary"]["unrecorded"], [many[-1]])
+        self.assertEqual(client.writes, [])
+
+    def test_an_empty_page_that_says_has_more_stops_everything(self):
+        FakeClient.pages = lambda kind, limit, offset: {"items": [], "has_more": True}
+        self.precheck_stops("has_more on an empty page")
+
+    def test_a_response_that_is_not_a_listing_stops_everything(self):
+        FakeClient.pages = lambda kind, limit, offset: {"error": "rate limited"}
+        self.precheck_stops("not a listing envelope")
+
+    def test_a_full_page_that_does_not_say_whether_more_follow_stops_everything(self):
+        FakeClient.pages = lambda kind, limit, offset: {"items": [{"id": "x%d" % i} for i in range(limit)]}
+        self.precheck_stops("cannot say whether more follow")
+
+    def test_fewer_ids_than_the_served_total_stops_everything(self):
+        FakeClient.pages = lambda kind, limit, offset: {
+            "items": [{"id": "p-ours" if kind == "posts" else "c-ours-1"}], "total": 2, "has_more": False}
+        self.precheck_stops("against a served total of 2")
+
+    def test_a_total_that_moves_during_the_walk_stops_everything(self):
+        def pages(kind, limit, offset):
+            if kind == "posts":
+                return {"items": [{"id": "p-ours"}], "total": 1, "has_more": False}
+            return {"items": [{"id": "c-%d" % (offset + i)} for i in range(limit)],
+                    "total": 150 + offset, "has_more": True}
+        FakeClient.pages = pages
+        self.precheck_stops("total moved")
+
+    def test_a_listing_that_repeats_a_row_across_pages_stops_everything(self):
+        def pages(kind, limit, offset):
+            if kind == "posts":
+                return {"items": [{"id": "p-ours"}], "has_more": False}
+            if offset == 0:
+                return {"items": [{"id": "c-%d" % i} for i in range(limit)], "has_more": True}
+            return {"items": [{"id": "c-99"}, {"id": "c-ours-1"}], "has_more": False}
+        FakeClient.pages = pages
+        self.precheck_stops("distinct ids")
+
+    def test_a_short_page_with_no_has_more_is_complete(self):
+        FakeClient.pages = lambda kind, limit, offset: {
+            "items": [{"id": "p-ours" if kind == "posts" else "c-ours-1"}]}
+        rc, lines, client = self.run_script([self.reply("c-to-us")])
+        self.assertEqual(rc, 0)
+        self.assertEqual(lines[0]["status"], "OK")
 
 
 if __name__ == "__main__":

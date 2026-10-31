@@ -32,7 +32,9 @@ read_db out_dir (--ledger-dir: DIR/colony/*.json, else DIR/*.json, taking both
 the `colony_id` and the `id` field of every row) or from IDS.txt (--ledger-ids,
 one id per line): one public item with no ledger id stops the run before it
 writes anything, because a write the record cannot see means the key may be
-in other hands. Each draft is then checked against the rules above with the
+in other hands. The account's listings are read by limit/offset to the end and
+the precheck fails closed: a page it cannot read as complete, or a count that
+does not match the served total, stops the run the same way (listing_ids). Each draft is then checked against the rules above with the
 thread read fresh; a draft that fails a rule is SKIPPED with its reason, never
 reshaped. A reply is skipped if one of ours already sits under that parent; a
 new-thread comment is skipped if the account is already in the thread. Each
@@ -86,21 +88,66 @@ def key_for(d):
     return "commonwealth-routine-%s" % hashlib.sha256(basis).hexdigest()[:24]
 
 
-def public_ids(c):
-    """Every public post and comment of the account, paged until has_more is false."""
-    ids = set()
-    for path in ("/posts?author_id=%s" % ME, "/users/%s/comments" % ME):
-        page = 1
-        while True:
-            sep = "&" if "?" in path else "?"
-            r = c._raw_request("GET", "%s%slimit=100&page=%d" % (path, sep, page))
-            got = items_of(r)
-            ids.update(x.get("id") for x in got if x.get("id"))
-            if not (isinstance(r, dict) and r.get("has_more")) or not got:
-                break
-            page += 1
+PAGE = 100
+MAX_PAGES = 50
+
+
+class PrecheckError(Exception):
+    """The account's public listing could not be read completely; nothing may be written."""
+
+
+def listing_ids(c, path, name):
+    """Every id in one paged listing, or PrecheckError. Fails closed.
+
+    Pages by limit/offset, the parameters colony-sdk documents for both
+    listings (2026-10-23: `page=` was sent here and is not one of them).
+    A page that is not a {"items": [...]} envelope, an item without an id, an
+    empty page that says has_more, a full page that does not say whether more
+    follow, a `total` that moves during the walk, or a final count of distinct
+    ids that differs from the served `total` is an error, never a complete list.
+    """
+    ids, offset, total, seen = set(), 0, None, 0
+    sep = "&" if "?" in path else "?"
+    for n in range(MAX_PAGES):
+        if n:
             time.sleep(1)
+        r = c._raw_request("GET", "%s%slimit=%d&offset=%d" % (path, sep, PAGE, offset))
+        if not isinstance(r, dict) or not isinstance(r.get("items"), list):
+            raise PrecheckError("%s: page at offset %d is not a listing envelope" % (name, offset))
+        got = r["items"]
+        if not all(isinstance(x, dict) and x.get("id") for x in got):
+            raise PrecheckError("%s: an item at offset %d has no id" % (name, offset))
+        ids.update(x["id"] for x in got)
+        seen += len(got)
+        t = r.get("total")
+        if t is not None:
+            if isinstance(t, bool) or not isinstance(t, int) or t < 0:
+                raise PrecheckError("%s: total is not a count" % name)
+            if total is not None and t != total:
+                raise PrecheckError("%s: total moved from %d to %d during the walk" % (name, total, t))
+            total = t
+        more = r.get("has_more")
+        if more is True:
+            if not got:
+                raise PrecheckError("%s: has_more on an empty page at offset %d" % (name, offset))
+            offset += len(got)
+            continue
+        if more is False or (more is None and len(got) < PAGE):
+            break
+        raise PrecheckError("%s: page at offset %d cannot say whether more follow" % (name, offset))
+    else:
+        raise PrecheckError("%s: more than %d pages" % (name, MAX_PAGES))
+    if len(ids) != seen:
+        raise PrecheckError("%s: %d rows but %d distinct ids (the listing moved)" % (name, seen, len(ids)))
+    if total is not None and len(ids) != total:
+        raise PrecheckError("%s: %d ids read against a served total of %d" % (name, len(ids), total))
     return ids
+
+
+def public_ids(c):
+    """Every public post and comment of the account, or PrecheckError."""
+    return (listing_ids(c, "/posts?author_id=%s" % ME, "posts")
+            | listing_ids(c, "/users/%s/comments" % ME, "comments"))
 
 
 def check_reply(d, thread):
@@ -216,6 +263,9 @@ def main():
 
     try:
         public = public_ids(c)
+    except PrecheckError as e:
+        out({"summary": {"status": "could_not_run", "reason": "precheck: %s" % e}})
+        return 3
     except Exception as e:
         out({"summary": {"status": "could_not_run", "reason": "precheck read: %s" % type(e).__name__}})
         return 3
