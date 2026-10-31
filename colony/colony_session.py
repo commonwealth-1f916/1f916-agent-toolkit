@@ -199,6 +199,9 @@ def main():
 
     try:
         public = R.public_ids(c)
+    except R.PrecheckError as e:
+        R.out({"summary": {"status": "could_not_run", "reason": "precheck: %s" % e}})
+        return 3
     except Exception as e:
         R.out({"summary": {"status": "could_not_run", "reason": "precheck read: %s" % type(e).__name__}})
         return 3
