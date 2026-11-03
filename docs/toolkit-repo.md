@@ -1,6 +1,6 @@
 # The published toolkit repo — `commonwealth-1f916/1f916-agent-toolkit`
 
-Status: `queue/task-2026-09-20-toolkit-batch-1-pinned` (rev. 2026-10-26; section 9 added, the second revision of this doc in the 2026-09-21/23 sitting, recorded on the runs row).
+Status: `queue/task-2026-09-20-toolkit-batch-1-pinned` (rev. 2026-11-03).
 
 **Created 2026-09-02T02:3x–02:5xZ by the live Cowork session bridged to the Mac, at the operator's
 instruction ("I think we should publish the code we're using to repos on the commonwealth-1f916
@@ -68,7 +68,7 @@ status` lists both.**
 via `hasconfig:remote.*.url:https://github.com/commonwealth-1f916/**`. It fires on the clone's
 remote URL, so a clone made anywhere gets `commonwealth` as name and the noreply address as email.
 **<OPERATOR-GITHUB-LOGIN> appears in no commit object that a session authored** — only in GitHub's pusher event, which is already public
-via `<WITNESS-REPO>`. *(Corrected 2026-09-05: since 2026-09-04 this is no longer true of every commit — GitHub-UI merge commits are authored by the operator, and since 2026-09-05 commits pushed through the GitHub connector carry <OPERATOR-GITHUB-LOGIN>'s noreply identity. The machine account also merged homepage PR #2 by accident on 2026-09-04, harmlessly. §8.)*
+via `<WITNESS-REPO>`. *(Corrected 2026-09-05: since 2026-09-04 this is no longer true of every commit — GitHub-UI merge commits are authored by the operator, and from 2026-09-05 to 2026-10-31 commits pushed through the GitHub connector carried <OPERATOR-GITHUB-LOGIN>'s noreply identity; since its reconnect as the machine account on 2026-10-31 they carry commonwealth's noreply, as Mac-built commits do (rev. 2026-11-03). The machine account also merged homepage PR #2 by accident on 2026-09-04, harmlessly. §8.)*
 
 **Lesson for the record: "I checked and found no credential" was a check of the ACTIVE account
 reported as a check of the machine.** Same shape as *a baseline is a tripwire, not a reading*.
@@ -183,6 +183,9 @@ behalf. Recorded so the verdict exists rather than the silence.
 7. **If the README's byte-identical claim ever stops being true, fix the deployment or fix the
    README in the same sitting.** It is a published claim about a live system and it is checkable by
    anyone with shell access to either machine.
+8. **Before pushing a change to a shell script, run shellcheck at the version CI runs**: the one GitHub's
+   `ubuntu-latest` runner image lists in its readme, not the container's or the Mac's, which can be newer and
+   pass a script CI fails (why: notes/2026-10-26-lesson-local-shellcheck-newer-than-ci) (rev. 2026-11-03).
 
 ## 8. Branch protection — `main` is enforced, not just promised (2026-09-05)
 
@@ -205,7 +208,7 @@ state rather than what the form showed:
   (`.github/workflows/ci.yml` lines 100 and 102), so a required check by those names would never
   report and would block every merge; two such rows were removed before saving.
 
-Why now: as of 2026-09-05 the GitHub connector writes to this repo as <OPERATOR-GITHUB-LOGIN> with no human in the
+Why now: as of 2026-09-05 the GitHub connector wrote to this repo as <OPERATOR-GITHUB-LOGIN> (as the machine account since 2026-10-31) with no human in the
 loop during a scheduled run (§3 correction above; delivery runbook), so "never any repo's `main`,
 never force-push" had become a rule the run follows rather than one the repo enforces. The ruleset
 makes the repo refuse what the prompt forbids. <OPERATOR-NAME>: *"I think the toolkit is the key branch to
@@ -226,6 +229,7 @@ The rule, decided by the operator on 2026-09-23:
 
 - A sitting MAY merge, as the machine account, a PR whose changed files are all under `docs/`, `prompts/`, or are `README.md` or `LICENSE`. Before merging: CI green, then each changed file fetched anonymously at the head commit and compared byte-for-byte with the local file the sitting committed, and each prompt template with the stored prompt it equals or the redacted form of it; since 2026-10-26 a doc under `docs/` is its own source, and merging one changes nothing a run reads until the pin moves (why: `queue/prompt-batch-2026-W44` line 4) (rev. 2026-10-26). After merging: fetch the same files at `main`, compare again, run `tests/pin.sh origin/main HEAD` and confirm it reports no tool file changed, and fast-forward the deployment clone. Record the merge on the sitting's runs row.
 - A PR that changes anything under `bin/` or `tests/`, or `.github/workflows/`, is opened by the sitting and merged by the operator, as before; the pin move that follows stays the operator's act (the tag signs under `op run`). A PR that mixes the two kinds is the operator's.
+- A PR from a 1f916-sittings session carries unsigned commits and is merged by <OPERATOR-NAME> in the web interface with a merge commit, which GitHub signs; a sitting never merges it as the machine account (why: queue/decision-2026-10-26-sitting-surface) (rev. 2026-11-03).
 - Sittings batch their mirror changes into ONE PR opened at the close-check, not one PR per change; the ledger already records each change on its own, and the PR is only the publication step (why: the operator on 2026-09-23, seven PRs in three days).
 
 A scheduled run merges nothing; this is a sitting's act, made with the token on the Mac, never with the GitHub connector.
