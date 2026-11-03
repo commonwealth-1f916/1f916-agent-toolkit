@@ -1,10 +1,10 @@
 # 1F916 delivery runbook — the human steps
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-29).
+Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-11-03).
 
 **NEW ROUTE 2026-09-04 — git bundle over the desktop bridge, for everything the Mac pushes (toolkit, homepage, third-party repos at the operator's go).** Proven end to end on two repos the day it was adopted (`notes/2026-09-04-bundle-over-the-bridge-is-the-route`; PRs toolkit #8 fix-up, #11, #12 and homepage #1 all travelled this way). It replaces every earlier container→Mac transfer — tarball+sha, base64 through osascript, gzipped diff with chunk hashes, patch in a doc — all of which shared the one property that made them lossy: **the bytes passed through the model's output** (`notes/2026-09-04-base64-through-me-is-a-lossy-channel`). The bridge file tools do not; git's object hashes are the integrity check; the SHA the session built is the SHA that lands. Mechanics in §3. Scheduled runs never use it — they have no bridge — and keep the connector route below for `<OPERATOR-FORK>`.
 
-**ROUTE WIDENED 2026-09-05 — GitHub connector, three repos.** The "Claude Github MCP Connector" GitHub App (its slug is claude-github-mcp-connector) is installed on `<OPERATOR-FORK>` (since 2026-09-03) and, since 2026-09-05, on `commonwealth-1f916/1f916-agent-toolkit` and `commonwealth-1f916/commonwealth.<BOUND-DOMAIN>` (installed by <OPERATOR-NAME> logged in as the machine account; write probed from a sitting and verified anonymously the same minute). Sittings and the scheduled runs write through it as <OPERATOR-GITHUB-LOGIN>: topic branches (`claude/…`) and PRs <OPERATOR-NAME> merges; `claude/custody-declare` for PR #172; never any `main`, never force-push; on the homepage repo a PR that changes `index.html` carries the new hash and seal preimage and is never merged before its seal. Not covered: the witness repo (<WITNESS-HOST>'s), third-party repos (Mac, machine account, <OPERATOR-NAME>'s go). **Caveat learned 2026-09-05: a scheduled task's connector set is fixed at creation** — the two daily tasks created on 2026-08-22 never had this connector and could not have used this route; they were recreated (v2) with it on 2026-09-05. Check `list_triggers → mcp_connections` before assuming a task can reach a connector. **Caveat learned 2026-09-14: `push_files` records every blob `100644`.** Any executable pushed this route loses its mode — in `tests/` that is cosmetic, on the three shipped scripts it is the exit-126 regression of 2026-09-02. Either `chmod` and commit from the Mac behind the push, or do not send a shipped script this route at all (why: `notes/2026-09-14-connector-push-drops-the-exec-bit`) (rev. 2026-09-14).
+**ROUTE WIDENED 2026-09-05 — GitHub connector, three repos.** The "Claude Github MCP Connector" GitHub App (its slug is claude-github-mcp-connector) is installed on `<OPERATOR-FORK>` (since 2026-09-03) and, since 2026-09-05, on `commonwealth-1f916/1f916-agent-toolkit` and `commonwealth-1f916/commonwealth.<BOUND-DOMAIN>` (installed by <OPERATOR-NAME> logged in as the machine account; write probed from a sitting and verified anonymously the same minute). Sittings and the scheduled runs write through it as the machine account `commonwealth-1f916`, reconnected on 2026-10-31, its commits authored by the machine account's noreply address (rev. 2026-11-03): topic branches (`claude/…`) and PRs <OPERATOR-NAME> merges; never any `main`, never force-push; on the homepage repo a PR that changes `index.html` carries the new hash and seal preimage and is never merged before its seal. Not covered: the witness repo (<WITNESS-HOST>'s), third-party repos (Mac, machine account, <OPERATOR-NAME>'s go). **Caveat learned 2026-09-05: a scheduled task's connector set is fixed at creation** — the two daily tasks created on 2026-08-22 never had this connector and could not have used this route; they were recreated (v2) with it on 2026-09-05. Check `list_triggers → mcp_connections` before assuming a task can reach a connector. **Caveat learned 2026-09-14: `push_files` records every blob `100644`.** Any executable pushed this route loses its mode — in `tests/` that is cosmetic, on the three shipped scripts it is the exit-126 regression of 2026-09-02. Either `chmod` and commit from the Mac behind the push, or do not send a shipped script this route at all (why: `notes/2026-09-14-connector-push-drops-the-exec-bit`) (rev. 2026-09-14).
 
 **Why the container's own GitHub token 403s (settled 2026-09-05, not a token defect):** the git proxy injects credentials only for repositories declared as the session's sources, and Cowork sessions and scheduled tasks declare none — its exact refusal: *"<OPERATOR-FORK> is not in this session's authorized repository set, so the proxy will not inject a credential for it."* Routines at claude.ai/code have a repository step and would get proxied `git push` and `gh`; that is unprobed (migration sketch, step 1).
 
@@ -215,8 +215,8 @@ What the session does, and what you should see it report, in this order:
   So the tree is the invariant on every route; §4 says what the SHA is expected to do on each.
   **Which routes produce a signed commit, so no draft claims otherwise again:** only Route B with
   the re-sign step (author and committer `commonwealth-1f916`, `verified=true`). The GitHub
-  connector — sittings and the scheduled runs, `push_files` — cannot sign and authors as <OPERATOR-GITHUB-LOGIN>'s
-  noreply; container-built commits on Routes A and C are unsigned; GitHub-UI merges are signed by
+  connector — sittings and the scheduled runs, `push_files` — cannot sign and authors as the machine account's
+  noreply (<OPERATOR-GITHUB-LOGIN>'s before 2026-10-31) (rev. 2026-11-03); container-built commits on Routes A and C are unsigned; GitHub-UI merges are signed by
   GitHub's web-flow key under whichever account clicked. Three commits pushed by the connector on
   2026-09-05 (`bc1526d3`, `08d78fc7`, `2bb54fbb`) read `unsigned` for exactly this reason and are not
   a skipped step (`queue/resign-step-not-applied-2026-09-05`, closed into `queue/runbook-resign-step`).
@@ -229,6 +229,12 @@ It should never rely on the active `gh` account, never leave a persistent config
 never rewrite history — a fix-up to an open PR is a merge-from-main plus a commit, not a rebase.
 
 ---
+
+**Route D — a 1f916-sittings session.** A sitting in the credential-free 1f916-sittings Claude Code
+environment pushes a `claude/` branch through that environment's git proxy and opens the PR; its commits
+are unsigned. <OPERATOR-NAME> merges it in GitHub's web interface with a merge commit, which GitHub signs (the
+ruleset allows no other method, `docs/toolkit-repo.md` §8). The pin move that follows stays a bridged,
+signed act (why: queue/decision-2026-10-26-sitting-surface) (rev. 2026-11-03).
 
 ## 4. The verification gate — never skip, never self-serve
 

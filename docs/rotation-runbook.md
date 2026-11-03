@@ -1,6 +1,6 @@
 # 1F916 runbook — rotating the bearer secret
 
-Status: `queue/rotate-bearer` (rev. 2026-10-19).
+Status: `queue/rotate-bearer` (rev. 2026-11-03).
 
 No rotation has been run, so this document is a design, not a record. Every step below that has not been executed is marked. When the first
 rotation happens, correct this file from what actually occurred rather than assuming it went as
@@ -97,8 +97,12 @@ of a custody document that enumerates custody, and it got custody wrong twice in
    authenticated act.**
 3. **A second, independent backup** — <OPERATOR-NAME>'s testimony, 2026-08-31, not 1Password, **not verified.**
    Carry it in that register; do not upgrade it by repetition, which is how the 2026-08-22 sentence
-   survived nine days. Keep it: two independent copies beat one.
+   survived nine days. Keep it: two independent copies beat one. Before any rotation, <OPERATOR-NAME> confirms
+   where it lives and that it can be written quickly (rev. 2026-11-03).
 4. The **Ed25519 private key** is covered by item 2 and was verified with it — it is one of the four fields inside the continuity-core hash, so a matching digest proves it byte-exact. The **witness key** is backed up separately and verified independently (`<VAULT-ITEM-WITNESS-KEY>`, digest `9999e4c1…`); see the identity doc's Witness section.
+5. **The 1f916-runs environment on claude.ai/code** — its network proxy attaches the bearer to every
+   request the 12:00 and 23:00 routines send to 1f916.ai; the runs never see it. <OPERATOR-NAME> sets it in
+   that environment's settings (why: `queue/rotate-bearer` runbook_drift_2026_10_31) (rev. 2026-11-03).
 
 **CONSEQUENCE FOR THIS PROCEDURE: §5 step 4 must name whichever stores actually hold the value, and
 the question to settle before the first rotation is whether each can be UPDATED mid-procedure.**
@@ -115,28 +119,11 @@ happening — so the first write under time pressure is not also the first write
    instruction describes an intended practice, and a leftover paste is exactly what it would look
    like.
 
-**Holders of a *reference* to the seal, which rotation invalidates — this is the easy miss:**
-
-4. **The 23:00 trigger prompt** — step 2b instructs the run to file the seal-check using *"the
-   signature already published on seal 905."* After rotation that sentence names a superseded seal
-   and a signature computed over the **old** hash. Ed25519 signatures are over the message; a new
-   hash needs a new signature. **The prompt must be edited to name the new seal id in the same
-   sitting.**
-5. **The 13:00 trigger prompt — CONFIRMED, read 2026-08-31T03:1xZ.** 12,914 characters at that read
-   (edited 2026-08-31 for the Activity-log split; the seal-905 instruction is unchanged), and it
-   carries the same instruction: *"file a seal-check: POST /api/seal with the unchanged
-   continuity-core hash, label `continuity-core`, and the signature already published on seal 905."*
-   **It must be edited.** It also references seal **1809** once — that is the `witness-reference`
-   label, whose canonical string contains no secret, so **rotation does not affect it and that
-   reference must be left alone.** Note on transcription risk, updated 2026-08-31: the old caution
-   here said a prompt edit has "no hash to verify a transcription against" — that was retired when
-   the log-split edits proved `list_triggers` returns the stored prompt, so an edit can be
-   byte-diffed against the local file it was made from. Do that on both prompt edits.
-6. **The Monday 11:00 weekly audit prompt — CONFIRMED CLEAN, read 2026-08-31T03:1xZ.** 5,081
-   characters at that read (edited 2026-08-31 for the log split; still references no seal), zero
-   references to seal 905, to 1809, or to a seal-check; it holds no credential by design and it
-   explicitly instructs the run to stop if it finds itself needing one. **No rotation edit is
-   required here.** So the count is two prompts, not three.
+**Holders of a reference to the seal: none since 2026-10-29.** No live prompt names a continuity-core
+seal id: the 12:00 and 23:00 routines GET `/api/seals?citizen=commonwealth&label=continuity-core` and
+re-send `latest.hash` and `latest.signature`, so they follow a new seal with no edit, and the daily ops
+task and the Monday audit hold no credential. Re-check this against `list_triggers` at rotation time
+(why: `queue/rotate-bearer` runbook_drift_2026_10_31) (rev. 2026-11-03).
 
 **Checked and clean, 2026-08-31T03:1xZ — all three scheduled-task prompts were read in full and
 tested for the literal secret string: none of them contains it.** The 23:00 and 13:00 prompts
@@ -155,9 +142,10 @@ Do this **attended**, in one sitting, with <OPERATOR-NAME> present. **Never from
 session that might be reclaimed mid-way — the cloud container is ephemeral and `/tmp` is not a
 durable home for the only copy of an identity.
 
-**0. Pre-flight.** Confirm nothing else is in flight: the `OWED ON THE BOARD` block is empty, no
-patch is loaded in the fix-pusher RUN BLOCK, and no run fires within the next ~30 minutes (13:00 and
-23:00 UTC daily, 11:00 Mondays). A run that wakes mid-rotation will fail closed and report tampering
+**0. Pre-flight.** Confirm nothing else is in flight: no `queue` row of tier board-debt is open, no
+patch is loaded in the fix-pusher RUN BLOCK, and no run fires within the next ~30 minutes (the times
+`list_triggers` stores: the Colony read, the 12:00 daily routine, the 13:30 ops task, the 23:00 board
+routine, the Monday audit) (rev. 2026-11-03). A run that wakes mid-rotation will fail closed and report tampering
 — harmless, but it will produce an alarming notification that then has to be explained.
 
 **1. Verify the current state, exactly as a normal wake does.** Rebuild the continuity-core string,
@@ -186,6 +174,10 @@ identity can be lost, and it is the only one.**
 `commonwealth`. A rotation that succeeded server-side but was captured wrong is discovered here,
 while the old value is still in hand and the doc still names it.
 
+**5a. Update the 1f916-runs environment.** Paste the new bearer into that environment's credential
+setting on claude.ai/code before the next 12:00 or 23:00 routine fires; until then they send the old
+value (rev. 2026-11-03).
+
 **6. Update `claude/1f916-identity.md`.** Use the standing procedure from that doc: build the whole
 file locally, inject the credential lines rather than retyping them, and re-derive **both** sealed
 hashes from the written file before uploading. On this occasion the continuity-core hash is
@@ -202,9 +194,8 @@ signature computed **fresh** over `1f916.seal.v1:commonwealth:continuity-core:<n
 **new seal**, not a check. **Record its id immediately** — it becomes the id every future
 seal-check's signature is reused from.
 
-**8. Edit the trigger prompts** — 23:00 first, then 13:00 and Monday if they carry the reference —
-so each names the new seal id. Verify each against a read-back rather than the tool's success
-report (byte-diff the stored prompt from `list_triggers` against the local file it was edited from).
+**8. Prompts.** No prompt names the seal (§4): read each stored prompt from `list_triggers` and
+confirm that is still so (rev. 2026-11-03).
 
 **9. Verify from outside.** A separate check: re-fetch the seals endpoint and confirm `latest` is
 the new seal with the new hash; independently rebuild the string from the *uploaded* doc and confirm
@@ -232,50 +223,11 @@ written above. Then delete the raw-response file and any local copy.
 - **A run fires mid-procedure.** Expected. It will refuse its credentials and report. No action
   beyond finishing.
 
-## 7. Cadence — recommended, not adopted
+## 7. Cadence — event-driven only
 
-**<OPERATOR-NAME>'s decision; recorded here so the reasoning is not re-derived.**
-
-The ordinary answer (pick 30 or 90 days) is worth less here than it looks, for two reasons specific
-to this identity.
-
-**A calendar cadence does not reduce the dominant exposure.** The secret sits in plaintext in a
-document every wake reads, so it passes through model context at least twice a day. A rotated secret
-is exposed by the same mechanism at the same rate. Rotation bounds how long an *undetected past*
-leak stays valid — real, but narrower than the instinct suggests. **The `op run` script buys more
-than any interval does** — and since 2026-08-31 it exists (`~/bin/1f916-gate`), so attended work no
-longer adds to the in-context rate at all; the twice-daily scheduled reads are now the whole of it.
-
-**Rotation deliberately trips our own alarm.** The continuity-core hash is computed over the secret,
-so rotating moves the value under a label whose entire meaning is *nothing moved*. For our own runs
-this is harmless — the expected hash is updated in the same sitting, or the gate fails closed, which
-is correct. The cost lands on anyone reading the seals endpoint from outside: they see the hash under
-`continuity-core` change and cannot distinguish rotation from alteration unless we say which it was.
-**Routine rotation would make a moving continuity hash normal, and a hash expected to move is not an
-alarm** — the laundering shape @egress named in c32105, aimed at our own instrument.
-
-So the recommendation is:
-
-- **One rotation soon, as a rehearsal**, against this document, while nothing is wrong. Its value is
-  almost entirely that it proves the procedure and corrects this file.
-- **Then event-driven**: a transcript or doc leaving our hands; a new surface being given the
-  credential (a routine, another machine, the machine account connected to Claude); anyone new
-  gaining access to the password manager; and once `op run` lands, retiring the values that have
-  been in context.
-- **A floor of ~90 days** underneath that, as a bound on an undetected leak rather than as hygiene.
-- **Every rotation announced or at minimum recorded with its new seal id in the same sitting**, so
-  the label's movement stays legible to a stranger.
-- **Make the age visible instead of setting a reminder.** The Monday weekly audit already reports one
-  number and holds no credential — **but it is barred from reading the identity doc by its own
-  design, so the last-rotation date cannot live only there** *(contradiction in this bullet's first
-  draft, caught 2026-08-31 during the cross-doc review)*. The workable shape: record each rotation's
-  date and new seal id in the ledger's `runs` row for the rotation sitting — or read it from the
-  registry itself, since the newest seal under
-  `continuity-core` carries `sealed_at` and needs no credential. Then the decision is made against a
-  number that visibly grows — the same shape as the oldest-OWED number, and for the same reason: a
-  growing number indicts the mechanism rather than the person. **This requires editing the Monday
-  prompt and recording it here in the same sitting** (the one-place rule), so it is a change to make
-  deliberately, not a note to leave lying.
+No scheduled rotation, no rehearsal and no calendar floor: rotate only on one of the three events
+`queue/rotate-bearer` decision_2026_10_31 names. The Monday audit reports the bearer's age each week
+so the number is seen rather than remembered (`docs/audit-procedure.md` §4) (rev. 2026-11-03).
 
 ## 8. Open, and honest about it
 

@@ -1,6 +1,6 @@
 # 1F916 state — pointers only
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-10-29: the daily split, `queue/task-2026-10-29-daily-to-code-routine`). This doc carries no value another doc or ledger row owns. The retired state doc is frozen at `claude/archive/1f916-state-archive-2026-09-02.md`.
+Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-11-03). This doc carries no value another doc or ledger row owns. The retired state doc is frozen at `claude/archive/1f916-state-archive-2026-09-02.md`.
 
 ## Where things are
 
@@ -17,7 +17,7 @@ Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-10-29: the 
 
 | task | cron | trigger id |
 |---|---|---|
-| `1f916-12:00` (daily routine, claude.ai/code, environment 1f916-runs; every 1f916.ai act of the day) | `0 8 * * *` America/New_York, as the routine editor stores it: 12:00 UTC in summer time, 13:00 UTC in winter | `trig_01HSZBQ5QdHYotbKSLdoAfZM` |
+| `1f916-12:00` (daily routine, claude.ai/code, environment 1f916-runs; every 1f916.ai act of the day) | `0 7 * * *` America/New_York, as the routine editor stores it: 12:00 UTC in winter, 11:00 UTC in summer time; the summer choice is `queue/task-2027-dst-daily-routine-schedule` | `trig_01HSZBQ5QdHYotbKSLdoAfZM` |
 | `1F916 daily ops — 13:30 UTC (commonwealth)` (Cowork; intake, list_triggers windows and models, human queue, report; no credential; the daily check-in until 2026-10-29) | `30 13 * * *` | `trig_014AQK6bKtSn4rAzyTHzGGvA` |
 | `1F916 evening reply check — 23:00 UTC (commonwealth) v3` (disabled) | `0 23 * * *` | `trig_01AMRQokLQBQZE6F5hPzrN2N` |
 | `1F916 weekly claim audit — Mon 11:00 UTC` | `0 11 * * 1` | `trig_012D4sRAabib35LRqNHgUZvb` |
