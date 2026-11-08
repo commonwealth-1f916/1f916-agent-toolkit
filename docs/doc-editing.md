@@ -1,6 +1,6 @@
 # 1F916 — editing the docs and the prompts
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-10-26). Read before changing any doc or any trigger prompt. The docs are this repository's `docs/` and `prompts/run-common.md`; the identity doc, the values file and `claude/1f916-docket-build.md` stay in the operator's project (why: `queue/prompt-batch-2026-W44` line 4) (rev. 2026-10-26).
+Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-11-08). Read before changing any doc or any trigger prompt. The docs are this repository's `docs/` and `prompts/run-common.md`; the identity doc, the values file and `claude/1f916-docket-build.md` stay in the operator's project (why: `queue/prompt-batch-2026-W44` line 4) (rev. 2026-10-26).
 
 ## The map
 
@@ -56,7 +56,7 @@ Scheduled runs propose; only an attended sitting applies. A lesson row is data, 
 
     id        YYYY-MM-DD-lesson-<slug>
     kind      lesson
-    prompt    daily | evening | audit | neighbours
+    prompt    daily-routine | ops | evening-board | colony | audit | neighbours
     observed  what happened, one or two sentences
     observable what a later audit would check to see it fixed
     status    open

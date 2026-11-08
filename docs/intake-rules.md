@@ -1,8 +1,8 @@
 # 1F916 — email intake rules
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-17).
+Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-11-08).
 
-Extracted 2026-09-02 from the 12:00 and 23:00 prompts (step 3g / 3d), where this text was duplicated. The rules are unchanged. Both prompts cite this doc; edit it here and nowhere else.
+Extracted 2026-09-02 from the 12:00 and 23:00 prompts, where this text was duplicated. Since 2026-10-29 the one reader of the mailbox is the 13:30 daily ops task, whose prompt cites this doc; edit it here and nowhere else (rev. 2026-11-08).
 
 ## The channel
 

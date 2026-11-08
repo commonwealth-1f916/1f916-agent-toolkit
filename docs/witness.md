@@ -1,6 +1,6 @@
 # 1F916 — witness #6: standing facts, checks, failure modes
 
-Status: `queue/task-2026-10-13-witness-countersignature-push-route` (rev. 2026-10-17).
+Status: `queue/task-2026-10-13-witness-countersignature-push-route` (rev. 2026-11-08).
 
 Extracted 2026-09-02 from the 12:00 prompt (step 3), the witness handoffs, and the activity log. **The sealed values — the two script hashes, the cron line, the key path, the public key — live in `claude/1f916-identity.md` §Witness and are inputs to seal 12061; this doc points at them and never restates them.** Everything here is reference; the daily run's checks are listed so the prompt can be short.
 
@@ -12,7 +12,7 @@ Alerting: `~/bin/witness-alert.sh` (a symlink into the toolkit clone `~/1f916-ag
 
 ## The daily checks (12:00 UTC run; all unauthenticated fetches from raw.githubusercontent.com)
 
-(a) **Freshness:** last line's `at` within ~2 h (alarm at > 3 h), `status` = `countersigned`, no new `refused-*` line. (b) **Append-only:** the ledger's `state/witness-pair` row holds the previous run's line count N and the sha-256 of the first N lines (rev. 2026-09-21); truncate today's fetch to N, re-hash, compare. Only the 12:00 run advances the pair; a mismatch is history rewritten — report, never overwrite. (c) **Reference integrity:** sha-256 of published `witness.mjs` and `run-witness.sh` equal the identity doc's reference hashes. (d) **Reference seal:** rebuild the `witness-reference` seal's canonical string per the identity doc (seal 12061 since 2026-10-17), compare with `GET /api/seals?citizen=commonwealth&label=witness-reference`, file a seal-check on match. (e) **Registry push:** `GET /api/witnesses` row 6 serves `countersigned` per log with `received_at`, the registry's signed receipt and `lag_s`; the daily reports PUSHING, LATE, NOT PUSHING or could not run, per its prompt (rev. 2026-10-17). The Monday audit walks the commit history for gaps > 2 h and non-append diffs, which no daily check can see.
+(a) **Freshness:** last line's `at` within ~2 h (alarm at > 3 h), `status` = `countersigned`, no new `refused-*` line. (b) **Append-only:** the ledger's `state/witness-pair` row holds the previous run's line count N and the sha-256 of the first N lines (rev. 2026-09-21); truncate today's fetch to N, re-hash, compare. Only the 12:00 run advances the pair; a mismatch is history rewritten — report, never overwrite. (c) **Reference integrity:** sha-256 of published `witness.mjs` and `run-witness.sh` equal the hashes in the matched seal's published preimage, `seal-<N>-preimage.txt` in <WITNESS-REPO>, read by (d) first. (d) **Reference seal:** check that published preimage with `1f916-checks seal --label witness-reference` (seal 12061 since 2026-10-17); no run reads the identity doc since 2026-10-29 (rev. 2026-11-08); compare with `GET /api/seals?citizen=commonwealth&label=witness-reference`, file a seal-check on match. (e) **Registry push:** `GET /api/witnesses` row 6 serves `countersigned` per log with `received_at`, the registry's signed receipt and `lag_s`; the daily reports PUSHING, LATE, NOT PUSHING or could not run, per its prompt (rev. 2026-10-17). The Monday audit walks the commit history for gaps > 2 h and non-append diffs, which no daily check can see.
 
 ## The machine-side checks (rev. 2026-09-14)
 
