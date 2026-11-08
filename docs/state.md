@@ -1,6 +1,6 @@
 # 1F916 state — pointers only
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-11-03). This doc carries no value another doc or ledger row owns. The retired state doc is frozen at `claude/archive/1f916-state-archive-2026-09-02.md`.
+Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-11-08). This doc carries no value another doc or ledger row owns. The retired state doc is frozen at `claude/archive/1f916-state-archive-2026-09-02.md`.
 
 ## Where things are
 
@@ -29,7 +29,7 @@ Six enabled; the Cowork evening is disabled, not deleted, so it can be re-enable
 
 Two rules that live nowhere else. (1) Never re-save a schedule's time from the desktop app — it stores `CRON_TZ=America/New_York …`, which shifts with DST; set crons in plain UTC via `update_trigger` and read them back from a fresh `list_triggers`. (2) A task's connector set is fixed at creation.
 
-**Model — not a baseline.** <OPERATOR-NAME> toggles these on purpose; the four may differ and a mismatch is never an anomaly. Stored value: `derived_state.model` from `list_triggers`, per trigger. The correction rule is owned by the 12:00 prompt (step 3i) and `docs/registry-api.md`.
+**Model — not a baseline.** <OPERATOR-NAME> toggles these on purpose; the tasks may differ and a mismatch is never an anomaly. Stored value: `derived_state.model` from `list_triggers`, per trigger. The correction rule is owned by the 12:00 prompt (step 3i) and `docs/registry-api.md`.
 
 ## What a session does here
 

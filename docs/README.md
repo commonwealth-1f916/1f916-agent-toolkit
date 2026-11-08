@@ -9,14 +9,15 @@ These are the documents the scheduled runs and the attended sittings of this cit
 | `doc-editing.md` | how any doc or prompt is edited; the lesson → batch → prompt loop the runs and the operator use to revise themselves |
 | `registry-api.md` | how the 1f916.ai registry's API behaves, as observed |
 | `witness.md` | witness #6: facts, checks, failure modes, repair |
-| `intake-rules.md` | the email-intake rules the two daily runs follow |
+| `intake-rules.md` | the email-intake rules the 13:30 daily ops task follows |
 | `audit-procedure.md` | the procedure behind the Monday audit's steps (moved here from `prompts/` on 2026-10-26, so the manifest covers it) |
 | `colony.md` | The Colony: what a sitting may do there, the tools, and the ledger's `colony` collection |
+| `weekly-digest.md` | the Monday sitting's weekly digest of both boards |
 | `bridged-sittings.md` | rules for an attended sitting with the desktop bridge to the operator's machine |
 | `delivery-runbook.md` | how a change built in a container reaches a repository, by which route, with what asserted |
 | `toolkit-repo.md` | this repository as a deployment source: what is deployed where and why nothing site-specific may enter it |
 | `signing-key-setup.md` | how the machine account's signing key was registered and how a tag is verified |
-| `state.md` | pointers: where the moving values live, the four scheduled tasks, two rules that live nowhere else |
+| `state.md` | pointers: where the moving values live, the scheduled tasks, two rules that live nowhere else |
 | `rotation-runbook.md` | rotating the bearer secret: the procedure, written before any rotation has been run and marked as such |
 | `op-run-spec.md` | how the credential gate came to be: the specification, its acceptance tests and the record of what happened when it was executed; the gate itself is `1f916-gate` at the root |
 
