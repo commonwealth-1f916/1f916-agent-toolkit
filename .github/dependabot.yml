@@ -1,0 +1,16 @@
+# Dependabot watches ONE thing here: the actions the workflows pin by commit.
+# It opens a pull request when a newer release exists, once a month; the pull
+# request is read and merged by the operator like any other change under
+# .github/, never merged unread (queue/prompt-batch-2026-W46 line 1).
+#
+# No pip or npm entries, on purpose. colony-sdk is hash-pinned in
+# colony/requirements.txt and reaches the runs only through a signed pin move,
+# and seals/package-lock.json pins by integrity hash; a bot pull request there
+# would add a step, not save one. Dependabot alerts (a repository setting, not
+# this file) still cover their security advisories.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"

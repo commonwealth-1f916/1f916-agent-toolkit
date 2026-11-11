@@ -52,10 +52,14 @@ jobs:
       # pins everything else by digest. `@v4` is a tag, and a tag is a name
       # its owner can move. The four programs in this repository are fetched by
       # the scheduled runs only after a sha-256 comparison, and the workflows
-      # that check them were trusting a mutable reference. Pinned 2026-09-20 to the
-      # commit `v4` resolved to that day, which is also tagged v4.4.0. To
-      # move it: read the tag again and change the sha here, deliberately.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      # that check them were trusting a mutable reference. Pinned by commit
+      # since 2026-09-20; moved 2026-11-10 to the commit tagged v7.0.1, whose
+      # action.yml runs on node24 (v4 ran on Node 20, which the runners now
+      # force forward with a warning). To move it: read the tag again and
+      # change the sha here, deliberately. Dependabot (.github/dependabot.yml)
+      # opens a pull request when a newer one exists; it is read, never
+      # merged unread.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: prove the pin check can go red
         run: sh tests/pin.sh --self-test
 
@@ -64,7 +68,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
       - name: does this pull request touch code the runs execute?
@@ -112,7 +116,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
       - name: open a pin-owed issue if a tool file moved
