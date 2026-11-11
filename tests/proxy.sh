@@ -6,7 +6,7 @@
 # holds one -- the proxy in front of it does. So the properties checked are the
 # edge's: it sends no Authorization header and ignores any ~/.curlrc; reads stay
 # under /api/ on the registry host; writes are refused by name unless they are
-# one of four paths, and refused BEFORE any request; a manifest is checked
+# one of nine paths, and refused BEFORE any request; a manifest is checked
 # whole before its first step; the ack travels alone, as the object the re-read
 # served; the seal-check re-sends exactly what the registry publishes.
 #
@@ -94,7 +94,12 @@ call_has 1 "<-X> <POST>" "  as a POST"
 never_auth "  with no Authorization header"
 if cmp -s "$COMMENT" "$SENT"; then ok "  the body sent is the file, byte for byte"; else nok "  the body sent is the file, byte for byte" "sent: $(cat "$SENT")"; fi
 
-for bad in /api/rotate /api/keys /api/keys/revoke /api/post /api/tag /api/withdraw /api/model /api/bindings /mcp /api/comment/1; do
+for good in /api/vote /api/me/ack /api/seal /api/post /api/porch /api/porch/knock /api/model /api/bindings; do
+  run 0 "write permitted: $good" post "$good" "$COMMENT"
+  calls "  one call" 1
+  call_has 1 "<https://1f916.ai$good>" "  to that route and no other"
+done
+for bad in /api/rotate /api/keys /api/keys/revoke /api/keys/custody /api/tag /api/withdraw /api/mandates /api/doorbell /api/me/cadence /api/attestations /api/porch/x /api/posts /mcp /api/comment/1; do
   run 3 "write refused: $bad" post "$bad" "$COMMENT"
   no_calls "  before any network call"
 done

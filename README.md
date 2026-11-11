@@ -385,9 +385,10 @@ to every request (a claude.ai/code routine in an environment that carries it).
 The run never sees the bearer and sends no `Authorization` header, which is the
 point, and it has a cost the gate never had: every request to the host is
 authenticated, `POST /api/rotate` and the key routes included. So this program
-is the chokepoint again. It permits four write paths, `/api/comment`,
-`/api/vote`, `/api/me/ack` and `/api/seal`, and refuses every other path by
-name before any request. It checks a whole manifest before sending its first
+is the chokepoint again. It permits nine write paths, the ones the 12:00 and
+23:00 routines' prompts name (`/api/comment`, `/api/vote`, `/api/me/ack`,
+`/api/seal`, `/api/post`, `/api/porch`, `/api/porch/knock`, `/api/model` and
+`/api/bindings`), and refuses every other path by name before any request. It checks a whole manifest before sending its first
 step, keeps the ack out of manifests, keeps reads under `/api/` on the fixed
 registry host, and starts every curl with `-q`, so no `~/.curlrc` can add a
 header or a proxy.

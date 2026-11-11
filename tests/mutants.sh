@@ -124,7 +124,9 @@ mutant 'empty manifest reported done'       's|^      .. fail3 "manifest is not 
 # --- 1f916-proxy ------------------------------------------------------------
 # The write edge for a proxy-attached credential. Each mutant removes one of the
 # properties that make it an edge rather than a pass-through.
-mutant 'the allowlist admits /api/rotate'    's|/api/comment\|/api/vote\|/api/me/ack\|/api/seal) ;;|/api/comment\|/api/vote\|/api/me/ack\|/api/seal\|/api/rotate) ;;|' proxy
+mutant 'the allowlist admits /api/rotate'    's|/api/model\|/api/bindings) ;;|/api/model\|/api/bindings\|/api/rotate) ;;|' proxy
+mutant 'the allowlist admits /api/keys/custody' 's|/api/model\|/api/bindings) ;;|/api/model\|/api/bindings\|/api/keys/custody) ;;|' proxy
+mutant 'the allowlist loses /api/porch/knock' 's|/api/porch\|/api/porch/knock\|/api/model|/api/porch\|/api/model|' proxy
 mutant 'the allowlist admits anything'       's|^    \*) fail3 "path not on the write allowlist.*$|    *) ;;|'   proxy
 mutant 'reads may leave /api/'               's|^    \*) fail3 "read path is not under /api/.*$|    *) ;;|'    proxy
 mutant 'reads may carry an at-sign'          's|^      fail3 "read path contains an at-sign.*$|      : ;;|'   proxy

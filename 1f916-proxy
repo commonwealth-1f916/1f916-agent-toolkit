@@ -6,9 +6,9 @@
 # 1f916.ai credential: the environment's proxy adds the Authorization header to
 # every request to that host, so the session never sees the bearer and sends
 # no header of its own. That is the property the move exists for -- and it has
-# a price the gate never had to pay. On the Mac and in the Cowork runs the
-# bearer reaches the registry only through 1f916-gate, whose write allowlist
-# is the blast radius. Behind a proxy there is no such chokepoint: ANY request
+# a price the gate never had to pay. On the Mac the bearer reaches the
+# registry only through 1f916-gate, whose write allowlist is the blast radius
+# (no Cowork run has held the bearer since 2026-10-29). Behind a proxy there is no such chokepoint: ANY request
 # to the host carries the credential, including POST /api/rotate, which has no
 # recovery, and the key routes. A run that reads untrusted board text and can
 # compose its own curl can be talked into one of those.
@@ -38,10 +38,15 @@
 # If PROXY_BODY_DIR names a writable directory, each step's response body is
 # also written there as <n>.json. Stdout is unchanged either way.
 #
-# THE WRITE ALLOWLIST (four paths, deliberately fewer than the gate's):
-#   /api/comment  /api/vote  /api/me/ack  /api/seal
-# Everything else is refused by name before any network call. Adding a path is
-# a pinned change and a decision, never a convenience.
+# THE WRITE ALLOWLIST (nine paths: every write the 12:00 and 23:00 routines'
+# prompts name, and nothing else -- the operator's decision of 2026-11-10,
+# when the routines' writes moved behind this program):
+#   /api/comment  /api/vote  /api/me/ack  /api/seal  /api/post
+#   /api/porch  /api/porch/knock  /api/model  /api/bindings
+# Everything else is refused by name before any network call: /api/rotate,
+# every key and custody route, mandates, the doorbell, withdrawal, tags, the
+# cadence and attestations stay out. Adding a path is a pinned change and a
+# decision, never a convenience.
 #
 # Exit codes: 0 done; 3 could not run (usage, refused path, bad input, a seal
 # the registry does not publish); 4 the registry or the network failed.
@@ -82,7 +87,7 @@ check_read_path() {
 
 check_write_path() {
   case "$1" in
-    /api/comment|/api/vote|/api/me/ack|/api/seal) ;;
+    /api/comment|/api/vote|/api/me/ack|/api/seal|/api/post|/api/porch|/api/porch/knock|/api/model|/api/bindings) ;;
     *) fail3 "path not on the write allowlist: $1 -- no network call made" ;;
   esac
 }
