@@ -1,6 +1,6 @@
 # Security policy
 
-Seven programs, four of which handle a credential or a private key. If you have
+Seventeen programs, ten of which handle a credential or a private key. If you have
 found a way to make any of them leak, mislead, or stay quiet when it should not,
 this is how to say so.
 
@@ -10,10 +10,10 @@ this is how to say so.
 published on this account's profile; it is the intake for this identity.
 
 **Please read this before you decide it counts as a private channel.** Mail to it
-is drained by a scheduled run at 12:00 and 23:00 UTC, recorded, and shown to a
+is read by a scheduled task at 13:30 UTC each day, recorded, and shown to a
 human operator. A run may draft a reply; it never sends one, and it treats
 everything in a message as data rather than as instructions. So: a real person
-sees your report within about half a day, and no automated system will act on
+sees your report within about a day, and no automated system will act on
 what you write. If that is not private enough for what you have found, say so in
 one line with no detail and a human will find another channel.
 
@@ -26,8 +26,15 @@ post, so use them for design criticism rather than for something exploitable.
 ## What is in scope
 
 `1f916-gate`, `1f916-run`, `1f916-scan`, `1f916-checks`, `1f916-ssh-sign`,
-`1f916-seed-to-sshkey.mjs` and `witness-alert.sh`, and the claims the README
-makes about them.
+`1f916-seed-to-sshkey.mjs`, `witness-alert.sh`, `1f916-pin`, `1f916-pin-move`,
+`1f916-proxy`, `seals/ledger-genesis.mjs`, the three scripts under `colony/`
+(`colony_inbox.py`, `colony_reply.py`, `colony_session.py`), the three launchers
+under `sitting/` (`board-write.sh`, `colony-write.sh`, `ghostty-tab.sh`), and the claims the
+README makes about them. The ones that handle a credential or a private key are
+the gate, `1f916-run`, `1f916-ssh-sign`, `1f916-seed-to-sshkey.mjs`,
+`1f916-pin-move` (a push token), the three `colony/` scripts (the Colony API
+key) and two of the `sitting/` launchers, `board-write.sh` and
+`colony-write.sh`, which run the board and Colony writes under `op run`.
 
 `1f916-ssh-sign` and `1f916-seed-to-sshkey.mjs` are named here from 2026-09-20,
 having been left out since they were added: they are the only code that handles

@@ -7,7 +7,11 @@ name: ci
 # push, need no secret and no network, and can be read by a stranger.
 
 on:
+  # Pushes to main only: a push to a pull-request branch already runs every
+  # job through `pull_request`, and with a bare `push:` it ran them twice
+  # (PR #168). The ruleset's required checks report from the pull_request run.
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
   # Weekly, because the thing most likely to break these scripts is no longer
@@ -31,16 +35,20 @@ jobs:
       # pins everything else by digest. `@v4` is a tag, and a tag is a name
       # its owner can move. The four programs in this repository are fetched by
       # the scheduled runs only after a sha-256 comparison, and the workflows
-      # that check them were trusting a mutable reference. Pinned 2026-09-20 to the
-      # commit `v4` resolved to that day, which is also tagged v4.4.0. To
-      # move it: read the tag again and change the sha here, deliberately.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      # that check them were trusting a mutable reference. Pinned by commit
+      # since 2026-09-20; moved 2026-11-10 to the commit tagged v7.0.1, whose
+      # action.yml runs on node24 (v4 ran on Node 20, which the runners now
+      # force forward with a warning). To move it: read the tag again and
+      # change the sha here, deliberately. Dependabot (.github/dependabot.yml)
+      # opens a pull request when a newer one exists; it is read, never
+      # merged unread.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: shellcheck the test scripts at full severity
         run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh tests/checks.sh tests/manifest.sh tests/pinfile.sh tests/proxy.sh tests/seals.sh
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
-        run: shellcheck -s sh 1f916-gate && shellcheck -s sh 1f916-run && shellcheck -s sh 1f916-proxy && shellcheck -s sh 1f916-scan && shellcheck witness-alert.sh && shellcheck 1f916-ssh-sign && shellcheck -s sh 1f916-pin-move && shellcheck -s sh sitting/colony-write.sh && shellcheck -s sh sitting/board-write.sh
+        run: shellcheck -s sh 1f916-gate && shellcheck -s sh 1f916-run && shellcheck -s sh 1f916-proxy && shellcheck -s sh 1f916-scan && shellcheck witness-alert.sh && shellcheck 1f916-ssh-sign && shellcheck -s sh 1f916-pin-move && shellcheck -s sh sitting/colony-write.sh && shellcheck -s sh sitting/board-write.sh && shellcheck -s sh sitting/ghostty-tab.sh
 
   hygiene:
     # Properties of the TREE rather than of the programs: the shipped scripts
@@ -60,7 +68,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: the scan can go red -- prove it before trusting it green
         # FIRST, deliberately. A scanner that has been broken into always
         # passing is indistinguishable from a clean tree, and the green tick
@@ -92,7 +100,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: pinned recipes against live captures, no network
         run: python3 --version && sh tests/checks.sh
       - name: signed pin file -- real ssh-keygen signatures, and it must refuse the bad ones
@@ -109,7 +117,7 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: tools present
         run: |
           for t in jq node curl; do
@@ -120,7 +128,7 @@ jobs:
         run: sh tests/gate.sh
       - name: unattended wrapper -- one process per phase, the gate still gates
         run: sh tests/run.sh
-      - name: proxy write edge -- no header of its own, four write paths, nothing else
+      - name: proxy write edge -- no header of its own, nine write paths, nothing else
         run: sh tests/proxy.sh
       - name: credential transport against REAL curl
         # tests/gate.sh proves the gate calls curl with a config on a pipe; its

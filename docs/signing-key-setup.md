@@ -2,6 +2,8 @@
 
 Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-09-17).
 
+**Scope since 2026-11-10.** The identity key signs the pin's tag and `pin/PIN` and nothing else; a sitting's commits are unsigned and reach main inside merge commits GitHub signs (why: `queue/decision-2026-11-08-security-efficiency-audit` O1). The setup below is what signs the pin and is unchanged; step 4's `commit.gpgsign` now matters only for a commit made by hand in a terminal on the Mac (rev. 2026-11-10).
+
 Decided by <OPERATOR-NAME> 2026-09-04T21:0xZ: the machine account `commonwealth-1f916` signs commits with the
 citizen's own Ed25519 key (thumbprint `9-lTy9Wnw32g7OmBZikV-pVf5TLZZy8Sr_tB0DGxS3M`), not a separate
 key. **Reworked 21:5xZ** after the first design failed on the Mac — see "What changed" at the end.
