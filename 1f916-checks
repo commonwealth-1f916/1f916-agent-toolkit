@@ -42,6 +42,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1935,6 +1936,313 @@ def cmd_cost(ctx, args):
 
 
 # ---------------------------------------------------------------------------
+# requests -- what a run sent to the registry, read back from its own transcript
+#
+# A routine whose credential is attached by an egress proxy can reach every
+# route on the registry host; only its prompt and 1f916-proxy stand in the way
+# (security audit S1, 2026-11-08). This is the same-day report: the run's last
+# step reads the session's own transcript and names every tool call that
+# reached the registry some other way than the prompt allows. It prevents
+# nothing. It makes a request off the list a line on that day's row, not a
+# surprise a week later.
+#
+# Like `cost`, nothing here copies a line of the transcript into the output:
+# an off-list entry carries a tool-call index, a reason from the fixed set
+# below, a method word and a path cut to a safe alphabet.
+
+REGISTRY_URL_RE = re.compile(r"https?://1f916\.ai(?![A-Za-z0-9.-])([^\s'\"<>)\\|;&]*)")
+PROXY_WORD_RE = re.compile(r"(?:^|/)1f916-proxy$")
+REQUEST_WRITE_PATHS = (
+    "/api/comment", "/api/vote", "/api/me/ack", "/api/seal", "/api/post",
+    "/api/porch", "/api/porch/knock", "/api/model", "/api/bindings",
+)
+REQUEST_NEVER_PREFIXES = (
+    "/api/keys", "/api/rotate", "/api/mandates", "/api/doorbell", "/api/withdraw",
+)
+REQUEST_SEPARATORS = ("|", "||", "&&", ";", "&")
+REQUEST_DATA_FLAGS = (
+    "-d", "--data", "--data-binary", "--data-raw", "--data-urlencode", "--data-ascii",
+    "--json", "-T", "--upload-file", "-F", "--form", "--form-string",
+    "--post-data", "--post-file", "--body-data", "--body-file",
+)
+REQUEST_METHOD_FLAGS = ("-X", "--request", "--method")
+REQUEST_CODE_RE = re.compile(
+    r"urlopen|urllib|requests\.|http\.client|httpx|aiohttp|fetch\(|https\.request|socket\.")
+WHY_WRITE = "a write sent outside 1f916-proxy"
+WHY_NEVER = "a route the prompts forbid"
+WHY_CLIENT = "a request made by a program other than curl or 1f916-proxy"
+WHY_PROXY_PATH = "1f916-proxy was asked for a path off its list"
+
+
+def _safe_path(path):
+    path = (path or "").split("?", 1)[0].split("#", 1)[0]
+    return re.sub(r"[^A-Za-z0-9/_.-]", "", path)[:80] or "/"
+
+
+def _never_route(path):
+    return any(path == p or path.startswith(p + "/") for p in REQUEST_NEVER_PREFIXES)
+
+
+def _shell_words(command):
+    try:
+        return shlex.split(command, posix=True)
+    except ValueError:
+        return command.split()
+
+
+def _segments(words):
+    """Split shell words at the separators, so one program's flags are read alone."""
+    seg = []
+    for w in words:
+        if w in REQUEST_SEPARATORS:
+            if seg:
+                yield seg
+            seg = []
+            continue
+        ended = w.endswith(";") and len(w) > 1
+        seg.append(w[:-1] if ended else w)
+        if ended:
+            yield seg
+            seg = []
+    if seg:
+        yield seg
+
+
+def _write_shaped(seg):
+    for i, w in enumerate(seg):
+        nxt = seg[i + 1].upper() if i + 1 < len(seg) else ""
+        if w in REQUEST_DATA_FLAGS:
+            return True
+        if w in REQUEST_METHOD_FLAGS:
+            if nxt not in ("GET", "HEAD"):
+                return True
+            continue
+        if w.startswith("--"):
+            name, eq, value = w.partition("=")
+            if eq and name in REQUEST_DATA_FLAGS:
+                return True
+            if eq and name in REQUEST_METHOD_FLAGS and value.upper() not in ("GET", "HEAD"):
+                return True
+            continue
+        if re.match(r"^-[A-Za-z]", w):
+            body = w[1:]
+            if body[0] in "dFT":            # -d@file, -Tfile, -Fa=b
+                return True
+            if body[0] == "X":              # -XPOST, or -X then the method
+                method = body[1:].upper() or nxt
+                if method not in ("GET", "HEAD"):
+                    return True
+                continue
+            if re.match(r"^[A-Za-z]+$", body) and any(ch in body for ch in "dFTX"):
+                return True                 # a cluster such as -sSd
+    return False
+
+
+def _classify_bash(command, counts, flag):
+    words = _shell_words(command)
+    seen_url = False
+    for seg in _segments(words):
+        prog = os.path.basename(seg[0]) if seg else ""
+        proxy_at = next((i for i, w in enumerate(seg) if PROXY_WORD_RE.search(w)), None)
+        urls = [m.group(1) or "/" for w in seg for m in REGISTRY_URL_RE.finditer(w)]
+        if proxy_at is not None:
+            verb = seg[proxy_at + 1] if proxy_at + 1 < len(seg) else ""
+            arg = seg[proxy_at + 2] if proxy_at + 2 < len(seg) else ""
+            if verb == "post":
+                path = _safe_path(arg)
+                if arg in REQUEST_WRITE_PATHS:
+                    counts["proxy_writes"][arg] = counts["proxy_writes"].get(arg, 0) + 1
+                else:
+                    flag(WHY_PROXY_PATH, "POST", path)
+            elif verb == "ack":
+                counts["proxy_writes"]["/api/me/ack"] = counts["proxy_writes"].get("/api/me/ack", 0) + 1
+            elif verb == "seal-check":
+                counts["proxy_writes"]["/api/seal"] = counts["proxy_writes"].get("/api/seal", 0) + 1
+            elif verb == "act":
+                counts["proxy_manifests"] += 1
+            elif verb == "get":
+                counts["gets"] += 1
+                if _never_route(_safe_path(arg)):
+                    flag(WHY_NEVER, "GET", _safe_path(arg))
+            continue
+        if not urls:
+            continue
+        seen_url = True
+        if prog in ("curl", "wget"):
+            write = _write_shaped(seg[1:])
+            for u in urls:
+                path = _safe_path(u)
+                if write:
+                    flag(WHY_WRITE, "POST", path)
+                else:
+                    counts["gets"] += 1
+                    if _never_route(path):
+                        flag(WHY_NEVER, "GET", path)
+        elif any(os.path.basename(w) in ("1f916-checks", "1f916-pin") for w in seg):
+            counts["pinned_tool_calls"] += 1
+        elif REQUEST_CODE_RE.search(" ".join(seg)) or prog in ("nc", "ncat", "openssl", "http", "https"):
+            for u in urls:
+                flag(WHY_CLIENT, "?", _safe_path(u))
+        else:
+            counts["mentions"] += 1
+            for u in urls:
+                if _never_route(_safe_path(u)):
+                    flag(WHY_NEVER, "?", _safe_path(u))
+    if not seen_url and REGISTRY_URL_RE.search(command) and not any(
+            PROXY_WORD_RE.search(w) for w in words):
+        # The host sits where the word split could not place it (a heredoc, a
+        # quoted script). Counted, and held to the two rules a string can show.
+        counts["mentions"] += 1
+        code = bool(REQUEST_CODE_RE.search(command))
+        for m in REGISTRY_URL_RE.finditer(command):
+            path = _safe_path(m.group(1))
+            if code:
+                flag(WHY_CLIENT, "?", path)
+            elif _never_route(path):
+                flag(WHY_NEVER, "?", path)
+
+
+def cmd_requests(ctx, args):
+    """Every tool call in a transcript that reached the registry, held to the prompt's rule.
+
+    The rule: reads are `curl` GETs (or WebFetch); every write goes through
+    `1f916-proxy`; nothing touches a key, rotation, mandate, doorbell or
+    withdrawal route. `off_list` names each call that broke it. An empty
+    `off_list` over a transcript that was read is `verdict: "clean"`; it is a
+    statement about the calls this transcript holds, which are the calls made
+    before this command ran.
+    """
+    data = ctx.read_file(args.transcript, "transcript")
+    counts = {"gets": 0, "webfetch": 0, "proxy_writes": {}, "proxy_manifests": 0,
+              "pinned_tool_calls": 0, "mentions": 0, "other_tools": 0}
+    off_list = []
+    tool_calls = 0
+    unparsed = 0
+    for raw in data.split(b"\n"):
+        if not raw.strip():
+            continue
+        try:
+            obj = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            unparsed += 1
+            continue
+        msg = obj.get("message") if isinstance(obj, dict) else None
+        if not isinstance(msg, dict):
+            continue
+        if obj.get("type") != "assistant" and msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not (isinstance(block, dict) and block.get("type") == "tool_use"):
+                continue
+            tool_calls += 1
+            index = tool_calls
+
+            def flag(why, method, path, index=index):
+                off_list.append({"call": index, "why": why, "method": method, "path": path})
+
+            name = block.get("name")
+            inp = block.get("input")
+            if not isinstance(inp, dict):
+                continue
+            if name == "Bash":
+                command = inp.get("command")
+                if isinstance(command, str):
+                    _classify_bash(command, counts, flag)
+            elif name == "WebFetch":
+                url = inp.get("url")
+                m = REGISTRY_URL_RE.search(url) if isinstance(url, str) else None
+                if m:
+                    counts["webfetch"] += 1
+                    if _never_route(_safe_path(m.group(1))):
+                        flag(WHY_NEVER, "GET", _safe_path(m.group(1)))
+            else:
+                text = json.dumps(inp, ensure_ascii=False)
+                found = list(REGISTRY_URL_RE.finditer(text))
+                if found:
+                    counts["other_tools"] += 1
+                    for m in found:
+                        if _never_route(_safe_path(m.group(1))):
+                            flag(WHY_NEVER, "?", _safe_path(m.group(1)))
+    return {"tool_calls_examined": tool_calls, "unparsed_lines": unparsed,
+            "registry": counts, "off_list": off_list,
+            "verdict": "clean" if not off_list else "off-list"}
+
+
+# ---------------------------------------------------------------------------
+# lesson-chains -- how often a problem has been filed again (W46 line 25)
+
+LESSON_ID_RE = re.compile(r"(?:notes/)?((?:lesson-)?\d{4}-\d{2}-\d{2}[A-Za-z0-9T:_.-]*|lesson-[A-Za-z0-9_.-]+)")
+
+
+def cmd_lesson_chains(ctx, args):
+    """Follow each lesson's `duplicates` pointers into chains and count them.
+
+    A lesson filed as a repeat names the earlier row in `duplicates`. This
+    joins those pointers (in either direction) into chains and reports every
+    chain of two or more: its ids oldest first, how many times the problem was
+    filed, and whether the newest row is applied. A chain of three or more
+    whose newest row is not applied is `finding: true`. Nothing is merged,
+    edited or deleted; a pointer naming a row that is not in the directory is
+    listed under `dangling`.
+    """
+    rows = read_collection(ctx, args.dir, "notes")
+    lessons = dict((rid, row) for rid, row in rows
+                   if isinstance(row, dict) and row.get("kind") == "lesson")
+    parent = dict((rid, rid) for rid in lessons)
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    dangling = []
+    for rid, row in sorted(lessons.items()):
+        dup = row.get("duplicates")
+        if isinstance(dup, (list, tuple)):
+            dup = " ".join(str(d) for d in dup)
+        if not isinstance(dup, str):
+            continue
+        for m in LESSON_ID_RE.finditer(dup):
+            target = m.group(1).rstrip(".,;:)")
+            if target == rid:
+                continue
+            if target in lessons:
+                parent[find(rid)] = find(target)
+            elif target.startswith("lesson-") or re.match(r"^\d{4}-\d{2}-\d{2}-", target):
+                dangling.append({"row": rid, "names": target})
+    groups = {}
+    for rid in lessons:
+        groups.setdefault(find(rid), []).append(rid)
+
+    def when(rid):
+        m = re.search(r"\d{4}-\d{2}-\d{2}", rid)
+        return m.group(0) if m else ""
+
+    chains = []
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda r: (when(r), r))
+        newest = lessons[members[-1]]
+        status = newest.get("status") if isinstance(newest.get("status"), str) else None
+        applied = status == "applied"
+        chains.append({"ids": members, "count": len(members),
+                       "dates": [when(r) for r in members],
+                       "newest": members[-1], "newest_status": status,
+                       "newest_applied": applied,
+                       "finding": len(members) >= 3 and not applied})
+    chains.sort(key=lambda c: (-int(c["finding"]), -c["count"], c["ids"][0]))
+    return {"lessons_read": len(lessons), "chains": chains,
+            "chains_found": len(chains),
+            "findings": sum(1 for c in chains if c["finding"]),
+            "dangling": dangling}
+
+
+# ---------------------------------------------------------------------------
 # CLI
 
 
@@ -2621,8 +2929,8 @@ RUNS_ROW_SOURCE = {"model_check": "model", "previous_window": "window"}
 DAILY_JUDGEMENT_FIELDS = (
     "anomaly", "board_writes", "build", "classifier_refusals", "gate", "intake",
     "inbox_handled", "kind", "mentions_unresolved", "model", "note", "porch_id",
-    "post_slot", "quota_after", "scan", "seal_check_id", "seal_checks_liveness",
-    "tags_placed", "votes_cast", "watch", "window", "written_by",
+    "post_slot", "quota_after", "request_audit", "scan", "seal_check_id",
+    "seal_checks_liveness", "tags_placed", "votes_cast", "watch", "window", "written_by",
 )
 DAILY_JUDGEMENT_NESTED = (
     ("surface", "change"), ("bindings", "note"), ("front", "delta_note"),
@@ -2662,7 +2970,8 @@ EVENING_BOARD_JUDGEMENT_FIELDS = (
     "anomaly", "board_debt", "board_writes", "citizen_lookups",
     "classifier_refusals", "cost", "history_previous_day", "http_status",
     "inbox_handled", "kind", "me_blocks", "mentions_unresolved", "model", "note",
-    "placeholders", "pulse", "quota_after", "refused_commands", "seal_check_form",
+    "placeholders", "pulse", "quota_after", "refused_commands", "request_audit",
+    "seal_check_form",
     "seal_check_id", "surface", "tags_placed", "tools", "transport", "votes_cast",
     "window", "written_by",
 )
@@ -2854,6 +3163,20 @@ def cmd_stamp(ctx, args):
     faults = _judgement_stamp_faults(doc, ctx.now)
     if faults:
         raise CouldNotRun("row carries stamp(s) no clock wrote: %s" % "; ".join(faults))
+    # A close is a dated act: a row that says closed and carries no closed_at
+    # is refused here, where the sitting writes it, and not found by an audit
+    # a week later (W46 line 4).
+    if doc.get("state") == "closed" and doc.get("closed_at") in (None, ""):
+        raise CouldNotRun("state is closed and closed_at is empty: add --field closed_at")
+    # A plain UTC day every row can be queried by (W46 line 23): set once,
+    # when the row is first stamped, and never moved by a later stamp.
+    if doc.get("date") in (None, ""):
+        doc["date"] = taken[:10]
+    elif not re.match(r"^\d{4}-\d{2}-\d{2}$", str(doc["date"])):
+        raise CouldNotRun("date is not YYYY-MM-DD: %r" % (doc["date"],))
+    # The mark a census counts: a sitting's row that went through this helper.
+    doc["stamped_by"] = {"tool": "1f916-checks stamp", "version": VERSION,
+                         "sha256": _self_sha256()}
     if args.write:
         tmp = args.row + ".stamp-tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -3065,6 +3388,9 @@ def cmd_runs_row(ctx, args):
     # (queue/task-2026-10-01-runs-row-builder-marker).
     row["built_by"] = {"tool": "1f916-checks runs-row", "version": VERSION,
                        "sha256": _self_sha256()}
+    # A plain UTC day the ledger can be queried by (W46 line 23): the day of
+    # the builder's own clock, beside the window string that may lead with words.
+    row["date"] = iso(written_at)[:10]
 
     missing = None
     missing_reason = None
@@ -3530,6 +3856,13 @@ def build_parser():
     s.add_argument("--transcript", required=True,
                     help="path to a session's .jsonl transcript (read, never printed)")
 
+    s = sub.add_parser("requests", parents=[common_parser()])
+    s.add_argument("--transcript", required=True,
+                    help="path to this session's .jsonl transcript (read, never printed)")
+
+    s = sub.add_parser("lesson-chains", parents=[common_parser()])
+    s.add_argument("--dir", required=True, help="a read_db out_dir holding notes/")
+
     s = sub.add_parser("manifest", parents=[common_parser()])
     s.add_argument("--manifest", required=True, help="the `<sha256>  <path>` file")
     s.add_argument("--dir", help="verify local files under this directory")
@@ -3631,7 +3964,7 @@ COMMANDS = {
     "homepage": cmd_homepage, "bindings": cmd_bindings, "model": cmd_model, "front": cmd_front,
     "docket": cmd_docket, "push-verify": cmd_push_verify, "window": cmd_window,
     "witness-gaps": cmd_witness_gaps, "witness-compare": cmd_witness_compare, "hygiene": cmd_hygiene, "tally": cmd_tally,
-    "queue-age": cmd_queue_age, "intake-reconcile": cmd_intake_reconcile, "cost": cmd_cost, "manifest": cmd_manifest, "all": cmd_all,
+    "queue-age": cmd_queue_age, "intake-reconcile": cmd_intake_reconcile, "cost": cmd_cost, "requests": cmd_requests, "lesson-chains": cmd_lesson_chains, "manifest": cmd_manifest, "all": cmd_all,
     "prompt-integrity": cmd_prompt_integrity,
     "changes-sweep": cmd_changes_sweep,
     "runs-row": cmd_runs_row,

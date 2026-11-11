@@ -1097,6 +1097,182 @@ class Cost(Base):
 
 
 # ---------------------------------------------------------------------------
+class Requests(Base):
+    """`requests` reads a transcript and names every registry call the prompt
+    does not allow (security audit S1): a write outside 1f916-proxy, a forbidden
+    route, a request made by something other than curl."""
+
+    def transcript(self, *calls):
+        lines = []
+        for name, inp in calls:
+            lines.append(json.dumps({"type": "assistant", "message": {
+                "role": "assistant", "model": "m",
+                "content": [{"type": "tool_use", "name": name, "input": inp}]}}))
+        return self.write("t.jsonl", "\n".join(lines) + "\n")
+
+    def bash(self, command):
+        return ("Bash", {"command": command})
+
+    GET = "curl -q -sS -o out/pulse.json -w '%{http_code}\\n' 'https://1f916.ai/api/pulse'"
+
+    def test_the_prescribed_forms_are_clean_and_counted(self):
+        path = self.transcript(
+            self.bash(self.GET),
+            self.bash("curl -q -sS -o me.json -w '%{http_code}\\n' 'https://1f916.ai/api/me?cursor_mode=id'"),
+            self.bash("sh tools/1f916-proxy post /api/comment body.json"),
+            self.bash("sh 1f916-proxy post /api/porch/knock knock.json"),
+            self.bash("sh 1f916-proxy ack"),
+            self.bash("sh 1f916-proxy seal-check commonwealth"),
+            self.bash("sh 1f916-proxy act manifest.json"),
+            self.bash("python3 1f916-checks seal --label homepage --url https://1f916.ai/api/seals"),
+            self.bash("python3 -c \"import json;print(json.load(open('me.json'))['now'])\""),
+            ("WebFetch", {"url": "https://1f916.ai/api/citizen/commonwealth", "prompt": "x"}),
+            ("ArtifactData", {"action": "list", "url": "https://claude.ai/code/artifact/x"}),
+        )
+        out = self.run_checks("requests", "--transcript", path)
+        self.assertEqual(out["verdict"], "clean")
+        self.assertEqual(out["off_list"], [])
+        self.assertEqual(out["tool_calls_examined"], 11)
+        reg = out["registry"]
+        self.assertEqual(reg["gets"], 2)
+        self.assertEqual(reg["webfetch"], 1)
+        self.assertEqual(reg["proxy_writes"], {"/api/comment": 1, "/api/porch/knock": 1,
+                                               "/api/me/ack": 1, "/api/seal": 1})
+        self.assertEqual(reg["proxy_manifests"], 1)
+        self.assertEqual(reg["pinned_tool_calls"], 1)
+
+    def test_a_curl_write_is_off_list_even_to_an_allowed_path(self):
+        for cmd in (
+            "curl -q -sS -o r.json -H 'Content-Type: application/json' --data @b.json 'https://1f916.ai/api/comment'",
+            "curl -sS -X POST https://1f916.ai/api/rotate",
+            "curl -sSd @b.json https://1f916.ai/api/vote",
+            "curl -XPOST 'https://1f916.ai/api/keys/custody' --json '{}'",
+            "curl --request=DELETE https://1f916.ai/api/me",
+            "wget --post-file=b.json https://1f916.ai/api/post",
+            "cd x && curl -T f https://1f916.ai/api/seal; echo done",
+        ):
+            out = self.run_checks("requests", "--transcript", self.transcript(self.bash(cmd)))
+            self.assertEqual(out["verdict"], "off-list", cmd)
+            self.assertEqual(out["off_list"][0]["why"], "a write sent outside 1f916-proxy", cmd)
+            self.assertEqual(out["off_list"][0]["call"], 1)
+
+    def test_a_get_with_an_explicit_get_method_is_still_a_read(self):
+        out = self.run_checks("requests", "--transcript", self.transcript(
+            self.bash("curl -q -sS -X GET 'https://1f916.ai/api/pulse' | cut -d: -f1")))
+        self.assertEqual(out["verdict"], "clean")
+        self.assertEqual(out["registry"]["gets"], 1)
+
+    def test_a_forbidden_route_is_named_whoever_asks(self):
+        cases = (
+            self.bash("curl -q -sS -o k.json 'https://1f916.ai/api/keys/commonwealth'"),
+            self.bash("sh 1f916-proxy get /api/mandates"),
+            self.bash("echo https://1f916.ai/api/rotate"),
+            ("WebFetch", {"url": "https://1f916.ai/api/doorbell", "prompt": "x"}),
+            ("SomeTool", {"target": "https://1f916.ai/api/withdraw/1"}),
+        )
+        for call in cases:
+            out = self.run_checks("requests", "--transcript", self.transcript(call))
+            self.assertEqual(out["verdict"], "off-list", call)
+            self.assertEqual(out["off_list"][0]["why"], "a route the prompts forbid", call)
+        # /api/keysmith is not under /api/keys
+        out = self.run_checks("requests", "--transcript", self.transcript(
+            self.bash("curl -q -sS 'https://1f916.ai/api/keysmith'")))
+        self.assertEqual(out["verdict"], "clean")
+
+    def test_another_client_is_off_list(self):
+        for cmd in (
+            "python3 -c \"import urllib.request as u; u.urlopen('https://1f916.ai/api/post')\"",
+            "node -e \"fetch('https://1f916.ai/api/comment',{method:'POST'})\"",
+            "python3 - <<'PY'\nimport requests\nrequests.post('https://1f916.ai/api/rotate')\nPY",
+        ):
+            out = self.run_checks("requests", "--transcript", self.transcript(self.bash(cmd)))
+            self.assertEqual(out["verdict"], "off-list", cmd)
+            self.assertEqual(out["off_list"][0]["why"],
+                             "a request made by a program other than curl or 1f916-proxy", cmd)
+
+    def test_the_proxy_asked_for_a_path_off_its_list_is_reported(self):
+        out = self.run_checks("requests", "--transcript", self.transcript(
+            self.bash("sh 1f916-proxy post /api/rotate b.json")))
+        self.assertEqual(out["off_list"],
+                         [{"call": 1, "why": "1f916-proxy was asked for a path off its list",
+                           "method": "POST", "path": "/api/rotate"}])
+
+    def test_other_hosts_are_not_the_registry(self):
+        out = self.run_checks("requests", "--transcript", self.transcript(
+            self.bash("curl -sS -d x https://f916-watch.fly.dev/post/1"),
+            self.bash("curl -sS -d x https://1f916.ai.example.net/api/rotate"),
+            self.bash("curl -sS -d x https://not1f916.ai/api/rotate")))
+        self.assertEqual(out["verdict"], "clean")
+        self.assertEqual(out["registry"]["gets"], 0)
+
+    def test_nothing_of_the_transcript_reaches_the_output_but_a_cut_path(self):
+        secret = "sekrit-token-value"
+        out = self.run_checks("requests", "--transcript", self.transcript(
+            self.bash("curl -sS -H 'X: %s' --data '%s' 'https://1f916.ai/api/comment?x=%s&y=<b>'"
+                      % (secret, secret, secret))))
+        self.assertNotIn(secret, json.dumps(out))
+        self.assertEqual(out["off_list"][0]["path"], "/api/comment")
+
+    def test_a_missing_transcript_is_could_not_run_and_never_clean(self):
+        out = self.run_checks("requests", "--transcript", os.path.join(self.tmp, "nope.jsonl"), want=3)
+        self.assertNotIn("verdict", out)
+
+
+# ---------------------------------------------------------------------------
+class LessonChains(Base):
+    """`lesson-chains` joins lessons through their `duplicates` pointers (W46 line 25)."""
+
+    def rows(self, **rows):
+        for rid, row in rows.items():
+            self.write(os.path.join("led", "notes", rid.replace("_", "-") + ".json"), row)
+        return os.path.join(self.tmp, "led")
+
+    def test_chains_counts_and_the_three_or_more_finding(self):
+        d = self.rows(**{
+            "lesson_2026_09_20_stamps": {"kind": "lesson", "status": "applied", "duplicates": "none"},
+            "2026_09_30_lesson_stamps_again": {"kind": "lesson", "status": "applied",
+                                               "duplicates": "notes/lesson-2026-09-20-stamps"},
+            "2026_10_20_lesson_stamps_still": {"kind": "lesson", "status": "open",
+                                               "duplicates": "2026-09-30-lesson-stamps-again (third filing)."},
+            "2026_10_13_lesson_merge": {"kind": "lesson", "status": "applied", "duplicates": "none found"},
+            "2026_10_15_lesson_merge_recurred": {"kind": "lesson", "status": "applied",
+                                                 "duplicates": ["2026-10-13-lesson-merge"]},
+            "2026_11_01_lesson_alone": {"kind": "lesson", "status": "open",
+                                        "duplicates": "2026-08-01-lesson-gone"},
+            "2026_11_02_a_finding": {"kind": "finding", "duplicates": "2026-11-01-lesson-alone"},
+        })
+        out = self.run_checks("lesson-chains", "--dir", d)
+        self.assertEqual(out["lessons_read"], 6)
+        self.assertEqual(out["chains_found"], 2)
+        self.assertEqual(out["findings"], 1)
+        first, second = out["chains"]
+        self.assertEqual(first["ids"], ["lesson-2026-09-20-stamps", "2026-09-30-lesson-stamps-again",
+                                        "2026-10-20-lesson-stamps-still"])
+        self.assertEqual(first["count"], 3)
+        self.assertTrue(first["finding"])
+        self.assertEqual(first["newest_status"], "open")
+        self.assertEqual(second["count"], 2)
+        self.assertFalse(second["finding"])
+        self.assertTrue(second["newest_applied"])
+        self.assertEqual(out["dangling"], [{"row": "2026-11-01-lesson-alone",
+                                            "names": "2026-08-01-lesson-gone"}])
+
+    def test_a_three_chain_whose_newest_is_applied_is_not_a_finding(self):
+        d = self.rows(**{
+            "2026_09_01_lesson_a": {"kind": "lesson", "status": "applied"},
+            "2026_09_02_lesson_b": {"kind": "lesson", "status": "applied", "duplicates": "2026-09-01-lesson-a"},
+            "2026_09_03_lesson_c": {"kind": "lesson", "status": "applied", "duplicates": "2026-09-01-lesson-a"},
+        })
+        out = self.run_checks("lesson-chains", "--dir", d)
+        self.assertEqual(out["chains"][0]["count"], 3)
+        self.assertEqual(out["findings"], 0)
+
+    def test_a_missing_directory_is_could_not_run(self):
+        self.run_checks("lesson-chains", "--dir", os.path.join(self.tmp, "absent"), want=3)
+
+
+
+# ---------------------------------------------------------------------------
 class Manifest(Base):
     """`manifest` verifies a set of documents against the digests a file claims.
 
@@ -1582,6 +1758,7 @@ class RunsRow(Base):
         # W41 line 21 (queue/task-2026-10-01-runs-row-builder-marker).
         out = self.run_checks("runs-row", "--all", self.all_path)
         mark = out["row"]["built_by"]
+        self.assertEqual(out["row"]["date"], out["row"]["written_at"][:10])
         self.assertEqual(mark["tool"], "1f916-checks runs-row")
         with open(SCRIPT, "rb") as fh:
             self.assertEqual(mark["sha256"], sha(fh.read()))
@@ -1619,6 +1796,30 @@ class Stamp(Base):
             row = self.write("row.json", {"opened": bad})
             self.run_checks("stamp", "--row", row, "--field", "closed_at",
                             "--now", self.NOW, want=3)
+
+    def test_it_sets_a_plain_date_once_and_marks_the_row(self):
+        row = self.write("row.json", {"item": "x"})
+        out = self.run_checks("stamp", "--row", row, "--field", "opened",
+                              "--now", self.NOW, "--write")
+        self.assertEqual(out["row"]["date"], "2026-10-05")
+        self.assertEqual(out["row"]["stamped_by"]["tool"], "1f916-checks stamp")
+        self.assertRegex(out["row"]["stamped_by"]["sha256"], "^[0-9a-f]{64}$")
+        later = self.run_checks("stamp", "--row", row, "--field", "closed_at",
+                                "--now", "2026-10-07T09:00:00Z")
+        self.assertEqual(later["row"]["date"], "2026-10-05")
+
+    def test_it_refuses_a_date_that_is_not_a_day(self):
+        row = self.write("row.json", {"date": "Monday"})
+        self.run_checks("stamp", "--row", row, "--field", "opened", "--now", self.NOW, want=3)
+
+    def test_a_close_without_closed_at_is_refused(self):
+        row = self.write("row.json", {"state": "closed", "closed_reason": "done"})
+        out = self.run_checks("stamp", "--row", row, "--field", "written_at",
+                              "--now", self.NOW, want=3)
+        self.assertIn("closed_at", out["reason"])
+        ok = self.run_checks("stamp", "--row", row, "--field", "closed_at", "--now", self.NOW)
+        self.assertEqual(ok["row"]["state"], "closed")
+        self.assertEqual(ok["row"]["closed_at"], ok["taken"])
 
     def test_no_field_is_a_usage_error(self):
         row = self.write("row.json", {})
