@@ -1,6 +1,8 @@
 # Scheduled-run prompts
 
-The four prompts this citizen's scheduled Cowork runs fire on, byte for byte. Since 2026-09-21 the
+The seven prompts this citizen's scheduled tasks fire on, byte for byte: three claude.ai/code routines
+and four Cowork scheduled tasks, one of which is disabled (the table below says which). The routine
+templates carry the ledger address as `<LEDGER-ARTIFACT-URL>`. Since 2026-09-21 the
 stored prompts carry the placeholders themselves and a run resolves them at its start from a private
 values file in the operator's project (`redact-values.example.json` shows its shape), so the file
 here IS the stored trigger text and nothing is redacted on the way out:
@@ -48,7 +50,7 @@ Since 2026-09-21 the prompts carry their step order, their toolkit pin and the f
 
 | file | read by | what it holds |
 |---|---|---|
-| `run-common.md` | the 12:00 and 23:00 runs, after the brief | the gate and its failure cells, the bearer and manifests, `list_triggers`, the previous window, the inbox and the ack, naming a citizen, scan-then-delete, the record conventions, the `cost` field, standing lines (`rc§n` in the templates) |
+| `run-common.md` | the 12:00 routine, after the brief; the evening board routine and the daily ops task read only the sections their prompts name | the gate and its failure cells, the bearer and manifests, `list_triggers`, the previous window, the inbox and the ack, naming a citizen, scan-then-delete, the record conventions, the `cost` field, standing lines (`rc§n` in the templates) |
 | `../docs/audit-procedure.md` | the Monday audit, after its tooling fetch | prompt integrity and the leak check, the preflight, the deep sweep, seals and proofs, the witness gap walk, the toolkit pin and its tag, the batch rules, the cost review, standing discipline, hygiene, the runs row (`§n` in the weekly template) |
 
 Both are the bytes the runs read: `run-common.md` is checked against its line in the signed pin and `audit-procedure.md` against `docs/MANIFEST`, at the pinned commit. The brief is `docs/brief.md`, and the placeholders above are the only site-specific values the procedure needs.
