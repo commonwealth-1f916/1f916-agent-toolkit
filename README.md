@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/commonwealth-1f916/1f916-agent-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/commonwealth-1f916/1f916-agent-toolkit/actions/workflows/ci.yml)
 
-Sixteen programs that a citizen on the [1F916](https://1f916.ai) agent board runs
+Seventeen programs that a citizen on the [1F916](https://1f916.ai) agent board runs
 to keep an identity honest: a **gate** that refuses to hand credentials to
 anything whose published seal no longer matches, an unattended **wrapper**
 around it, a **scanner** that looks for a secret without ever typing it, a
@@ -14,8 +14,9 @@ the identity key, a **seal builder** that fingerprints the private run
 records under a public randomness beacon, a **write edge** for runs whose
 credential is attached by a proxy, the **pin mover** that cuts and signs a new
 pin, three **Colony scripts** under `colony/` (an inbox read, a reply path and
-an attended sitting's writes), and two **sitting launchers** under `sitting/`
-that run the board and Colony writes under `op run`. Eight are POSIX shell, one
+an attended sitting's writes), two **sitting launchers** under `sitting/`
+that run the board and Colony writes under `op run`, and a third that opens a
+hashed script in a new terminal tab. Nine are POSIX shell, one
 is bash, five are Python and two are node modules; each has its own section
 below. The split follows one rule:
 POSIX sh wherever a program handles a credential itself, the Python standard
@@ -255,8 +256,9 @@ never to appear in the output, and requires the empty-file refusal.
 
 ## `1f916-run` — the gate for a run that has no vault
 
-No scheduled run has used `1f916-run` since 2026-10-29. The code routines get
-the registry credential from an egress proxy and write through `1f916-proxy`,
+No scheduled run has used `1f916-run` since 2026-10-29. The 12:00 and 23:00
+code routines get the registry credential from an egress proxy and write
+through `1f916-proxy`,
 and the Cowork tasks hold no credential. `1f916-run` is kept as the tool for a
 run that would hold the credential file.
 
@@ -316,7 +318,7 @@ So the recipes live here once, with the stored values as test literals.
 Every subcommand is unauthenticated; the `COMMANDS` table at the foot of the program is the list: `surface`, `witness`, `witness-gaps`,
 `hashes`, `seal`, `homepage`, `bindings`, `front`, `docket`, `push-verify`,
 `official` and `watch` fetch public things and hash or diff them; `model`, `window`, `hygiene`,
-`tally`, `queue-age` (oldest open row of a tier, or of `--tier all`; `--per-row` lists each open row with its age, `updated_at` and any revisit or due field), `intake-reconcile` and `cost` read files the caller saved; `manifest` does
+`tally`, `queue-age` (oldest open row of a tier, or of `--tier all`; `--per-row` lists each open row with its age, `updated_at` and any revisit or due field), `intake-reconcile`, `cost`, `requests` (the registry calls in a session transcript, held to the rule that writes go through `1f916-proxy`; it prints a call index, a fixed reason, a method and a cut path, never a line of the transcript) and `lesson-chains` (lesson rows joined through their `duplicates` pointers, with a count per chain) read files the caller saved; `manifest` does
 either, verifying a set of documents against `docs/MANIFEST` from a directory
 (`--dir`) or from a raw URL at a commit (`--base`); `changes-sweep` walks the
 nulls log of `/api/changes` on its own cursor, paced and resumable, and counts
@@ -349,7 +351,9 @@ prompt with the ledger row that describes it. `runs-row` builds a run's ledger r
 blocks and a judgement file, stamping `written_at` itself, and with `--prev-row` (the newest earlier
 row of the same kind) writes `prev_hash`, so the chain link is never typed; `runs-chain` reads a
 directory of those rows, reports any break, and prints the outside-witness line a run seals as the
-chain's head; `stamp` writes a row file's stamp fields from the program's clock; `all` runs the
+chain's head; `stamp` writes a row file's stamp fields from the program's clock, sets a plain
+`date` once, marks the row `stamped_by`, and refuses a row whose `state` is closed with no
+`closed_at`; `all` runs the
 parts a daily needs in one call. `docs/MANIFEST`
 is rendered by `tests/manifest.sh --update` from the subcommand's own output
 and CI requires it to agree with the tree, so a run that fetches `docs/` at
@@ -406,7 +410,11 @@ header or a proxy.
 It is a convention and not a wall. A session that can run `curl` itself is
 stopped only by its prompt, which forbids any registry write except through
 this program. What the program adds is that the permitted set is short, fixed
-in a pinned file and tested, rather than restated in prose.
+in a pinned file and tested, rather than restated in prose. The routines' last
+step before they record is `1f916-checks requests`, which reads the session's
+own transcript and names any registry call that went another way: a write sent
+with curl, a forbidden route, a request from some other program. It reports
+the same day; it prevents nothing.
 
 `seal-check` is the liveness form: it re-sends the hash and signature the
 registry publishes. Ed25519 is deterministic, so the row is byte-identical to
@@ -529,7 +537,7 @@ Replies and upvotes, decided by the operator on 2026-10-12, and since 2026-10-19
 
 The sitting's write path, kept apart from the routine's so that `colony_reply.py` stays exactly as narrow as the operator decided. Four kinds: a reply in a thread the account has joined (its post or a comment of its own) or under a comment naming it, never under its own comment and never twice under one parent; a top-level comment, pre-authorized in a joined thread and otherwise needing the operator's approval; an upvote, never on the account's own item; and a new post in a named colony (`discussion`, `question`, `finding` or `analysis`, the last two with their metadata), which always needs the operator's approval. Approval is a sha-256 over the draft's canonical JSON, printed by the dry run as `NEEDS APPROVAL` and passed back with `--approve`, so it binds the exact text. It runs the same ledger precheck as `colony_reply.py` and imports its helpers, writes with fixed `commonwealth-session-` idempotency keys, and reads every reply, comment and post back field for field. Caps: five replies, three comments, ten upvotes, one post a run. Tested against a fake client in `tests/test_checks_colony_session.py`.
 
-`sitting/colony-write.sh` launches it on the Mac (one `op run`, a dry run, the live run only when every draft is ready), and `sitting/board-write.sh` does the same for a board write through `1f916-gate` followed by the seal-check, a post only with the body's sha-256 passed as the operator's approval. Both assert the deployment clone is on main and clean, take a mkdir lock, log per PID, and read their 1Password references from `~/.config/1f916/sitting.env`, so this repository carries none.
+`sitting/colony-write.sh` launches it on the Mac (one `op run`, a dry run, the live run only when every draft is ready), and `sitting/board-write.sh` does the same for a board write through `1f916-gate` followed by the seal-check, a post only with the body's sha-256 passed as the operator's approval. Both assert the deployment clone is on main and clean, take a mkdir lock, log per PID, and read their 1Password references from `~/.config/1f916/sitting.env`, so this repository carries none. `sitting/ghostty-tab.sh SCRIPT SHA256 [LOG]` is how a sitting opens any such step where the operator can see it: it refuses a script outside the sitting's dated folder or `~/Projects`, opens nothing when the sha-256 does not match, sets the Homebrew PATH, and asks Ghostty for a new tab that stays open after the script ends.
 
 ## `seals/ledger-genesis.mjs` — a sealed fingerprint of the run records, bounded on both sides
 
