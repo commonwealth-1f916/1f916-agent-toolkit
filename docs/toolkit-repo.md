@@ -1,6 +1,6 @@
 # The published toolkit repo — `commonwealth-1f916/1f916-agent-toolkit`
 
-Status: `queue/task-2026-09-20-toolkit-batch-1-pinned` (rev. 2026-11-03).
+Status: `queue/task-2026-09-20-toolkit-batch-1-pinned` (rev. 2026-11-10).
 
 **Created 2026-09-02T02:3x–02:5xZ by the live Cowork session bridged to the Mac, at the operator's
 instruction ("I think we should publish the code we're using to repos on the commonwealth-1f916
@@ -45,7 +45,7 @@ the same work done wrong and done right.**
 
 ## 2. What is in the repo
 
-The repository is its own inventory: `git ls-files` at `main` lists every tracked file, `README.md` names every program the repository ships (a CI check, `tests/hygiene.sh`, refuses a root-level program the README does not name), and `git log -- <file>` is each file's history. This doc carries no copy of either list, because a copy goes stale the day a file lands and nothing re-reads it (why: queue/task-2026-09-20-two-doc-debts-from-the-toolkit-batch). Every commit is authored and committed as `commonwealth <321972176+commonwealth-1f916@users.noreply.github.com>` and signed with the identity key (`docs/signing-key-setup.md`) (rev. 2026-09-21).
+The repository is its own inventory: `git ls-files` at `main` lists every tracked file, `README.md` names every program the repository ships (a CI check, `tests/hygiene.sh`, refuses a root-level program the README does not name), and `git log -- <file>` is each file's history. This doc carries no copy of either list, because a copy goes stale the day a file lands and nothing re-reads it (why: queue/task-2026-09-20-two-doc-debts-from-the-toolkit-batch). Every commit a sitting makes is authored and committed as `commonwealth <321972176+commonwealth-1f916@users.noreply.github.com>` and is unsigned; it reaches main inside a merge commit GitHub signs. The identity key (`docs/signing-key-setup.md`) signs the pin's tag and `pin/PIN`, the one thing a run trusts, and nothing else (why: `queue/decision-2026-11-08-security-efficiency-audit` O1) (rev. 2026-11-10).
 
 ## 3. How the push authenticated — do not re-derive this, it cost a wrong turn
 
@@ -229,7 +229,7 @@ The rule, decided by the operator on 2026-09-23:
 
 - A sitting MAY merge, as the machine account, a PR whose changed files are all under `docs/`, `prompts/`, or are `README.md` or `LICENSE`. Before merging: CI green, then each changed file fetched anonymously at the head commit and compared byte-for-byte with the local file the sitting committed, and each prompt template with the stored prompt it equals or the redacted form of it; since 2026-10-26 a doc under `docs/` is its own source, and merging one changes nothing a run reads until the pin moves (why: `queue/prompt-batch-2026-W44` line 4) (rev. 2026-10-26). After merging: fetch the same files at `main`, compare again, run `tests/pin.sh origin/main HEAD` and confirm it reports no tool file changed, and fast-forward the deployment clone. Record the merge on the sitting's runs row.
 - A PR that changes anything under `bin/` or `tests/`, or `.github/workflows/`, is opened by the sitting and merged by the operator, as before; the pin move that follows stays the operator's act (the tag signs under `op run`). A PR that mixes the two kinds is the operator's.
-- A PR from a 1f916-sittings session carries unsigned commits and is merged by <OPERATOR-NAME> in the web interface with a merge commit, which GitHub signs; a sitting never merges it as the machine account (why: queue/decision-2026-10-26-sitting-surface) (rev. 2026-11-03).
+- Every PR carries unsigned commits, from whichever surface built it, and lands by a merge commit, which GitHub signs whether the merge is made in the web interface or through the API (the ruleset allows no other method, §8). Who merges follows the two rules above; a PR from a 1f916-sittings session is merged by <OPERATOR-NAME> (why: queue/decision-2026-10-26-sitting-surface; `queue/decision-2026-11-08-security-efficiency-audit` O1) (rev. 2026-11-10).
 - Sittings batch their mirror changes into ONE PR opened at the close-check, not one PR per change; the ledger already records each change on its own, and the PR is only the publication step (why: the operator on 2026-09-23, seven PRs in three days).
 
 A scheduled run merges nothing; this is a sitting's act, made with the token on the Mac, never with the GitHub connector.
