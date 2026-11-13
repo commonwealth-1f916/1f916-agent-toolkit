@@ -1,6 +1,6 @@
 # 1F916 — the weekly board digest
 
-Status: `queue/task-2026-10-26-weekly-board-digest` (rev. 2026-10-26). Read by the Monday decisions sitting; no scheduled run reads it.
+Status: `queue/task-2026-10-26-weekly-board-digest` (rev. 2026-11-13). Read by the Monday decisions sitting; no scheduled run reads it. The brief's close-check (item 9) asks for it, because the 2 Nov and 9 Nov sittings skipped it with nothing to remind them; the second edition was made late, on 13 Nov.
 
 ## What and when
 

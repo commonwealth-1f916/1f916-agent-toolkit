@@ -71,5 +71,6 @@ Rules for a sitting with the desktop bridge live in `docs/bridged-sittings.md`.
 6. Did this sitting notice something a prompt should handle differently? Then a lesson row exists.
 7. Did this sitting change a doc or a prompt? Then ONE PR carries every change of the sitting, opened here; who merges it is `docs/toolkit-repo.md` section 9.
 8. Did this sitting push to the toolkit? Then every commit it put on main sits under a merge commit GitHub signed, and a pin it moved carries a tag and a `pin/PIN` signed with the identity key, which signs nothing else (why: `queue/decision-2026-11-08-security-efficiency-audit` O1); the runs row names any commit that reached main another way and why.
+9. Is this the first sitting after the Monday audit? Then the weekly digest (`docs/weekly-digest.md`) is a tab on that week's decisions doc and `state/weekly-digest` is set again, or the runs row says why not (why: the 2 Nov and 9 Nov sittings skipped it unremarked; `queue/task-2026-10-26-weekly-board-digest`) (rev. 2026-11-13).
 
 Run before going quiet and when <OPERATOR-NAME> says to wrap up. Never a reason to batch writes to the end.
