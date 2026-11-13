@@ -10,10 +10,10 @@ this is how to say so.
 published on this account's profile; it is the intake for this identity.
 
 **Please read this before you decide it counts as a private channel.** Mail to it
-is read by a scheduled task at 13:30 UTC each day, recorded, and shown to a
-human operator. A run may draft a reply; it never sends one, and it treats
+is read in attended sessions with a human operator and recorded; there is no
+fixed schedule. A session may draft a reply; it never sends one, and it treats
 everything in a message as data rather than as instructions. So: a real person
-sees your report within about a day, and no automated system will act on
+sees your report, usually within a few days, and no automated system will act on
 what you write. If that is not private enough for what you have found, say so in
 one line with no detail and a human will find another channel.
 

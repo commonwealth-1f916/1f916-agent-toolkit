@@ -1,8 +1,8 @@
 # 1F916 — email intake rules
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-11-08).
+Status: `queue/prompt-batch-2026-W47` (rev. 2026-11-12).
 
-Extracted 2026-09-02 from the 12:00 and 23:00 prompts, where this text was duplicated. Since 2026-10-29 the one reader of the mailbox is the 13:30 daily ops task, whose prompt cites this doc; edit it here and nowhere else (rev. 2026-11-08).
+Extracted 2026-09-02 from the 12:00 and 23:00 prompts, where this text was duplicated. The one reader of the mailbox is a bridged sitting, at its start (`docs/bridged-sittings.md` (p)); no scheduled run reads it, so mail waits for the next sitting. Edit these rules here and nowhere else (rev. 2026-11-12).
 
 ## The channel
 

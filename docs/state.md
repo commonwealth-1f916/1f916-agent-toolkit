@@ -1,6 +1,6 @@
 # 1F916 state — pointers only
 
-Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-11-08). This doc carries no value another doc or ledger row owns. The retired state doc is frozen at `claude/archive/1f916-state-archive-2026-09-02.md`.
+Status: `queue/prompt-batch-2026-W47` (rev. 2026-11-12). This doc carries no value another doc or ledger row owns. The retired state doc is frozen at `claude/archive/1f916-state-archive-2026-09-02.md`.
 
 ## Where things are
 
@@ -10,6 +10,7 @@ Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-11-08). Thi
 - **Project instructions field:** `state/instructions-field` (bytes, sha-256, set by <OPERATOR-NAME>). The audit re-derives it with `project_info`; a change is a finding.
 - **Credentials and sealed facts:** `claude/1f916-identity.md` — read by no scheduled run since 2026-10-29 (the Cowork daily read it for the gate until its credentialed half moved to the 12:00 routine); written only on credential events under rule 5; never searched.
 - **Prompt bytes and hashes:** ledger `prompts` collection, one row per trigger. The stored trigger is authoritative: `list_triggers` → `derived_state.prompt`. Templates: `prompts/` in this repository.
+- **Run watcher:** the healthchecks.io project `commonwealth`, one check per scheduled run, named for its trigger; each routine pings its check at its end with `HC_PING_KEY` from its cloud environment (`prompts/run-common.md` §14), and a missed or failed ping alerts <OPERATOR-NAME> by email and Signal. The audit and the monthly check-in have checks and no ping until they run where an environment carries the key (`queue/prompt-batch-2026-W47` line 4) (rev. 2026-11-12).
 - **Reference:** `docs/registry-api.md`, `docs/witness.md`, `docs/intake-rules.md`, `docs/authorizations.md`, `docs/doc-editing.md`, the runbooks, `claude/1f916-probes.md`, `claude/1f916-docket-build.md` in the project (environment and session rules for PR #172).
 - **Frozen:** everything under `claude/archive/`; `project_info` lists it. A changed archive is an incident.
 
@@ -17,17 +18,17 @@ Status: `queue/task-doc-hygiene-and-prompt-feedback-loop` (rev. 2026-11-08). Thi
 
 | task | cron | trigger id |
 |---|---|---|
-| `1f916-12:00` (daily routine, claude.ai/code, environment 1f916-runs; every 1f916.ai act of the day) | `0 7 * * *` America/New_York, as the routine editor stores it: 12:00 UTC in winter, 11:00 UTC in summer time; the summer choice is `queue/task-2027-dst-daily-routine-schedule` | `trig_01HSZBQ5QdHYotbKSLdoAfZM` |
-| `1F916 daily ops — 13:30 UTC (commonwealth)` (Cowork; intake, list_triggers windows and models, human queue, report; no credential; the daily check-in until 2026-10-29) | `30 13 * * *` | `trig_014AQK6bKtSn4rAzyTHzGGvA` |
+| `1f916-12:00` (daily routine, claude.ai/code, environment 1f916-runs; every 1f916.ai act of the day) | `0 12 * * *` | `trig_01HSZBQ5QdHYotbKSLdoAfZM` |
+| `1F916 daily ops — 13:30 UTC (commonwealth)` (Cowork; disabled 2026-11-12: its intake moved to sittings and its window checks to healthchecks.io) | `30 13 * * *` | `trig_014AQK6bKtSn4rAzyTHzGGvA` |
 | `1F916 evening reply check — 23:00 UTC (commonwealth) v3` (disabled) | `0 23 * * *` | `trig_01AMRQokLQBQZE6F5hPzrN2N` |
 | `1F916 weekly claim audit — Mon 11:00 UTC` | `0 11 * * 1` | `trig_012D4sRAabib35LRqNHgUZvb` |
 | `1F916 monthly neighbours check-in` | `0 13 1 * *` | `trig_01EjzVqwcbRPXTkLaiGQPKst` |
-| `1f916-23:00` (evening board routine, claude.ai/code, environment 1f916-runs) | `0 23 * * *` | `trig_01Y4Zev9qjzxbGRoEgtg5cih` |
+| `1f916-23:00` (evening board routine, claude.ai/code, environment 1f916-runs; disabled 2026-11-12) | `0 23 * * *` | `trig_01Y4Zev9qjzxbGRoEgtg5cih` |
 | `colony-11:00` (Colony read, claude.ai/code, environment colony-inbox) | `0 11 * * *` | `trig_01VcCpY6nyD4AQbKjoTBPmYE` |
 
-Six enabled; the Cowork evening is disabled, not deleted, so it can be re-enabled if the board routine misbehaves (why: `queue/decision-2026-10-03-retire-cowork-evening`). The three routines were created outside a session, so a session cannot `update_trigger` them (refused by name, measured 2026-10-29): the operator pastes a revision in the routine editor or changes its schedule in the routine's settings (`/schedule update` is not a command there, measured 2026-10-05; the editor stores a schedule in local time, measured 2026-10-29), and a sitting byte-diffs each from `list_triggers` (rev. 2026-10-29). Disabled predecessors and the condition for deleting them: `queue/task-retire-original-daily-tasks`.
+Four enabled; the Cowork evening, the daily ops task and the `1f916-23:00` routine are disabled, not deleted (why: `queue/decision-2026-10-03-retire-cowork-evening`; `queue/prompt-batch-2026-W47` lines 5 and 6). The three routines were created outside a session, so a session cannot `update_trigger` them (refused by name, measured 2026-10-29): the operator pastes a revision in the routine editor or changes its schedule in the routine's settings (`/schedule update` is not a command there, measured 2026-10-05; the editor's presets store a schedule in local time, measured 2026-10-29, and its Custom field takes a bare five-field cron as UTC, measured 2026-11-12 in a bridged sitting), and a sitting byte-diffs each from `list_triggers` (rev. 2026-10-29). Disabled predecessors and the condition for deleting them: `queue/task-retire-original-daily-tasks`.
 
-Two rules that live nowhere else. (1) Never re-save a schedule's time from the desktop app — it stores `CRON_TZ=America/New_York …`, which shifts with DST; set crons in plain UTC via `update_trigger` and read them back from a fresh `list_triggers`. (2) A task's connector set is fixed at creation.
+Two rules that live nowhere else. (1) Never re-save a schedule's time from the desktop app — it stores `CRON_TZ=America/New_York …`, which shifts with DST; set crons in plain UTC, in the routine editor's Custom field with any `CRON_TZ=` prefix deleted or by `update_trigger` for a task a session created, and read them back from a fresh `list_triggers` (rev. 2026-11-12). (2) A task's connector set is fixed at creation.
 
 **Model — not a baseline.** <OPERATOR-NAME> toggles these on purpose; the tasks may differ and a mismatch is never an anomaly. Stored value: `derived_state.model` from `list_triggers`, per trigger. The correction rule is owned by the 12:00 prompt (step 3i) and `docs/registry-api.md`.
 
