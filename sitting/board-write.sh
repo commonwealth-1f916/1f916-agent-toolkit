@@ -4,11 +4,12 @@
 #
 #   sh board-write.sh DIR ROUTE BODY.json [APPROVAL_SHA]
 #
-# ROUTE is /api/comment, /api/post, /api/vote or /api/keys/custody: the board
+# ROUTE is /api/comment, /api/post, /api/vote, /api/keys/custody or
+# /api/me/cadence (the public check-in interval, added 2026-11-12): the board
 # writes a sitting makes (quotas in docs/registry-api.md). BODY.json is the
 # request body. A new top-level post, and a custody declaration (a dated
 # statement about who holds the key, which also decides whether the key may
-# authorize a payout), need the operator in the sitting: for those two routes
+# authorize a payout), need the operator in the sitting, and so does a cadence change: for those three routes
 # the script writes nothing unless APPROVAL_SHA equals the body file's sha-256,
 # and without it ends `VERDICT NEEDS APPROVAL <sha>`, so the approval binds the
 # exact bytes the operator was shown.
@@ -32,7 +33,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 TK=$HOME/Projects/1f916-agent-toolkit
 CONF=$HOME/.config/1f916/sitting.env
 rc=2
-case "$ROUTE" in /api/comment|/api/post|/api/vote|/api/keys/custody) ;; *) verdict "FAIL route not a sitting write: $ROUTE" ;; esac
+case "$ROUTE" in /api/comment|/api/post|/api/vote|/api/keys/custody|/api/me/cadence) ;; *) verdict "FAIL route not a sitting write: $ROUTE" ;; esac
 [ -f "$CONF" ] || verdict "FAIL no $CONF"
 # shellcheck disable=SC1090
 . "$CONF"
@@ -45,7 +46,7 @@ echo "toolkit $(git -C "$TK" rev-parse HEAD)"
 BSHA=$(shasum -a 256 "$BODY" | cut -c1-64)
 echo "body sha256 $BSHA"
 case "$ROUTE" in
-  /api/post|/api/keys/custody)
+  /api/post|/api/keys/custody|/api/me/cadence)
     if [ "$APPROVAL" != "$BSHA" ]; then
       rc=1; verdict "NEEDS APPROVAL $BSHA (a $ROUTE write is made only with the operator's approval of this hash)"
     fi ;;

@@ -34,12 +34,12 @@ before the placeholders moved into the stored prompts.
 
 | file | task | cron (UTC) |
 |---|---|---|
-| `daily-ops-1330.txt` | daily ops (Cowork; intake, list_triggers windows and models, human queue, the report; no credential, no toolkit program) — until 2026-10-29 the daily check-in, `daily-1200.txt` | `30 13 * * *` |
-| `daily-routine-1200.txt` | daily routine `1f916-12:00` (claude.ai/code routine, environment `1f916-runs`; every 1f916.ai act of the day; the routine editor stores its schedule as 07:00 America/New_York, so it fires 12:00 UTC in winter and 11:00 UTC in summer time; `docs/state.md` holds the summer question) | `0 7 * * *` New York |
+| `daily-ops-1330.txt` | daily ops (Cowork; disabled 2026-11-12: intake moved to sittings, window checks to healthchecks.io) — until 2026-10-29 the daily check-in, `daily-1200.txt` | `30 13 * * *` |
+| `daily-routine-1200.txt` | daily routine `1f916-12:00` (claude.ai/code routine, environment `1f916-runs`; every 1f916.ai act of the day; pings healthchecks.io at its end) | `0 12 * * *` |
 | `evening-2300.txt` | evening reply check (task disabled since 2026-10-05; its board work runs in the evening board routine) | `0 23 * * *` |
 | `weekly-mon-1100.txt` | weekly claim audit (no credential) | `0 11 * * 1` |
 | `monthly-neighbours.txt` | monthly neighbours check-in (read-only, ledger only) | `0 13 1 * *` |
-| `evening-board-2300.txt` | evening board routine `1f916-23:00` (claude.ai/code routine; the registry credential is attached by the environment's proxy) | `0 23 * * *` |
+| `evening-board-2300.txt` | evening board routine `1f916-23:00` (claude.ai/code routine; disabled 2026-11-12, the board went to one run a day) | `0 23 * * *` |
 | `colony-1100.txt` | Colony read `colony-11:00` (claude.ai/code routine; replies and upvotes only through `colony/colony_reply.py`) | `0 11 * * *` |
 
 ## Procedure documents the prompts point at
@@ -50,10 +50,12 @@ Since 2026-09-21 the prompts carry their step order, their toolkit pin and the f
 
 | file | read by | what it holds |
 |---|---|---|
-| `run-common.md` | the 12:00 routine, after the brief; the evening board routine and the daily ops task read only the sections their prompts name | the gate and its failure cells, the bearer and manifests, `list_triggers`, the previous window, the inbox and the ack, naming a citizen, scan-then-delete, the record conventions, the `cost` field, standing lines (`rc§n` in the templates) |
+| `run-common.md` | the 12:00 routine, after the brief; the audit reads only the sections its prompt names | the gate and its failure cells, the bearer and manifests, `list_triggers`, the previous window, the inbox and the ack, naming a citizen, scan-then-delete, the record conventions, the `cost` field, standing lines (`rc§n` in the templates) |
 | `../docs/audit-procedure.md` | the Monday audit, after its tooling fetch | prompt integrity and the leak check, the preflight, the deep sweep, seals and proofs, the witness gap walk, the toolkit pin and its tag, the batch rules, the cost review, standing discipline, hygiene, the runs row (`§n` in the weekly template) |
 
 Both are the bytes the runs read: `run-common.md` is checked against its line in the signed pin and `audit-procedure.md` against `docs/MANIFEST`, at the pinned commit. The brief is `docs/brief.md`, and the placeholders above are the only site-specific values the procedure needs.
+
+**2026-11-12, daily routine, Colony read and weekly audit recommitted from the prepared bytes the operator pasted** — `queue/prompt-batch-2026-W47` lines 5 and 6. Daily: the only board run (the evening check is gone), and step 8b pings healthchecks.io per `run-common.md` §14. Colony: step 4b pings the same way. Audit: ledger completeness ends the `T12-ops` and `T23-board` expectations on 2026-11-12. The 23:00 board routine and the daily ops task are disabled; their templates stay as stored.
 
 **2026-11-11, daily routine, evening board, Colony read and weekly audit recommitted from the STORED bytes** — `queue/prompt-batch-2026-W46` and the security audit's S1, at pin serial 24. Daily and evening board: a write to the registry is `sh 1f916-proxy post <path> <body file>` and never a curl, and the last step before the row is `1f916-checks requests` over the session's own transcript, recorded as `request_audit` (S1); a reply that adds a first-hand fact is preferred and one that only restates is nothing owed (line 24); an item outside the run's remit gets a queue row of tier `discuss` (line 6); a dated reading goes in a field of its own, not onto `status` (line 23). The evening board's GitHub paragraph says the routine has no connector. The daily template had not followed the stored prompt since 2026-11-03, so this commit also carries the 2026-11-08 removal of its build step. Colony read: fetches `1f916-checks` at the pin and records `cost`. Weekly audit: its opening names the daily routine and the ops task; the official record is read by `1f916-checks official` and a blocked tool leaves it could-not-run (line 15); `lesson-chains` (line 25); the archive sweep runs only after the verify passed (line 22); step 4e, the first-Monday doc drift (line 11). Each was drafted by asserted replacements over the live bytes, pasted by the operator from the clipboard, read back from a fresh `list_triggers` and found byte-equal to the draft. The daily stands at 20,100 bytes and the audit at 20,313 of the 20,480 budget.
 
