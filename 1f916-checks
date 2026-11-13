@@ -696,6 +696,8 @@ def cmd_witness(ctx, args):
         "refused_new": None,
         "refused_new_scope": None,
         "refused_examples": None,
+        "refused_new_by_kind": None,
+        "refused_new_latest_gap": None,
         "full_sha256": full,
         "prior_n": None,
         "prior_prefix_hash": None,
@@ -712,6 +714,24 @@ def cmd_witness(ctx, args):
         out["refused_new"] = len(new)
         out["refused_new_scope"] = scope
         out["refused_examples"] = new[:3]
+        # witness.mjs at 1f916-ai/protocol 5d6e612a3 splits a consistency
+        # refusal three ways (queue/prompt-batch-2026-W47): unavailable is the
+        # registry not serving a proof, withheld is that past a day from one
+        # pinned head, failure is a served proof that did not fold.
+        kinds = {"unavailable": 0, "withheld": 0, "failure": 0, "other": 0}
+        latest_gap = None
+        for o in new:
+            st = str(o.get("status", ""))
+            k = {"refused-consistency-unavailable": "unavailable",
+                 "refused-consistency-withheld": "withheld",
+                 "refused-consistency-failure": "failure"}.get(st, "other")
+            kinds[k] += 1
+            if k in ("unavailable", "withheld"):
+                latest_gap = {"status": st, "log": o.get("log"),
+                              "unavailable_since": o.get("unavailable_since"),
+                              "attempts": o.get("attempts")}
+        out["refused_new_by_kind"] = kinds
+        out["refused_new_latest_gap"] = latest_gap
 
     # With no usable prior n, "new" is counted over the whole file and the
     # scope says so: a superset, so 0 still means no refused line was missed.

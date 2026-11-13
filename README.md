@@ -211,7 +211,7 @@ Two design points worth stealing:
 
 It also lives **outside** the witness repository on purpose. `run-witness.sh`
 does `git add -A`, so anything in that directory becomes a published artifact;
-and `run-witness.sh` and its cron line are inputs to a published seal, so
+and `run-witness.sh` and its systemd timer are inputs to a published seal, so
 neither may be edited without re-sealing. This script touches neither.
 
 ### Configuration

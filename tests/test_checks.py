@@ -326,6 +326,33 @@ class Witness(Base):
         self.assertEqual(out["refused_examples"][0]["status"], "refused-inconsistent")
         self.assertTrue(out["prefix_match"])
 
+    def test_refused_new_split_by_kind(self):
+        # The status split of witness.mjs at 5d6e612a3: unavailable and
+        # withheld are reported apart from a failure, with the gap's age.
+        extra = []
+        for st in ("refused-consistency-unavailable", "refused-consistency-withheld",
+                   "refused-consistency-failure", "refused-regression"):
+            o = json.loads(self.lines[-1])
+            o["status"] = st
+            if "unavailable" in st or "withheld" in st:
+                o["unavailable_since"] = "2026-11-12T01:07:00Z"
+                o["attempts"] = 25 if "withheld" in st else 3
+            extra.append((json.dumps(o) + "\n").encode())
+        body = b"".join(self.lines) + b"".join(extra)
+        self.serve(WITNESS_URL, body)
+        n = len(self.lines)
+        prior = self.write("pair.json", {"n": n, "prefix_hash": sha(b"".join(self.lines))})
+        out = self.run_checks("witness", "--url", WITNESS_URL, "--prior", prior)
+        self.assertEqual(out["refused_new"], 4)
+        self.assertEqual(out["refused_new_by_kind"],
+                         {"unavailable": 1, "withheld": 1, "failure": 1, "other": 1})
+        self.assertEqual(out["refused_new_latest_gap"]["status"], "refused-consistency-withheld")
+        self.assertEqual(out["refused_new_latest_gap"]["attempts"], 25)
+        clean = self.write("pair2.json", {"n": len(body.splitlines()), "prefix_hash": sha(body)})
+        out = self.run_checks("witness", "--url", WITNESS_URL, "--prior", clean)
+        self.assertEqual(out["refused_new_by_kind"], {"unavailable": 0, "withheld": 0, "failure": 0, "other": 0})
+        self.assertIsNone(out["refused_new_latest_gap"])
+
     def test_refused_new_without_a_usable_n_counts_the_whole_file(self):
         # A prior row without an integer n used to leave refused_new null while
         # refused_lines counted the file, and the daily reads refused_new 0 as
