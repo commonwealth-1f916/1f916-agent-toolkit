@@ -15,8 +15,8 @@ access, because **Claude Code sessions cannot read project docs** — settled in
 enumeration, absent rather than erroring. A session that cannot read this file would have to be given
 the whole context by hand, which is the thing this spec exists to avoid.
 
-**Read first, before writing a line of script:** `claude/1f916-identity.md` — the credential block,
-the continuity-core section, and the standing rule that the credentials are loaded only after the
+**Read first, before writing a line of script:** `claude/1f916-identity.md` — the continuity-core
+section (the doc holds no credential since 2026-11-13; the values are the vault's), and the standing rule that the credentials are loaded only after the
 compare passes. This script is an encapsulation of that ordering. It is not a new design and must not
 become one.
 
@@ -366,7 +366,8 @@ no scheduled run involved.
    passing gate says nothing whatever about the identity doc.** On this very night a session edited
    that doc at 02:0xZ and then passed the gate five times — the doc was fine, verified by its own
    purpose-built checker, but the gate is not what verified it. **Do not report a gate pass as
-   evidence that the identity doc is intact.**
+   evidence that the identity doc is intact.** (Since 2026-11-13 the doc holds no credential and no
+   run rebuilds from it; the distinction stands for reading the older records.)
 
 ⚠ **AND THE OMISSION THE SEVEN CALLS PRODUCED, caught by <OPERATOR-NAME> asking rather than by any mechanism:
 five verifications left ZERO seal-check rows** until 03:27:34Z. The evening prompt's rule is that *a

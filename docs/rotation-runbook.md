@@ -8,7 +8,7 @@ written — that correction is the most valuable thing the first run produces.
 
 Written 2026-08-31 by the 23:00 scheduled run, at <OPERATOR-NAME>'s request, after he asked how often the
 secret should be rotated. Authoritative for the *procedure*; `claude/1f916-identity.md` stays
-authoritative for the credential values and the seal facts, and this file deliberately duplicates
+authoritative for the seal facts (the credential values are only in the vault since 2026-11-13), and this file deliberately duplicates
 neither.
 
 ---
@@ -28,10 +28,11 @@ Losing the secret no longer strands the bound Ed25519 key. `GET /api/surface`, r
 By contrast, **every partial state of the rest of the procedure is safe**, and this is worth
 internalising before starting because it removes the temptation to hurry:
 
-- New seal filed, identity doc not yet updated → the doc's expected hash no longer matches `latest`
+- New seal filed, vault not yet updated → the vault copy's hash no longer matches `latest`
   → the next run's gate **fails closed**, refuses its own credentials, and reports possible
   tampering to <OPERATOR-NAME>.
-- Identity doc updated, new seal not yet filed → same mismatch, same fail-closed, same report.
+- Vault updated, new seal not yet filed → same mismatch, same fail-closed, same report (rev. 2026-11-13:
+  the gate is built from the vault; the identity doc holds no credential).
 - Both done, a trigger prompt still naming the old seal → the seal-*check* step misbehaves or is
   refused; no credential is exposed and no board write is corrupted.
 
@@ -46,7 +47,7 @@ in which a run would alarm.
 | The bearer secret | The **Ed25519 keypair**, unaffected here. `POST /api/rotate` swaps the bearer only. The key has its own two routes (surface read 2026-10-19): `POST /api/keys/rotate` (bearer, plus old and new key both signing one dated payload; one chained key-rotate event) and `POST /api/keys/revoke` (§1) |
 | The continuity-core canonical string (the secret is one of its five lines) | Seal **1809** `witness-reference` — its string names no secret; **do not re-seal it** |
 | Seal **905**'s label `continuity-core` — a new hash under the same label records a **new seal**, not a check | Witness #6's registration, pointer URL, key, or feed |
-| The identity doc's credential lines, Expected-hash line, and seals paragraph | The docket row, PR #172, the fork, the machine account |
+| The identity doc's Expected-hash line and seal facts (it holds no credential lines since 2026-11-13) | The docket row, PR #172, the fork, the machine account |
 | **Both daily trigger prompts** — see §4, this is the easy one to miss | Karma, claims, attestations, domain binding |
 | **`~/bin/1f916-gate` needs NO edit** — it reads the vault and the live seals endpoint, so it follows a rotation automatically — but the **1Password item's `bearer` field is a holder and must be updated in §5 step 4** | |
 
@@ -86,7 +87,9 @@ unrelated check; the first correction then over-shot and declared the project do
 inferring absence-from-all-stores from absence-from-one. Both are left visible: this is the section
 of a custody document that enumerates custody, and it got custody wrong twice in one night.**
 
-1. **`claude/1f916-identity.md`** — plaintext, in the credential block. The copy every wake reads.
+1. **`claude/1f916-identity.md`** — no longer a holder: the operator took the credential lines out on
+   2026-11-13 (the archive copy was made from the operator's export without them). Until then it was the plaintext
+   copy every wake read.
 2. **1Password — VERIFIED 2026-08-31T03:4xZ**, Secure Note `1F916 commonwealth (citizen 943)`,
    Personal vault, **`<VAULT-ITEM-CREDENTIAL>`** (address it by **id**, never by
    title: the vault scheme rejects parentheses and an id survives a rename). Checked by reading `handle`,
@@ -178,12 +181,12 @@ while the old value is still in hand and the doc still names it.
 setting on claude.ai/code before the next 12:00 or 23:00 routine fires; until then they send the old
 value (rev. 2026-11-03).
 
-**6. Update `claude/1f916-identity.md`.** Use the standing procedure from that doc: build the whole
-file locally, inject the credential lines rather than retyping them, and re-derive **both** sealed
-hashes from the written file before uploading. On this occasion the continuity-core hash is
+**6. Update `claude/1f916-identity.md`.** It holds no credential since 2026-11-13, so nothing secret
+is written into it: build the whole file locally from a copy (brief, rule 5) and re-derive the
+witness-reference hash from the written file before uploading. On this occasion the continuity-core hash is
 *expected to change* — so the check is that it equals the value computed from the new canonical
-string, and that **witness-reference still reproduces `1a52ad09…` unchanged.** Update in the same
-edit: the credential line, the `Expected hash:` line, and the seals-live paragraph. The rotation's
+string, and that **witness-reference still reproduces its recorded hash unchanged.** Update in the same
+edit: the `Expected hash:` line and the seal facts. The rotation's
 log entry goes to the ledger — a `runs` row for the sitting and a `notes` row of kind `doc-change`
 — never to the identity doc, and never to `claude/1f916-activity-log.md`, which was retired to
 `claude/archive/` on 2026-09-07 and where a write would be an incident (rev. 2026-09-14).
