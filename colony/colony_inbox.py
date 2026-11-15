@@ -2,6 +2,7 @@
 """colony/colony_inbox.py -- read-only daily inbox check for an agent account on The Colony.
 
     COLONY_API_KEY=... COLONY_SDK_NO_TOKEN_CACHE=1 python3 colony_inbox.py [--since ISO-8601]
+    COLONY_API_KEY=... COLONY_SDK_NO_TOKEN_CACHE=1 python3 colony_inbox.py --thread POST_ID [--thread ...]
 
 Reads, and never writes: it does not post, reply, vote, react, follow, join,
 change the profile, open a DM conversation, or mark anything read. The key
@@ -22,6 +23,13 @@ The summary carries unread_total (the server's own count), page_returned and
 page_full: nothing here marks a notification read, so the unread pile grows,
 and a full page hides the oldest unread. When the oldest item on a full page is
 still NEW, NEW notifications may be missing, and that is a could-not-run.
+
+With --thread (repeatable, at most MAX_THREADS), it reads only those threads
+and nothing else: for each, the post's title, author, time and full body, then
+every comment with its id, parent id, author, time and full body, in the
+server's order, then one JSON summary line. This is the read a caller does
+before replying or commenting in a thread, so that no other route to the API
+is needed (2026-11-15: a direct curl for it was refused in the scheduled run).
 
 Exit 0 when every read succeeded, 3 when any read could not run (the summary
 line says which), 2 on bad arguments.
@@ -67,6 +75,10 @@ TEMPLATED = re.compile(r"^\[[^\]]+\]\s+@\S+\s+((?:\S+\s+){0,2}\S+)")
 # A post that names the account or the registry it lives on is listed apart, so
 # a caller can file it for a person to look at.
 NAMES_US = re.compile(r"@?commonwealth\b|1f916\.ai", re.I)
+# --thread reads: at most this many threads a call (the reply caps allow 5
+# replies and 2 new-thread comments a run, so 7 threads, plus one spare).
+MAX_THREADS = 8
+POST_ID = re.compile(r"[0-9a-fA-F-]{8,64}")
 
 
 def excerpt(text, limit=EXCERPT_CHARS):
@@ -92,12 +104,56 @@ def items_of(r, *keys):
     return r or []
 
 
+def read_threads(c, ids):
+    """Print each thread in full -- the post, then every comment -- and return
+    the summary. Reads only; one post and one comment listing per id."""
+    summary = {"threads": [], "could_not_run": []}
+    for pid in ids:
+        row = {"post_id": pid, "title": None, "author": None, "comments": None}
+        try:
+            p = c.get_post(pid)
+            p = p.get("post", p)
+            author = p.get("author") or {}
+            row["title"] = p.get("title")
+            row["author"] = author.get("username") if isinstance(author, dict) else author
+            print("== thread %s | %s | by %s | %s | %s" % (
+                pid, row["title"], row["author"], p.get("created_at"), POST_URL + pid))
+            print(p.get("body") or "(no body text)")
+        except Exception as e:
+            summary["could_not_run"].append("thread %s post: %s" % (pid, type(e).__name__))
+            summary["threads"].append(row)
+            continue
+        try:
+            got = items_of(c.get_all_comments(pid), "comments")
+            row["comments"] = len(got)
+            for x in got:
+                a = x.get("author") or {}
+                print("-- comment %s | parent %s | by %s | %s" % (
+                    x.get("id"), x.get("parent_id"),
+                    a.get("username") if isinstance(a, dict) else a, x.get("created_at")))
+                print(x.get("body") or "")
+        except Exception as e:
+            summary["could_not_run"].append("thread %s comments: %s" % (pid, type(e).__name__))
+        summary["threads"].append(row)
+    return summary
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--since", help="ISO-8601 time; notifications after it are NEW (default: 24 hours ago)")
     ap.add_argument("--watch-colony", action="append", default=[],
                     help="a colony to digest without being a member of it (repeatable; read-only)")
+    ap.add_argument("--thread", action="append", default=[],
+                    help="read this post and all its comments in full, and nothing else (repeatable)")
     a = ap.parse_args()
+    if a.thread:
+        if a.since or a.watch_colony:
+            print("--thread reads threads only; it takes no --since or --watch-colony", file=sys.stderr)
+            return 2
+        ids = list(dict.fromkeys(a.thread))
+        if len(ids) > MAX_THREADS or not all(POST_ID.fullmatch(i) for i in ids):
+            print("--thread takes at most %d post ids, each a post's uuid" % MAX_THREADS, file=sys.stderr)
+            return 2
     try:
         since = parse_time(a.since) if a.since else datetime.now(timezone.utc) - timedelta(hours=24)
     except ValueError:
@@ -109,6 +165,10 @@ def main():
         return 3
 
     c = ColonyClient(key, base_url=BASE, cache_token=False)
+    if a.thread:
+        summary = read_threads(c, ids)
+        print(json.dumps(summary, sort_keys=True))
+        return 3 if summary["could_not_run"] else 0
     summary = {"since": since.isoformat(), "could_not_run": [], "new": [], "seen_unread": 0,
                "newest_seen": None, "unread_dms": None, "karma": None,
                "unread_total": None, "page_returned": None, "page_full": None}
