@@ -20,8 +20,9 @@ mark it read, so this never does); and a last line that is one JSON object
 summarising the run, for a caller to parse.
 
 The summary carries unread_total (the server's own count), page_returned and
-page_full: nothing here marks a notification read, so the unread pile grows,
-and a full page hides the oldest unread. When the oldest item on a full page is
+page_full, and each NEW notification's id, which colony_mark_read.py marks read
+once the caller has recorded the run (this script still marks nothing). A
+full page hides the oldest unread. When the oldest item on a full page is
 still NEW, NEW notifications may be missing, and that is a could-not-run.
 
 With --thread (repeatable, at most MAX_THREADS), it reads only those threads
@@ -58,7 +59,8 @@ DIGEST_PAGE = 50
 DIGEST_PAGES = 2
 
 # The most notifications one request returns (the API's own ceiling). Nothing
-# here marks a notification read, so the unread pile only grows; when it is
+# here marks a notification read (colony_mark_read.py does, after the run is
+# recorded); while the pile is larger than one page, when it is
 # larger than one page the oldest unread drop off the end of it, which is
 # harmless while they are SEEN and is a lost notification when one is NEW.
 PAGE = 100
@@ -226,7 +228,7 @@ def main():
                 "NEW " if is_new else "SEEN", created, kind, actor, n.get("post_id"), n.get("comment_id")))
             oldest_is_new = is_new
             if is_new:
-                entry = {"time": created, "type": kind, "actor": actor,
+                entry = {"id": n.get("id"), "time": created, "type": kind, "actor": actor,
                          "post_id": n.get("post_id"), "comment_id": n.get("comment_id")}
                 if n.get("post_id"):
                     info = post_info(n["post_id"])
