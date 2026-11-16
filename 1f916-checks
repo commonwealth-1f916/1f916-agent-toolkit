@@ -1992,6 +1992,21 @@ WHY_WRITE = "a write sent outside 1f916-proxy"
 WHY_NEVER = "a route the prompts forbid"
 WHY_CLIENT = "a request made by a program other than curl or 1f916-proxy"
 WHY_PROXY_PATH = "1f916-proxy was asked for a path off its list"
+WHY_LOOP = "a write sent from a shell loop, so how many requests it made is unknown"
+# A tool that only writes text (a file, a ledger row) can mention a registry
+# address without sending anything: a comment body quoting a route, a lesson
+# row naming one. Counted as a mention, never flagged (W47 line 2).
+MENTION_ONLY_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+SHELL_LOOP_RE = re.compile(r"(?:^|[\s;&|(])(?:for|while|until)\s[^\n]*?(?:;|\n)\s*do(?:\s|$)", re.S)
+REQUEST_CLIENT_WORD_RE = re.compile(r"(?:^|[\s;&|(/])(?:curl|wget|nc|ncat|openssl)(?:\s|$)")
+
+
+def _mention_only_tool(name):
+    return name in MENTION_ONLY_TOOLS or "artifact" in (name or "").lower()
+
+
+def _runs_a_client(command):
+    return bool(REQUEST_CLIENT_WORD_RE.search(command) or REQUEST_CODE_RE.search(command))
 
 
 def _safe_path(path):
@@ -2061,6 +2076,8 @@ def _write_shaped(seg):
 def _classify_bash(command, counts, flag):
     words = _shell_words(command)
     seen_url = False
+    looped = bool(SHELL_LOOP_RE.search(command))
+    client = _runs_a_client(command)
     for seg in _segments(words):
         prog = os.path.basename(seg[0]) if seg else ""
         proxy_at = next((i for i, w in enumerate(seg) if PROXY_WORD_RE.search(w)), None)
@@ -2068,6 +2085,11 @@ def _classify_bash(command, counts, flag):
         if proxy_at is not None:
             verb = seg[proxy_at + 1] if proxy_at + 1 < len(seg) else ""
             arg = seg[proxy_at + 2] if proxy_at + 2 < len(seg) else ""
+            if looped and verb in ("post", "ack", "seal-check", "act"):
+                # One command, an unknown number of requests: the prompts send
+                # one write per command, and a count read from the text would
+                # be a guess (W47 line 18).
+                flag(WHY_LOOP, "POST", _safe_path(arg) if verb == "post" else "/")
             if verb == "post":
                 path = _safe_path(arg)
                 if arg in REQUEST_WRITE_PATHS:
@@ -2104,10 +2126,13 @@ def _classify_bash(command, counts, flag):
             for u in urls:
                 flag(WHY_CLIENT, "?", _safe_path(u))
         else:
+            # Text in a command that runs no network client (echo, cat > file,
+            # grep) names an address and sends nothing (W47 line 2).
             counts["mentions"] += 1
-            for u in urls:
-                if _never_route(_safe_path(u)):
-                    flag(WHY_NEVER, "?", _safe_path(u))
+            if client:
+                for u in urls:
+                    if _never_route(_safe_path(u)):
+                        flag(WHY_NEVER, "?", _safe_path(u))
     if not seen_url and REGISTRY_URL_RE.search(command) and not any(
             PROXY_WORD_RE.search(w) for w in words):
         # The host sits where the word split could not place it (a heredoc, a
@@ -2118,7 +2143,7 @@ def _classify_bash(command, counts, flag):
             path = _safe_path(m.group(1))
             if code:
                 flag(WHY_CLIENT, "?", path)
-            elif _never_route(path):
+            elif client and _never_route(path):
                 flag(WHY_NEVER, "?", path)
 
 
@@ -2130,7 +2155,10 @@ def cmd_requests(ctx, args):
     withdrawal route. `off_list` names each call that broke it. An empty
     `off_list` over a transcript that was read is `verdict: "clean"`; it is a
     statement about the calls this transcript holds, which are the calls made
-    before this command ran.
+    before this command ran. An address written by a text-only tool (Write,
+    Edit, the Artifact tools) or named in a command that runs no network
+    client is a mention: counted, never flagged. A write sent from a shell
+    loop is flagged, because its request count cannot be read from the text.
     """
     data = ctx.read_file(args.transcript, "transcript")
     counts = {"gets": 0, "webfetch": 0, "proxy_writes": {}, "proxy_manifests": 0,
@@ -2178,6 +2206,10 @@ def cmd_requests(ctx, args):
                     counts["webfetch"] += 1
                     if _never_route(_safe_path(m.group(1))):
                         flag(WHY_NEVER, "GET", _safe_path(m.group(1)))
+            elif _mention_only_tool(name):
+                text = json.dumps(inp, ensure_ascii=False)
+                if REGISTRY_URL_RE.search(text):
+                    counts["mentions"] += 1
             else:
                 text = json.dumps(inp, ensure_ascii=False)
                 found = list(REGISTRY_URL_RE.finditer(text))

@@ -24,7 +24,7 @@ The checks above read what the machine publishes; these seven read what it runs.
 4. **Auth history.** Accepted and failed authentications with their keys and sources. Read the journal's earliest entry first and report the window that exists beside the window asked for (why: `notes/2026-09-14-the-journal-does-not-reach-thirty-days`).
 5. **Second scheduler.** `systemctl --user list-timers` shows `1f916-witness.timer` and no other witness timer; `crontab -l` carries no `run-witness.sh` line (the `witness-alert.sh` line stays); `/etc/cron.d` and the system timers carry neither (rev. 2026-11-13).
 6. **Commit cadence.** From the deployed repo: local main against origin, then the walk for gaps over two hours and for commits that are not pure appends. An anonymous clone may carry the walk once its head is asserted equal to the deployed head.
-7. **The alarm.** sha-256 of the deployed `witness-alert.sh` against toolkit main, and that it stays outside the witness repo.
+7. **The alarm.** sha-256 of the deployed `witness-alert.sh` against toolkit main, and that it stays outside the witness repo; then read `~/.witness-alert.conf`'s switches and compare this doc's Failure-modes claims about the alarm with the deployed script. A sitting reads the deployed code, not this doc, before telling the operator what a deployed script does (why: notes/2026-09-27-lesson-a-doc-status-line-outlived-the-fix; `queue/prompt-batch-2026-W47` line 21) (rev. 2026-11-16).
 
 ## Failure modes met so far, and what each check does
 

@@ -65,7 +65,13 @@ jobs:
         # allows and shellcheck accepts and bash 3.2 on macOS rejects outright.
         # Linux was green while the script would not parse on one of the two
         # machines it guards.
-        os: [ubuntu-latest, macos-latest]
+        # macOS on pushes to main, the weekly schedule and a manual run, not on
+        # pull requests: hosted Mac runners queue for up to fifteen minutes and
+        # on 2026-11-16 were not acquired at all, which held every PR on GitHub's
+        # capacity. Before pushing a change to a program, the sitting runs the
+        # same suites on the Mac mini and puts the results in the PR body
+        # (docs/toolkit-repo.md section 8; W47 line 25).
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -97,7 +103,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # macOS on pushes to main, the weekly schedule and a manual run, not on
+        # pull requests: hosted Mac runners queue for up to fifteen minutes and
+        # on 2026-11-16 were not acquired at all, which held every PR on GitHub's
+        # capacity. Before pushing a change to a program, the sitting runs the
+        # same suites on the Mac mini and puts the results in the PR body
+        # (docs/toolkit-repo.md section 8; W47 line 25).
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -114,7 +126,13 @@ jobs:
         # Raspberry Pi, and the differences between them (shasum vs sha256sum,
         # GNU vs BSD date and stat) are exactly where its portability claims
         # have gone untested.
-        os: [ubuntu-latest, macos-latest]
+        # macOS on pushes to main, the weekly schedule and a manual run, not on
+        # pull requests: hosted Mac runners queue for up to fifteen minutes and
+        # on 2026-11-16 were not acquired at all, which held every PR on GitHub's
+        # capacity. Before pushing a change to a program, the sitting runs the
+        # same suites on the Mac mini and puts the results in the PR body
+        # (docs/toolkit-repo.md section 8; W47 line 25).
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
