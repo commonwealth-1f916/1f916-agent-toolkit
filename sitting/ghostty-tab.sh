@@ -20,6 +20,12 @@
 #     log's last lines. `wait after command` keeps the tab open to be read.
 #   - A new tab in the front Ghostty window; a new window only when none is
 #     open. Never `open -na Ghostty`, which opens a window every time.
+#   - Before the tab opens, a macOS notification with a sound names the step,
+#     because a 1Password prompt in a tab nobody is watching times out
+#     unseen; when the script ends non-zero (a timed-out or declined
+#     approval among the causes), a second notification says so. Neither
+#     carries anything but the script's file name and the exit code
+#     (W47 line 21c; why: notes/2026-10-31-lesson-a-launched-ghostty-signing-window-can-time-out-unseen).
 #
 # A sitting calls this with one osascript `do shell script` and reads the
 # script's own log; this program's exit status says only whether the tab was
@@ -75,10 +81,14 @@ command -v osascript >/dev/null 2>&1 || fail "osascript not found: this runs on 
 
 # The command the tab runs. Single quotes inside are safe: every path was
 # held to an alphabet with no quote, space, dollar or backslash in it.
+NAME=$(basename "$SCRIPT")
 INNER="PATH=/opt/homebrew/bin:/usr/local/bin:\$PATH; export PATH; /bin/sh $SCRIPT; code=\$?; echo; echo ghostty-tab: exit \$code"
+INNER="$INNER; [ \$code -eq 0 ] || osascript -e \"display notification \\\"$NAME ended with exit \$code: read its tab\\\" with title \\\"1F916 sitting\\\" sound name \\\"Basso\\\"\" >/dev/null 2>&1"
 [ -z "$LOG" ] || INNER="$INNER; echo ghostty-tab: tail of $LOG; tail -n 12 $LOG"
 INNER="$INNER; exit \$code"
 
+osascript -e "display notification \"$NAME is opening in Ghostty: approve the 1Password prompt there if one appears\" with title \"1F916 sitting\" sound name \"Glass\"" >/dev/null 2>&1 || true
+sleep 2
 osascript - "$INNER" <<'APPLESCRIPT' || fail "osascript could not open the tab"
 on run argv
   set inner to item 1 of argv

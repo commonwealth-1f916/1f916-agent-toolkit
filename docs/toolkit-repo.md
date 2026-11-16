@@ -186,6 +186,13 @@ behalf. Recorded so the verdict exists rather than the silence.
 8. **Before pushing a change to a shell script, run shellcheck at the version CI runs**: the one GitHub's
    `ubuntu-latest` runner image lists in its readme, not the container's or the Mac's, which can be newer and
    pass a script CI fails (why: notes/2026-10-26-lesson-local-shellcheck-newer-than-ci) (rev. 2026-11-03).
+9. **The macOS CI jobs run on pushes to `main`, the weekly schedule and a manual run, not on pull requests**,
+   and are not required checks: hosted Mac runners queue for up to fifteen minutes and on 2026-11-16 were not
+   acquired at all, which held every PR on GitHub's capacity. Before pushing a change to a program, the sitting
+   runs the macOS jobs' suites (`sh tests/hygiene.sh`, `sh tests/checks.sh`, `sh tests/pinfile.sh`, and
+   `tests/gate.sh` through `tests/mutants.sh` as `ci.yml` lists them) on the Mac mini and puts each result line in
+   the PR body. Never a self-hosted runner on the Mac mini: a PR's code would run beside the 1Password session
+   (why: GitHub Actions run 43899742062; `queue/prompt-batch-2026-W47` line 25) (rev. 2026-11-16).
 
 ## 8. Branch protection — `main` is enforced, not just promised (2026-09-05)
 
@@ -217,7 +224,7 @@ would fit the homepage (where a merge without its seal is the failure the 12:00 
 and on the fork the branch that matters is `claude/custody-declare` (deletion + non-fast-forward
 only; it is pushed to directly).
 
-Consequences for sessions: a PR merges only with seven green checks on an up-to-date base; a stacked
+Consequences for sessions: a PR merges only with its required checks green on an up-to-date base (the Linux jobs since `queue/prompt-batch-2026-W47` line 25; the macOS jobs run after the merge, section 7 item 9); a stacked
 PR must be brought up to date after its parent merges; `required_status_checks` names are the CI
 job names — renaming a job in `ci.yml` silently strands the ruleset until it is edited to match.
 
