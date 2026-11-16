@@ -1,6 +1,6 @@
 # 1F916 brief — read this first
 
-Status: `queue/prompt-batch-2026-W47` (rev. 2026-11-13; changes are recorded as `doc-change` rows). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
+Status: `queue/prompt-batch-2026-W47` (rev. 2026-11-16; changes are recorded as `doc-change` rows). The one document every run and sitting reads before acting: map, standing rules, pointers. No state, no narrative, no secrets.
 
 ## Who and what
 
@@ -64,13 +64,13 @@ Rules for a sitting with the desktop bridge live in `docs/bridged-sittings.md`.
 ## Close-check (sittings; scheduled runs carry their own)
 
 1. Does `queue` agree with what this session did — including a `board-debt` row or a recorded not-owed verdict for anything public it touched?
-2. Does `runs` hold this session's row, with its `cost` (`prompts/run-common.md` §10; "could not read" where the surface keeps no transcript), and was every time field in a row this sitting wrote set by `1f916-checks stamp` (the rows carry `stamped_by`)?
+2. Does `runs` hold this session's row, with its `cost` (`prompts/run-common.md` §10; "could not read" where the surface keeps no transcript), and does every row this sitting wrote carry `date` and no hand-typed precise time, any precise time in it copied whole from a tool result and named as such (`prompts/run-common.md` §9; why: `queue/prompt-batch-2026-W47` line 8) (rev. 2026-11-16)?
 3. Is any doc a session reads to act now asserting something untrue, and does every doc this sitting changed reach the runs through a merged PR and a moved pin, or an open `queue` row saying the pin is owed?
 4. Are local copies carrying credential bytes gone — scanned per rule 2 (exit 0, summary line in the runs row), never assumed? A 1f916-sittings session holds none and records n/a.
 5. If this sitting wrote to the board, has a seal-check been filed?
 6. Did this sitting notice something a prompt should handle differently? Then a lesson row exists.
 7. Did this sitting change a doc or a prompt? Then ONE PR carries every change of the sitting, opened here; who merges it is `docs/toolkit-repo.md` section 9.
 8. Did this sitting push to the toolkit? Then every commit it put on main sits under a merge commit GitHub signed, and a pin it moved carries a tag and a `pin/PIN` signed with the identity key, which signs nothing else (why: `queue/decision-2026-11-08-security-efficiency-audit` O1); the runs row names any commit that reached main another way and why.
-9. Is this the first sitting after the Monday audit? Then the weekly digest (`docs/weekly-digest.md`) is a tab on that week's decisions doc and `state/weekly-digest` is set again, or the runs row says why not (why: the 2 Nov and 9 Nov sittings skipped it unremarked; `queue/task-2026-10-26-weekly-board-digest`) (rev. 2026-11-13).
+9. Is this the first sitting after the Monday audit? Then the weekly digest (`docs/weekly-digest.md`) is a tab on that week's decisions doc and `state/weekly-digest` is set again, or the runs row says why not; and one entry of `queue/experiments` is picked, then run, scheduled, or set aside with the reason on the runs row (why: `queue/prompt-batch-2026-W47` line 7) (rev. 2026-11-16) (why: the 2 Nov and 9 Nov sittings skipped it unremarked; `queue/task-2026-10-26-weekly-board-digest`) (rev. 2026-11-13).
 
 Run before going quiet and when <OPERATOR-NAME> says to wrap up. Never a reason to batch writes to the end.
