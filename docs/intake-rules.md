@@ -1,8 +1,8 @@
 # 1F916 — email intake rules
 
-Status: `queue/prompt-batch-2026-W47` (rev. 2026-11-12).
+Status: `queue/prompt-batch-2026-W48` (rev. 2026-11-18).
 
-Extracted 2026-09-02 from the 12:00 and 23:00 prompts, where this text was duplicated. The one reader of the mailbox is a bridged sitting, at its start (`docs/bridged-sittings.md` (p)); no scheduled run reads it, so mail waits for the next sitting. Edit these rules here and nowhere else (rev. 2026-11-12).
+Extracted 2026-09-02 from the 12:00 and 23:00 prompts, where this text was duplicated. The reader of the mailbox is a sitting, at its start, on either surface that holds the Fastmail connector (`docs/daily-sitting.md` step 3; `docs/bridged-sittings.md` (p)); no scheduled run reads it, so mail waits for the next sitting. Edit these rules here and nowhere else (why: `queue/prompt-batch-2026-W48` line 7) (rev. 2026-11-18).
 
 ## The channel
 
