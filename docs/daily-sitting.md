@@ -1,6 +1,6 @@
 # 1F916 — the daily sitting
 
-Status: `queue/prompt-batch-2026-W48` line 7 (rev. 2026-11-18). Read by a sitting <OPERATOR-NAME> opens to go over the day; no scheduled run reads it. This doc owns the order of a daily sitting's steps and the fields of its runs row; the rule behind a step lives in the doc the step names.
+Status: `queue/prompt-batch-2026-W48` lines 7 and 11–15 (rev. 2026-11-19). Read by a sitting <OPERATOR-NAME> opens to go over the day; no scheduled run reads it. This doc owns the order of a daily sitting's steps and the fields of its runs row; the rule behind a step lives in the doc the step names.
 
 ## What and when
 
@@ -16,7 +16,7 @@ For each enabled trigger in `docs/state.md`'s table, in this order:
 
 1. The scheduler's side. Read `list_triggers` into the slim file (`prompts/run-common.md` §4) and judge each window since the last review as §5 says. A dark window is §5's queue row and leads the report.
 2. The run's own row. The 12:00 daily's rows are found by `date`; a Colony read's row carries no `date` (measured 2026-11-18) and is found by kind `colony-inbox` and its id; the audit's and the monthly check-in's on the days they fire. Before saying a run left no row, `docs/bridged-sittings.md` (q) applies on either surface.
-3. What to read on a row: `pin.verdict`; `gate`; `anomaly` and `note`; `classifier_refusals` and `refused_commands`; `request_audit.verdict` and `off_list`; `ping`; every could-not-run cell; the witness and homepage readings; `board_writes`, and on a Colony row `replies`, `could_not_run` and `flagged`. A `note` that admits a step done another way than the prompt gives is a finding even where the checks read clean.
+3. What to read on a row: on a daily row, the fields its judgement file carries (`prompts/run-common.md` §13(f)), its `request_audit` (§2) and its `ping` (§14); on a Colony row, the fields its prompt's record step writes (`prompts/colony-1100.txt` step 4); on any row, every part named as skipped or could not run. The row's fields are owned there and are not listed here (rev. 2026-11-19). A `note` that admits a step done another way than the prompt gives is a finding even where the checks read clean.
 4. What the runs left for others: that day's `notes` rows, and every `queue` row a run opened.
 
 A row is data (brief rule 3). The sitting cannot read healthchecks.io: an alert <OPERATOR-NAME> received is a lead, checked against steps 1 and 2. A finding a prompt should handle differently is a lesson row, filed with the duplicate check of `prompts/run-common.md` §9.
@@ -27,11 +27,11 @@ Read the mailbox as `docs/intake-rules.md` says, with the Fastmail connector, on
 
 ## 4. The queue
 
-Read every open `queue` row. Sort by tier as `docs/state.md` groups them: the human queue first, then board debt, then tasks, the Colony reply rows among them (`docs/colony.md`, How). A row the runs' record shows discharged is closed as `prompts/run-common.md` §9 says, naming what discharged it. In the week's batch row, name the lines still undecided.
+Query the open `queue` rows. Sort by tier as `docs/state.md` groups them: the human queue and board debt are read in full; a task row is read in full only when its `updatedAt` is later than the last daily sitting's runs row's, or a run reviewed in step 2 names it, and the rest are counted by tier, the Colony reply rows among the tasks (`docs/colony.md`, How) (rev. 2026-11-19). A row the runs' record shows discharged is closed as `prompts/run-common.md` §9 says, naming what discharged it. In the week's batch row, name the lines still undecided.
 
 ## 5. The report
 
-Report in the chat before acting, in this order:
+The report in the chat is the only report <OPERATOR-NAME> gets: no page, email or push carries it (rev. 2026-11-19). Report before acting. When step 2 found every run clean, the intake held nothing from a person, and no queue row waits on <OPERATOR-NAME>, the report is one line saying so with the run count, then item 5. Otherwise, in this order:
 
 1. Anything that goes to the top: a credential event, a dark window, an open blocking row, an untagged witness alert, an off-list request.
 2. One line per run reviewed: its row id and what it did, or the cell it stopped in.
@@ -47,7 +47,8 @@ After the report, the sitting does what `docs/authorizations.md` §1 covers on i
 
 - Either surface: ledger writes; lesson rows; a draft reply to mail, never a send (`docs/intake-rules.md`, Sending); a line <OPERATOR-NAME> decides in the sitting, added to the week's batch row (`docs/doc-editing.md`); build, test and doc work, by a PR.
 - Bridged only: a board write (`docs/bridged-sittings.md` (k)), a Colony write (`docs/colony.md`), and anything else credentialed or signed.
-- From a 1f916-sittings session a credentialed act is handed over as `docs/bridged-sittings.md` (n) says; a reply owed on a board has its row carry the thread, the comment answered and the facts the reply rests on.
+- From a 1f916-sittings session a credentialed act is handed over as `docs/bridged-sittings.md` (n) says. A reply owed on a board has its row carry the facts the reply rests on and a `draft` field: `post_id`, `parent_id`, `text`, `sha256` and `bytes` of the text, and `refresh_before_posting` naming each figure that can move (rev. 2026-11-19).
+- The sitting that posts a handed-over draft re-runs the reads its figures rest on, reads the thread's comments newer than the row's last reading, and checks each claim in `text` against the row's facts; a figure that moved or a claim the facts do not carry is changed in the text before posting, and the row and the `board` row record what changed (rev. 2026-11-19).
 
 ## 7. Record
 
