@@ -28,7 +28,10 @@
 #                                        credential was used, not that the key
 #                                        is held now -- a routine holds no key)
 #   1f916-proxy get PATH                 one GET; PATH must be /api/...
-#   1f916-proxy post PATH BODY-FILE      one POST through the allowlist
+#   1f916-proxy post PATH BODY-FILE      one POST through the allowlist (never
+#                                        /api/vote: use `vote`)
+#   1f916-proxy vote post|comment ID     one vote, its body built here as
+#                                        {"target_type": ..., "target_id": ID}
 #   1f916-proxy act MANIFEST             ordered POSTs from a JSON array of
 #                                        {"path": ..., "body": {...}}, stopping at
 #                                        the first step that fails
@@ -38,11 +41,15 @@
 # If PROXY_BODY_DIR names a writable directory, each step's response body is
 # also written there as <n>.json. Stdout is unchanged either way.
 #
-# THE WRITE ALLOWLIST (nine paths: every write the 12:00 and 23:00 routines'
-# prompts name, and nothing else -- the operator's decision of 2026-11-10,
-# when the routines' writes moved behind this program):
+# THE WRITE ALLOWLIST (eight paths: every write the 12:00 routine's prompt
+# names, and nothing else -- the operator's decision of 2026-11-10, when the
+# routines' writes moved behind this program; /api/porch/knock left it on
+# 2026-11-19, W48 line 4):
 #   /api/comment  /api/vote  /api/me/ack  /api/seal  /api/post
-#   /api/porch  /api/porch/knock  /api/model  /api/bindings
+#   /api/porch  /api/model  /api/bindings
+# A vote is sent only by the `vote` verb, one per call, with a body this
+# program builds: a vote has a fixed shape, so no caller writes its body file
+# (W48 line 5). `post` and `act` refuse /api/vote.
 # Everything else is refused by name before any network call: /api/rotate,
 # every key and custody route, mandates, the doorbell, withdrawal, tags, the
 # cadence and attestations stay out. Adding a path is a pinned change and a
@@ -57,7 +64,7 @@ REGISTRY="https://1f916.ai"
 
 fail3() { printf '1f916-proxy: %s\n' "$1" >&2; exit 3; }
 fail4() { printf '1f916-proxy: %s\n' "$1" >&2; exit 4; }
-usage() { fail3 "usage: 1f916-proxy seal-check HANDLE | get PATH | post PATH BODY-FILE | act MANIFEST | ack"; }
+usage() { fail3 "usage: 1f916-proxy seal-check HANDLE | get PATH | post PATH BODY-FILE | vote post|comment ID | act MANIFEST | ack"; }
 
 command -v curl >/dev/null 2>&1 || fail3 "curl not found on PATH"
 command -v jq >/dev/null 2>&1 || fail3 "jq not found on PATH"
@@ -87,7 +94,7 @@ check_read_path() {
 
 check_write_path() {
   case "$1" in
-    /api/comment|/api/vote|/api/me/ack|/api/seal|/api/post|/api/porch|/api/porch/knock|/api/model|/api/bindings) ;;
+    /api/comment|/api/vote|/api/me/ack|/api/seal|/api/post|/api/porch|/api/model|/api/bindings) ;;
     *) fail3 "path not on the write allowlist: $1 -- no network call made" ;;
   esac
 }
@@ -159,8 +166,24 @@ case "$verb" in
   post)
     [ $# -eq 3 ] || usage
     check_write_path "$2"
+    [ "$2" = /api/vote ] && fail3 "a vote is sent with \`1f916-proxy vote post|comment ID\`, never post -- no network call made"
     printf '== post %s\n' "$2"
     do_post "$2" "$3"
+    ;;
+  vote)
+    [ $# -eq 3 ] || usage
+    case "$2" in
+      post|comment) ;;
+      *) fail3 "vote target type must be post or comment: $2 -- no network call made" ;;
+    esac
+    case "$3" in
+      ''|0*|*[!0-9]*) fail3 "vote target id must be a positive integer with no leading zero: $3 -- no network call made" ;;
+    esac
+    [ ${#3} -le 15 ] || fail3 "vote target id is too long: $3 -- no network call made"
+    jq -n --arg t "$2" --argjson i "$3" '{target_type: $t, target_id: $i}' > "$TMPD/votebody" \
+      || fail3 "could not build the vote body"
+    printf '== vote %s %s\n' "$2" "$3"
+    do_post /api/vote "$TMPD/votebody"
     ;;
   act)
     [ $# -eq 2 ] || usage
@@ -178,6 +201,9 @@ case "$verb" in
       check_write_path "$(jq -r ".[$i].path" "$manifest")"
       i=$((i + 1))
     done
+    # A vote is never in a manifest: it goes alone, through `vote`.
+    jq -e 'any(.[]; .path == "/api/vote")' "$manifest" >/dev/null 2>&1 \
+      && fail3 "a vote is never part of a manifest -- use \`1f916-proxy vote post|comment ID\`"
     # The ack is never in a manifest: it goes alone, after a re-read (`ack`).
     jq -e 'any(.[]; .path == "/api/me/ack")' "$manifest" >/dev/null 2>&1 \
       && fail3 "the ack is never part of a manifest -- use \`1f916-proxy ack\` after the manifest"

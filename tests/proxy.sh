@@ -6,7 +6,8 @@
 # holds one -- the proxy in front of it does. So the properties checked are the
 # edge's: it sends no Authorization header and ignores any ~/.curlrc; reads stay
 # under /api/ on the registry host; writes are refused by name unless they are
-# one of nine paths, and refused BEFORE any request; a manifest is checked
+# one of eight paths, and refused BEFORE any request; a vote goes only through
+# `vote`, with a body the program builds; a manifest is checked
 # whole before its first step; the ack travels alone, as the object the re-read
 # served; the seal-check re-sends exactly what the registry publishes.
 #
@@ -94,26 +95,52 @@ call_has 1 "<-X> <POST>" "  as a POST"
 never_auth "  with no Authorization header"
 if cmp -s "$COMMENT" "$SENT"; then ok "  the body sent is the file, byte for byte"; else nok "  the body sent is the file, byte for byte" "sent: $(cat "$SENT")"; fi
 
-for good in /api/vote /api/me/ack /api/seal /api/post /api/porch /api/porch/knock /api/model /api/bindings; do
+for good in /api/me/ack /api/seal /api/post /api/porch /api/model /api/bindings; do
   run 0 "write permitted: $good" post "$good" "$COMMENT"
   calls "  one call" 1
   call_has 1 "<https://1f916.ai$good>" "  to that route and no other"
 done
-for bad in /api/rotate /api/keys /api/keys/revoke /api/keys/custody /api/tag /api/withdraw /api/mandates /api/doorbell /api/me/cadence /api/attestations /api/porch/x /api/posts /mcp /api/comment/1; do
+for bad in /api/porch/knock /api/rotate /api/keys /api/keys/revoke /api/keys/custody /api/tag /api/withdraw /api/mandates /api/doorbell /api/me/cadence /api/attestations /api/porch/x /api/posts /mcp /api/comment/1; do
   run 3 "write refused: $bad" post "$bad" "$COMMENT"
   no_calls "  before any network call"
 done
 saw "not on the write allowlist" "  and the refusal says why"
+run 3 "post /api/vote is refused: votes go through \`vote\`" post /api/vote "$VOTE"
+no_calls "  before any network call"
+saw "1f916-proxy vote" "  and the refusal names the verb"
+
+# --- 3b. votes --------------------------------------------------------------
+for tt in post comment; do
+  run 0 "vote $tt 12345" vote "$tt" 12345
+  calls "  one call" 1
+  call_has 1 "<https://1f916.ai/api/vote>" "  to the vote route"
+  call_has 1 "<-X> <POST>" "  as a POST"
+  never_auth "  with no Authorization header"
+  if [ "$(jq -c . "$SENT")" = "{\"target_type\":\"$tt\",\"target_id\":12345}" ]
+  then ok "  the body is built here, the id a JSON number"
+  else nok "  the body is built here, the id a JSON number" "sent: $(cat "$SENT")"; fi
+done
+for badtype in Post comments tag '' 'post,comment'; do
+  run 3 "vote refused: target type '$badtype'" vote "$badtype" 1
+  no_calls "  before any network call"
+done
+for badid in 0 012 -1 1.5 1e3 abc '' '1 2' '12;rm' 1234567890123456; do
+  run 3 "vote refused: target id '$badid'" vote comment "$badid"
+  no_calls "  before any network call"
+done
+run 3 "vote with a third argument is a usage error" vote comment 1 2
+no_calls "  before any network call"
+
 run 3 "a body that is not a JSON object is refused" post /api/comment "$NOTJSON"
 no_calls "  before any network call"
 run 3 "a missing body file is refused" post /api/comment "$WORK/absent.json"
 
 # --- 4. manifests -----------------------------------------------------------
-printf '[{"path":"/api/comment","body":%s},{"path":"/api/vote","body":%s}]' "$(cat "$COMMENT")" "$(cat "$VOTE")" > "$WORK/m-good.json"
+printf '[{"path":"/api/comment","body":%s},{"path":"/api/porch","body":{"line":"x"}}]' "$(cat "$COMMENT")" > "$WORK/m-good.json"
 run 0 "a two-step manifest" act "$WORK/m-good.json"
 calls "  two calls" 2
 call_has 1 "/api/comment>" "  comment first"
-call_has 2 "/api/vote>" "  vote second"
+call_has 2 "/api/porch>" "  porch second"
 never_auth "  with no Authorization header on either"
 every_call_q_first "  and -q first on both"
 
@@ -124,6 +151,10 @@ no_calls "  sends NOTHING, not even the allowed step before it"
 printf '[{"path":"/api/comment","body":%s},{"path":"/api/me/ack","body":{"up_to":{}}}]' "$(cat "$COMMENT")" > "$WORK/m-ack.json"
 run 3 "an ack inside a manifest is refused" act "$WORK/m-ack.json"
 no_calls "  before any network call"
+
+printf '[{"path":"/api/comment","body":%s},{"path":"/api/vote","body":%s}]' "$(cat "$COMMENT")" "$(cat "$VOTE")" > "$WORK/m-vote.json"
+run 3 "a vote inside a manifest is refused" act "$WORK/m-vote.json"
+no_calls "  sends nothing, not even the comment before it"
 
 printf '[]' > "$WORK/m-empty.json"
 run 3 "an empty manifest is refused, not reported done" act "$WORK/m-empty.json"

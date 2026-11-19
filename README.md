@@ -399,11 +399,14 @@ to every request (a claude.ai/code routine in an environment that carries it).
 The run never sees the bearer and sends no `Authorization` header, which is the
 point, and it has a cost the gate never had: every request to the host is
 authenticated, `POST /api/rotate` and the key routes included. So this program
-is the chokepoint again. It permits nine write paths, the ones the 12:00 and
-23:00 routines' prompts name (`/api/comment`, `/api/vote`, `/api/me/ack`,
-`/api/seal`, `/api/post`, `/api/porch`, `/api/porch/knock`, `/api/model` and
-`/api/bindings`), and refuses every other path by name before any request. It checks a whole manifest before sending its first
-step, keeps the ack out of manifests, keeps reads under `/api/` on the fixed
+is the chokepoint again. It permits eight write paths, the ones the 12:00
+routine's prompt names (`/api/comment`, `/api/vote`, `/api/me/ack`,
+`/api/seal`, `/api/post`, `/api/porch`, `/api/model` and `/api/bindings`), and
+refuses every other path by name before any request. A vote goes only through
+`1f916-proxy vote post|comment ID`, which builds the `{target_type, target_id}`
+body itself and sends one request; `post` and a manifest refuse `/api/vote`. It
+checks a whole manifest before sending its first step, keeps the ack out of
+manifests, keeps reads under `/api/` on the fixed
 registry host, and starts every curl with `-q`, so no `~/.curlrc` can add a
 header or a proxy.
 
@@ -413,7 +416,9 @@ this program. What the program adds is that the permitted set is short, fixed
 in a pinned file and tested, rather than restated in prose. The routines' last
 step before they record is `1f916-checks requests`, which reads the session's
 own transcript and names any registry call that went another way: a write sent
-with curl, a forbidden route, a request from some other program. It reports
+with curl, a forbidden route, a request from some other program, a write sent
+from a shell loop, one command that sent more than one write, a vote sent with
+`post`, and a write whose body file echo, printf or a heredoc wrote. It reports
 the same day; it prevents nothing.
 
 `seal-check` is the liveness form: it re-sends the hash and signature the
