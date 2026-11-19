@@ -1974,7 +1974,7 @@ REGISTRY_URL_RE = re.compile(r"https?://1f916\.ai(?![A-Za-z0-9.-])([^\s'\"<>)\\|
 PROXY_WORD_RE = re.compile(r"(?:^|/)1f916-proxy$")
 REQUEST_WRITE_PATHS = (
     "/api/comment", "/api/vote", "/api/me/ack", "/api/seal", "/api/post",
-    "/api/porch", "/api/porch/knock", "/api/model", "/api/bindings",
+    "/api/porch", "/api/model", "/api/bindings",
 )
 REQUEST_NEVER_PREFIXES = (
     "/api/keys", "/api/rotate", "/api/mandates", "/api/doorbell", "/api/withdraw",
@@ -1993,6 +1993,18 @@ WHY_NEVER = "a route the prompts forbid"
 WHY_CLIENT = "a request made by a program other than curl or 1f916-proxy"
 WHY_PROXY_PATH = "1f916-proxy was asked for a path off its list"
 WHY_LOOP = "a write sent from a shell loop, so how many requests it made is unknown"
+WHY_MULTI = "one command sent more than one registry write"
+WHY_VOTE_POST = "a vote sent with 1f916-proxy post, not 1f916-proxy vote"
+WHY_SHELL_BODY = "a write whose body file was written by echo, printf or a heredoc"
+# A body file whose last writer in the transcript was echo, printf or a
+# heredoc (`cat <<EOF > f`, also through `| tee f`): shell quoting can change
+# what is published (W48 line 5). A file the Write tool or a program's own
+# output wrote (python, jq) is not flagged, and a later such write clears it.
+SHELL_TEXT_WRITE_RE = re.compile(
+    r"(?:^|[;&|(\n])\s*(echo|printf|cat)\b([^\n;&]*)")
+REDIRECT_TARGET_RE = re.compile(r"(?<![0-9&])>>?\s*([^\s;&|<>()]+)")
+TEE_TARGET_RE = re.compile(r"\|\s*tee\s+(?:-a\s+)?([^\s;&|<>()]+)")
+ANY_REDIRECT_RE = re.compile(r"(?:^|[;&|(\n])\s*([A-Za-z0-9_./-]+)\b[^\n;&]*?(?<![0-9&])>>?\s*([^\s;&|<>()]+)")
 # A tool that only writes text (a file, a ledger row) can mention a registry
 # address without sending anything: a comment body quoting a route, a lesson
 # row naming one. Counted as a mention, never flagged (W47 line 2).
@@ -2073,11 +2085,34 @@ def _write_shaped(seg):
     return False
 
 
-def _classify_bash(command, counts, flag):
+def _file_key(path):
+    return os.path.basename((path or "").strip("'\""))
+
+
+def _note_file_writes(command, shell_files):
+    """Record which files this command wrote, and whether echo, printf or a heredoc wrote them."""
+    for m in ANY_REDIRECT_RE.finditer(command):
+        prog = os.path.basename(m.group(1))
+        if prog not in ("echo", "printf", "cat"):
+            shell_files.pop(_file_key(m.group(2)), None)
+    for m in SHELL_TEXT_WRITE_RE.finditer(command):
+        prog, rest = m.group(1), m.group(2)
+        if prog == "cat" and "<<" not in rest:
+            continue
+        for t in REDIRECT_TARGET_RE.finditer(rest):
+            shell_files[_file_key(t.group(1))] = prog
+        for t in TEE_TARGET_RE.finditer(rest):
+            shell_files[_file_key(t.group(1))] = prog
+
+
+def _classify_bash(command, counts, flag, shell_files=None):
+    if shell_files is None:
+        shell_files = {}
     words = _shell_words(command)
     seen_url = False
     looped = bool(SHELL_LOOP_RE.search(command))
     client = _runs_a_client(command)
+    writes_here = 0
     for seg in _segments(words):
         prog = os.path.basename(seg[0]) if seg else ""
         proxy_at = next((i for i, w in enumerate(seg) if PROXY_WORD_RE.search(w)), None)
@@ -2085,17 +2120,32 @@ def _classify_bash(command, counts, flag):
         if proxy_at is not None:
             verb = seg[proxy_at + 1] if proxy_at + 1 < len(seg) else ""
             arg = seg[proxy_at + 2] if proxy_at + 2 < len(seg) else ""
-            if looped and verb in ("post", "ack", "seal-check", "act"):
+            if verb in ("post", "vote", "ack", "seal-check", "act"):
+                writes_here += 1
+                if writes_here == 2:
+                    # One request per command, so the record can count them
+                    # (W48 line 5): a chain of two writes is flagged once.
+                    flag(WHY_MULTI, "POST", "/")
+            body = seg[proxy_at + 3] if verb == "post" and proxy_at + 3 < len(seg) else (
+                arg if verb == "act" else "")
+            if body and _file_key(body) in shell_files:
+                flag(WHY_SHELL_BODY, "POST", _safe_path(arg) if verb == "post" else "/")
+            if looped and verb in ("post", "vote", "ack", "seal-check", "act"):
                 # One command, an unknown number of requests: the prompts send
                 # one write per command, and a count read from the text would
                 # be a guess (W47 line 18).
                 flag(WHY_LOOP, "POST", _safe_path(arg) if verb == "post" else "/")
             if verb == "post":
                 path = _safe_path(arg)
-                if arg in REQUEST_WRITE_PATHS:
+                if arg == "/api/vote":
+                    flag(WHY_VOTE_POST, "POST", path)
+                    counts["proxy_writes"][arg] = counts["proxy_writes"].get(arg, 0) + 1
+                elif arg in REQUEST_WRITE_PATHS:
                     counts["proxy_writes"][arg] = counts["proxy_writes"].get(arg, 0) + 1
                 else:
                     flag(WHY_PROXY_PATH, "POST", path)
+            elif verb == "vote":
+                counts["proxy_writes"]["/api/vote"] = counts["proxy_writes"].get("/api/vote", 0) + 1
             elif verb == "ack":
                 counts["proxy_writes"]["/api/me/ack"] = counts["proxy_writes"].get("/api/me/ack", 0) + 1
             elif verb == "seal-check":
@@ -2158,7 +2208,10 @@ def cmd_requests(ctx, args):
     before this command ran. An address written by a text-only tool (Write,
     Edit, the Artifact tools) or named in a command that runs no network
     client is a mention: counted, never flagged. A write sent from a shell
-    loop is flagged, because its request count cannot be read from the text.
+    loop is flagged, because its request count cannot be read from the text;
+    so is a command that sends more than one write, a vote sent with `post`
+    instead of `vote`, and a write whose body file echo, printf or a heredoc
+    wrote (W48 line 5).
     """
     data = ctx.read_file(args.transcript, "transcript")
     counts = {"gets": 0, "webfetch": 0, "proxy_writes": {}, "proxy_manifests": 0,
@@ -2166,6 +2219,7 @@ def cmd_requests(ctx, args):
     off_list = []
     tool_calls = 0
     unparsed = 0
+    shell_files = {}
     for raw in data.split(b"\n"):
         if not raw.strip():
             continue
@@ -2198,7 +2252,8 @@ def cmd_requests(ctx, args):
             if name == "Bash":
                 command = inp.get("command")
                 if isinstance(command, str):
-                    _classify_bash(command, counts, flag)
+                    _note_file_writes(command, shell_files)
+                    _classify_bash(command, counts, flag, shell_files)
             elif name == "WebFetch":
                 url = inp.get("url")
                 m = REGISTRY_URL_RE.search(url) if isinstance(url, str) else None
@@ -2207,6 +2262,8 @@ def cmd_requests(ctx, args):
                     if _never_route(_safe_path(m.group(1))):
                         flag(WHY_NEVER, "GET", _safe_path(m.group(1)))
             elif _mention_only_tool(name):
+                if name in ("Write", "Edit", "MultiEdit") and isinstance(inp.get("file_path"), str):
+                    shell_files.pop(_file_key(inp["file_path"]), None)
                 text = json.dumps(inp, ensure_ascii=False)
                 if REGISTRY_URL_RE.search(text):
                     counts["mentions"] += 1
@@ -2989,9 +3046,10 @@ DAILY_JUDGEMENT_NESTED = (
     ("front", "filed_from_discovery"), ("front", "filed_from_discovery_why"),
     ("front", "read_in_full"), ("front", "comments_read_in_full"),
     ("homepage", "check_id"), ("model_check", "instrument"),
-    ("previous_window", "task"), ("previous_window", "fired_at"),
-    ("previous_window", "finished_at"), ("previous_window", "last_run_status"),
 )
+# previous_window left this list on 2026-11-19 (W48 line 3): no scheduled run
+# judges a previous window since 2026-11-12, so the daily writes none and the
+# builder fills the block only when a `window` part ran.
 
 # The weekly audit's equivalent. DERIVED, not invented: the three audit rows
 # this identity has written -- 2026-09-07T11, 2026-09-14T11, 2026-09-21T11 --

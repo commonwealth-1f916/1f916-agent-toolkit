@@ -126,7 +126,12 @@ mutant 'empty manifest reported done'       's|^      .. fail3 "manifest is not 
 # properties that make it an edge rather than a pass-through.
 mutant 'the allowlist admits /api/rotate'    's|/api/model\|/api/bindings) ;;|/api/model\|/api/bindings\|/api/rotate) ;;|' proxy
 mutant 'the allowlist admits /api/keys/custody' 's|/api/model\|/api/bindings) ;;|/api/model\|/api/bindings\|/api/keys/custody) ;;|' proxy
-mutant 'the allowlist loses /api/porch/knock' 's|/api/porch\|/api/porch/knock\|/api/model|/api/porch\|/api/model|' proxy
+mutant 'the allowlist admits /api/porch/knock' 's|/api/porch\|/api/model|/api/porch\|/api/porch/knock\|/api/model|' proxy
+mutant 'post may send a vote'                's|^    \[ "\$2" = /api/vote \] \&\& fail3.*$|    :|' proxy
+mutant 'a vote may ride in a manifest'       's|^      \&\& fail3 "a vote is never part of a manifest.*$|      \&\& :|' proxy
+mutant 'a vote takes any target type'        's|^      \*) fail3 "vote target type must be post or comment.*$|      *) ;;|' proxy
+mutant 'a vote takes any target id'          's#^      ..|0\*|\*\[!0-9\]\*) fail3 "vote target id.*$#      x) ;;#' proxy
+mutant 'a vote id is sent as a string'       's|--argjson i "\$3"|--arg i "$3"|' proxy
 mutant 'the allowlist admits anything'       's|^    \*) fail3 "path not on the write allowlist.*$|    *) ;;|'   proxy
 mutant 'reads may leave /api/'               's|^    \*) fail3 "read path is not under /api/.*$|    *) ;;|'    proxy
 mutant 'reads may carry an at-sign'          's|^      fail3 "read path contains an at-sign.*$|      : ;;|'   proxy

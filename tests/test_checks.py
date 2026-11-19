@@ -1147,7 +1147,7 @@ class Requests(Base):
             self.bash(self.GET),
             self.bash("curl -q -sS -o me.json -w '%{http_code}\\n' 'https://1f916.ai/api/me?cursor_mode=id'"),
             self.bash("sh tools/1f916-proxy post /api/comment body.json"),
-            self.bash("sh 1f916-proxy post /api/porch/knock knock.json"),
+            self.bash("sh 1f916-proxy vote comment 148925"),
             self.bash("sh 1f916-proxy ack"),
             self.bash("sh 1f916-proxy seal-check commonwealth"),
             self.bash("sh 1f916-proxy act manifest.json"),
@@ -1163,7 +1163,7 @@ class Requests(Base):
         reg = out["registry"]
         self.assertEqual(reg["gets"], 2)
         self.assertEqual(reg["webfetch"], 1)
-        self.assertEqual(reg["proxy_writes"], {"/api/comment": 1, "/api/porch/knock": 1,
+        self.assertEqual(reg["proxy_writes"], {"/api/comment": 1, "/api/vote": 1,
                                                "/api/me/ack": 1, "/api/seal": 1})
         self.assertEqual(reg["proxy_manifests"], 1)
         self.assertEqual(reg["pinned_tool_calls"], 1)
@@ -1234,7 +1234,7 @@ class Requests(Base):
     def test_a_write_from_a_shell_loop_is_flagged(self):
         # W47 line 18: four votes in one loop were counted as one write.
         for cmd in (
-            "for v in a b c d; do sh 1f916-proxy post /api/vote $v.json > $v.out; done",
+            "for v in a b c d; do sh 1f916-proxy vote comment $v > $v.out; done",
             "while read f; do sh 1f916-proxy post /api/comment \"$f\"; done < list",
         ):
             out = self.run_checks("requests", "--transcript", self.transcript(self.bash(cmd)))
@@ -1242,10 +1242,84 @@ class Requests(Base):
             self.assertEqual(out["off_list"][0]["why"],
                              "a write sent from a shell loop, so how many requests it made is unknown", cmd)
         out = self.run_checks("requests", "--transcript", self.transcript(
-            self.bash("sh 1f916-proxy post /api/vote a.json > a.out && sh 1f916-proxy post /api/vote b.json > b.out"),
+            self.bash("sh 1f916-proxy vote comment 1 > a.out"),
+            self.bash("sh 1f916-proxy vote post 2 > b.out"),
             self.bash("for f in *.json; do python3 -c 'print(1)' $f; done")))
-        self.assertEqual(out["verdict"], "clean")
+        self.assertEqual(out["verdict"], "clean", out["off_list"])
         self.assertEqual(out["registry"]["proxy_writes"], {"/api/vote": 2})
+
+    def test_more_than_one_write_in_a_command_is_flagged_once(self):
+        # W48 line 5: the 2026-11-14 and -17 shapes, a chain of writes in one command.
+        for cmd in (
+            "sh 1f916-proxy vote comment 1 > a.out && sh 1f916-proxy vote comment 2 > b.out",
+            "sh 1f916-proxy post /api/comment c.json; sh 1f916-proxy ack",
+            "sh 1f916-proxy vote post 1 && sh 1f916-proxy vote post 2 && sh 1f916-proxy vote post 3",
+        ):
+            out = self.run_checks("requests", "--transcript", self.transcript(self.bash(cmd)))
+            whys = [o["why"] for o in out["off_list"]]
+            self.assertEqual(whys.count("one command sent more than one registry write"), 1, cmd)
+            self.assertEqual(out["verdict"], "off-list", cmd)
+
+    def test_a_vote_sent_with_post_is_flagged(self):
+        out = self.run_checks("requests", "--transcript", self.transcript(
+            ("Write", {"file_path": "v.json", "content": '{"target_type":"comment","target_id":1}'}),
+            self.bash("sh 1f916-proxy post /api/vote v.json")))
+        self.assertEqual([o["why"] for o in out["off_list"]],
+                         ["a vote sent with 1f916-proxy post, not 1f916-proxy vote"])
+
+    def test_the_knock_is_off_the_list(self):
+        out = self.run_checks("requests", "--transcript", self.transcript(
+            self.bash("sh 1f916-proxy post /api/porch/knock k.json")))
+        self.assertEqual(out["off_list"][0]["why"], "1f916-proxy was asked for a path off its list")
+
+    def test_a_body_written_by_the_shell_is_flagged(self):
+        # W48 line 5: knock and vote bodies written with echo on 11-14 and 11-17.
+        why = "a write whose body file was written by echo, printf or a heredoc"
+        for writer in (
+            "echo '{\"body\":\"hi\"}' > body.json",
+            "printf '%s' '{\"body\":\"hi\"}' > out/body.json",
+            "cat > body.json <<'EOF'\n{\"body\": \"hi\"}\nEOF",
+            "cat <<'EOF' > body.json\n{\"body\": \"hi\"}\nEOF",
+            "echo '{}' | tee body.json",
+        ):
+            out = self.run_checks("requests", "--transcript", self.transcript(
+                self.bash(writer), self.bash("sh 1f916-proxy post /api/comment body.json")))
+            self.assertEqual([o["why"] for o in out["off_list"]], [why], writer)
+            self.assertEqual(out["off_list"][0]["call"], 2, writer)
+        # In the same command as the post.
+        out = self.run_checks("requests", "--transcript", self.transcript(
+            self.bash("echo '{}' > p.json && sh 1f916-proxy post /api/porch p.json")))
+        self.assertEqual([o["why"] for o in out["off_list"]], [why])
+        # A manifest written by the shell.
+        out = self.run_checks("requests", "--transcript", self.transcript(
+            self.bash("echo '[]' > m.json"), self.bash("sh 1f916-proxy act m.json")))
+        self.assertEqual([o["why"] for o in out["off_list"]], [why])
+
+    def test_a_body_from_the_write_tool_or_a_program_is_clean(self):
+        out = self.run_checks("requests", "--transcript", self.transcript(
+            ("Write", {"file_path": "/s/body.json", "content": '{"body":"hi"}'}),
+            self.bash("sh 1f916-proxy post /api/comment /s/body.json"),
+            self.bash("python3 mk.py > seal.json"),
+            self.bash("sh 1f916-proxy post /api/seal seal.json"),
+            self.bash("jq -n '{line:\"x\"}' > porch.json"),
+            self.bash("sh 1f916-proxy post /api/porch porch.json"),
+            self.bash("cat a.json > copy.json"),
+            self.bash("sh 1f916-proxy post /api/post copy.json")))
+        self.assertEqual(out["verdict"], "clean", out["off_list"])
+        # A later Write or program output clears an earlier echo.
+        out = self.run_checks("requests", "--transcript", self.transcript(
+            self.bash("echo '{}' > b.json"),
+            ("Write", {"file_path": "b.json", "content": '{"body":"hi"}'}),
+            self.bash("sh 1f916-proxy post /api/comment b.json"),
+            self.bash("echo '{}' > c.json"),
+            self.bash("python3 mk.py > c.json"),
+            self.bash("sh 1f916-proxy post /api/comment c.json")))
+        self.assertEqual(out["verdict"], "clean", out["off_list"])
+        # 2>&1 and 2> are not body writes.
+        out = self.run_checks("requests", "--transcript", self.transcript(
+            self.bash("echo hi 2> err.json"),
+            self.bash("sh 1f916-proxy post /api/comment err.json")))
+        self.assertEqual(out["verdict"], "clean", out["off_list"])
 
     def test_another_client_is_off_list(self):
         for cmd in (
@@ -1771,18 +1845,16 @@ class RunsRow(Base):
         # The other half, and without it the guard would be a refusal machine:
         # DAILY_JUDGEMENT_NESTED is this file's own list of fields the RUN
         # writes, so a judgement carrying one is doing its job -- including
-        # previous_window.task, which the builder also derives when the window
-        # part ran.
+        # homepage.check_id, in a block a check also fills.
         judgement = self.write("j.json", {
             "surface": {"change": "two routes added"},
-            "previous_window": {"task": "1F916 evening (trig_x)"},
+            "homepage": {"check_id": 4242},
             "note": "a sentence only the run can write",
         })
         out = self.run_checks("runs-row", "--all", self.all_path,
                               "--judgement", judgement)
         self.assertEqual(out["row"]["surface"]["change"], "two routes added")
-        self.assertEqual(out["row"]["previous_window"]["task"],
-                         "1F916 evening (trig_x)")
+        self.assertEqual(out["row"]["homepage"]["check_id"], 4242)
         self.assertIn("capability_sha256", out["row"]["surface"])
 
     def test_a_block_that_did_not_run_leaves_the_judgement_free_to_write_it(self):
@@ -1925,7 +1997,7 @@ class RunsRowStamps(Base):
 
     def test_copied_stamps_at_or_before_the_clock_pass(self):
         out = self.build({"note": "fine", "started_at": "2026-10-01T12:04:58Z",
-                          "previous_window": {"fired_at": "2026-09-30T23:00:12.5Z"},
+                          "queue": {"opened": "2026-09-30T23:00:12.5Z"},
                           "board": [{"filed_at": self.NOW}]})
         self.assertEqual(out["row"]["started_at"], "2026-10-01T12:04:58Z")
 
