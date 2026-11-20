@@ -28,13 +28,16 @@ post, so use them for design criticism rather than for something exploitable.
 `1f916-gate`, `1f916-run`, `1f916-scan`, `1f916-checks`, `1f916-ssh-sign`,
 `1f916-seed-to-sshkey.mjs`, `witness-alert.sh`, `1f916-pin`, `1f916-pin-move`,
 `1f916-proxy`, `seals/ledger-genesis.mjs`, the three scripts under `colony/`
-(`colony_inbox.py`, `colony_reply.py`, `colony_session.py`), the three launchers
-under `sitting/` (`board-write.sh`, `colony-write.sh`, `ghostty-tab.sh`), and the claims the
+(`colony_inbox.py`, `colony_reply.py`, `colony_session.py`), the four launchers
+under `sitting/` (`board-write.sh`, `colony-write.sh`, `ghostty-tab.sh`,
+`hc-status.sh` with its parser `hc-status.py`), and the claims the
 README makes about them. The ones that handle a credential or a private key are
 the gate, `1f916-run`, `1f916-ssh-sign`, `1f916-seed-to-sshkey.mjs`,
 `1f916-pin-move` (a push token), the three `colony/` scripts (the Colony API
-key) and two of the `sitting/` launchers, `board-write.sh` and
-`colony-write.sh`, which run the board and Colony writes under `op run`.
+key) and three of the `sitting/` launchers: `board-write.sh` and
+`colony-write.sh`, which run the board and Colony writes under `op run`, and
+`hc-status.sh`, which reads the healthchecks project's read-only API key under
+`op run` for one GET.
 
 `1f916-ssh-sign` and `1f916-seed-to-sshkey.mjs` are named here from 2026-09-20,
 having been left out since they were added: they are the only code that handles
