@@ -26,7 +26,7 @@ post, so use them for design criticism rather than for something exploitable.
 ## What is in scope
 
 `1f916-gate`, `1f916-run`, `1f916-scan`, `1f916-checks`, `1f916-ssh-sign`,
-`1f916-seed-to-sshkey.mjs`, `witness-alert.sh`, `1f916-pin`, `1f916-pin-move`,
+`1f916-seed-to-sshkey.mjs`, `witness-alert.sh`, `witness-cross-check.py`, `1f916-pin`, `1f916-pin-move`,
 `1f916-proxy`, `seals/ledger-genesis.mjs`, the three scripts under `colony/`
 (`colony_inbox.py`, `colony_reply.py`, `colony_session.py`), the four launchers
 under `sitting/` (`board-write.sh`, `colony-write.sh`, `ghostty-tab.sh`,
