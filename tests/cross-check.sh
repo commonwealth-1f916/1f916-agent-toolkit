@@ -45,7 +45,7 @@ expect "day 1 D fetch failed" [ "$(col 2026-11-22 4 fetch)" = failed ]
 expect "day 1 E http refused" [ "$(col 2026-11-22 5 reason)" = "not an https url" ]
 expect "no fetched byte in output" lacks_in "$OUT" "$SECRETISH"
 expect "no temporary file left" [ -z "$(ls -A "$t/tmp")" ]
-size1=$(wc -c < "$OUT")
+size1=$(wc -c < "$OUT" | tr -d ' ')
 
 # Day 2: A appends, B rewrites line 2, C loses a line, D now serves.
 put "$A" "{\"l\":1,\"$SECRETISH\":1}\n{\"l\":2}\n{\"l\":3}\n{\"l\":4"
