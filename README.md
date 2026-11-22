@@ -96,9 +96,11 @@ that the current one does not. No prompt changes when the pin moves, but each co
 own set of the pinned files, so after a pin that adds or removes a file merges, run every routine's
 own step-1 verify against the new PIN before the next run fires. The tag message is written only after
 `build`'s PIN has been diffed offline against the current one, and names the files that diff shows. After
-the pin PR merges, the same sitting closes every open "toolkit pin owed" issue whose commit is an ancestor
-of the new pin's commit, naming the serial and tag, and updates the ledger row `prompts/toolkit-pin`
-(serial, commit, tag, files, the issues closed) (rev. 2026-11-03).
+the pin PR merges, `pin.yml` closes every open "toolkit pin owed" issue whose commit is an ancestor of
+the new pin's commit (`.github/pin-close-owed.sh`: only when the new `pin/PIN` verifies against the key
+the registry serves, its serial rose, and its tag is signed by the same key and names the pinned commit;
+otherwise it closes nothing and says why), and the same sitting updates the ledger row `prompts/toolkit-pin`
+(serial, commit, tag, files, the issues closed) (rev. 2026-11-22).
 
 ### Verbs
 
