@@ -44,7 +44,7 @@ jobs:
       # merged unread.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: shellcheck the test scripts at full severity
-        run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh tests/checks.sh tests/manifest.sh tests/pinfile.sh tests/proxy.sh tests/seals.sh tests/hc-status.sh sitting/hc-status.sh
+        run: shellcheck tests/gate.sh tests/run.sh tests/alert.sh tests/config-transport.sh tests/sign.sh tests/mutants.sh tests/hygiene.sh tests/scan.sh tests/stub-curl tests/pin.sh tests/checks.sh tests/manifest.sh tests/pinfile.sh tests/proxy.sh tests/seals.sh tests/hc-status.sh tests/cross-check.sh sitting/hc-status.sh
       - name: shellcheck the shipped scripts at full severity
         # Raised from --severity=warning here, in the change that cleared the
         # two info-level SC2015 notes it was holding the line for.
@@ -119,6 +119,8 @@ jobs:
         run: sh tests/pinfile.sh
       - name: sitting healthchecks reader -- reduces the listing, never prints a ping URL
         run: sh tests/hc-status.sh
+      - name: witness cross-check -- match, mismatch, shrank, failed fetch, file only grows, no fetched byte kept
+        run: sh tests/cross-check.sh
 
   gate-tests:
     strategy:

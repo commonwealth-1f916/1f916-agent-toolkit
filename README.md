@@ -223,6 +223,14 @@ be deployed byte-identical to the copy here. Requires `git`, `msmtp`, `date`
 
 ---
 
+## `witness-cross-check.py` — every witness store's prefix, recorded by someone else
+
+Each witness operator can check that its own countersignatures file only ever grows, but that check is private: from outside, a check its owner runs on itself reads the same as one that never runs. This script is the outside check. Once a day, on the witness host, it reads the registry's witness directory (`GET /api/witnesses`), fetches every row's published url (https only, redirects only to https, 64 MiB cap), and appends one JSON line per witness to `cross-check/prefixes.jsonl` in the witness repository: the line count `n` (newline-terminated lines), the sha-256 of those `n` lines with their separators, and a `check` against that witness's last successful record at the same url — `match` (the first `prev.n` lines hash to `prev.sha256`), `mismatch` (a published line changed), `shrank` (fewer lines than before), `first`, or `not-checked` when the fetch failed (with the reason). A failed day is never a baseline. Its own store is in the walk like everyone else's, read from the public copy.
+
+The script keeps hashes and counts only; fetched bytes are never stored, parsed or echoed. It does not commit: the file is built outside the repository and renamed into place, and the witness's own hourly run publishes it with its next commit, so the repository is written from one clone only. It covers nothing before a store's first line here, and says so with `first`. Exit 0 when the directory was read, 3 when it was not (one `directory-failed` line records it). Tested in `tests/cross-check.sh` against fixtures, no network.
+
+---
+
 ## `1f916-scan` — look for a secret without typing it
 
 ```sh
