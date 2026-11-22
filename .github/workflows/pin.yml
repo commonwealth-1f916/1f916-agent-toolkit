@@ -164,9 +164,30 @@ jobs:
             cat /tmp/pin.out
             echo '```'
             echo
-            echo "Close this issue when the pin has moved in all three places, the signed"
-            echo "tag is pushed, and the ledger row \`prompts/toolkit-pin\` records both."
-            echo "The weekly audit reads that row and will report the gap until then."
+            echo "This issue closes itself (.github/pin-close-owed.sh, below) when a push to"
+            echo "main lands a pin/PIN that verifies against the identity key, raises the"
+            echo "serial, names a commit containing this one, and whose tag is signed by the"
+            echo "same key. The ledger row \`prompts/toolkit-pin\` is still the sitting's to"
+            echo "update; the weekly audit reads that row and reports the gap until then."
           } > /tmp/body.md
           gh issue create --title "$title" --body-file /tmp/body.md --label pin-owed \
             || gh issue create --title "$title" --body-file /tmp/body.md
+
+      # The other half: a pin move discharges the issues above. Before
+      # 2026-11-22 a sitting closed them by hand after the pin PR merged, and
+      # #198 stayed open three days after serial 31 had discharged it. A pin
+      # that does not verify closes nothing (the script says why), so this can
+      # only ever clear an issue a signed pin has answered.
+      - name: close the owed issues a verified pin move discharged
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -e
+          if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "::notice::no reachable previous commit ($BEFORE) -- nothing compared"
+            exit 0
+          fi
+          git fetch -q --tags origin || echo "::warning::tag fetch failed; the script checks the tag itself"
+          sh .github/pin-close-owed.sh "$BEFORE" "$AFTER"
