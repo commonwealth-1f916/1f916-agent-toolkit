@@ -8,7 +8,11 @@ check that never runs. This script is the outside check, run by one witness
 operator over everybody's stores, its own included:
 
   1. read the directory and, for each row, fetch the published url (https only,
-     size-capped, redirects only to https);
+     size-capped, redirects only to https). A url that serves an HTML page is
+     not a store: the page's <link rel="alternate" type="application/jsonl">
+     is followed once, on the same host, and the file it names is the store
+     (resolved_url); a page with no such link, or one that leads off the host
+     or to another page, is "not-checked";
   2. count the complete lines n (newline-terminated) and hash the first n lines
      with their separators, sha-256 -- the same pair the stores' operators and
      the board already quote;
@@ -19,7 +23,10 @@ operator over everybody's stores, its own included:
 
 The output file is itself append-only and lives in a public repository, so the
 record of other people's stores is not held by any of them. It holds hashes
-and counts only: fetched bytes are never stored, parsed or echoed. History
+and counts only: fetched bytes are never stored or echoed, and nothing is
+parsed but an HTML page's <link> tags. A store is compared only with earlier
+records of the same file (the url actually hashed), so a record taken of a page
+before this rule never stands in for the store it links to. History
 before a store's first record here is not covered, and the file says so with
 check "first".
 
@@ -37,10 +44,12 @@ import json
 import os
 import sys
 import tempfile
+import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
-VERSION = 1
+VERSION = 2
 REGISTRY = "https://1f916.ai/api/witnesses"
 UA = "1f916-witness-cross-check/1 (+https://github.com/commonwealth-1f916/1f916-agent-toolkit)"
 
@@ -82,6 +91,47 @@ def fetch(url, args):
     return status, ctype[:80], body
 
 
+LINK_TAG = re.compile(rb"<link\b[^>]*>", re.I)
+ATTR = re.compile(rb'([a-zA-Z-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')')
+
+
+def looks_html(ctype, body):
+    """True for a page rather than a store: an HTML content type or an HTML start."""
+    if ctype.lower().startswith(("text/html", "application/xhtml")):
+        return True
+    head = body[:512].lstrip().lower()
+    return head.startswith((b"<!doctype html", b"<html"))
+
+
+def jsonl_alternate(body):
+    """href of the first <link rel="alternate" type="application/jsonl">, or None."""
+    for tag in LINK_TAG.findall(body[:256 * 1024]):
+        attrs = {m.group(1).lower(): (m.group(2) if m.group(2) is not None else m.group(3))
+                 for m in ATTR.finditer(tag)}
+        rel = (attrs.get(b"rel") or b"").lower().split()
+        if b"alternate" in rel and (attrs.get(b"type") or b"").strip().lower() == b"application/jsonl":
+            href = (attrs.get(b"href") or b"").strip()
+            if href:
+                return href.decode("utf-8", "replace")
+    return None
+
+
+def resolve_store(url, ctype, body, args):
+    """(hashed_url, status, ctype, body) for the store behind url, or raise RuntimeError(reason)."""
+    if not looks_html(ctype, body):
+        return url, None, ctype, body
+    href = jsonl_alternate(body)
+    if href is None:
+        raise RuntimeError("html page with no application/jsonl alternate link")
+    target = urllib.parse.urljoin(url, href)
+    if urllib.parse.urlsplit(target).netloc.lower() != urllib.parse.urlsplit(url).netloc.lower():
+        raise RuntimeError("jsonl alternate leads off the host")
+    status, ctype2, b2 = fetch(target, args)
+    if looks_html(ctype2, b2):
+        raise RuntimeError("jsonl alternate is an html page too")
+    return target, status, ctype2, b2
+
+
 def prefix(body, n):
     """sha-256 of the first n newline-terminated lines, or None if fewer exist."""
     if n == 0:
@@ -109,9 +159,11 @@ def load_records(path):
     return recs
 
 
-def last_ok(recs, wid, url):
+def last_ok(recs, wid, url, hashed):
+    """The newest ok record of this witness, this directory url and this hashed file."""
     for r in reversed(recs):
-        if r.get("witness_id") == wid and r.get("url") == url and r.get("fetch") == "ok":
+        if (r.get("witness_id") == wid and r.get("url") == url and r.get("fetch") == "ok"
+                and r.get("resolved_url", r.get("url")) == hashed):
             return r
     return None
 
@@ -150,15 +202,20 @@ def main(argv=None):
         wid, url = w.get("id"), w.get("url") or ""
         rec = {"v": VERSION, "date": date, "at": at, "witness_id": wid,
                "operator": w.get("operator"), "url": url}
-        prev = last_ok(recs, wid, url)
-        rec["prev"] = ({"date": prev["date"], "n": prev["n"], "sha256": prev["sha256"]}
-                       if prev else None)
         try:
             status, ctype, b = fetch(url, args)
+            hashed, status2, ctype2, b = resolve_store(url, ctype, b, args)
         except RuntimeError as e:
-            rec.update({"fetch": "failed", "reason": str(e), "check": "not-checked"})
+            rec.update({"fetch": "failed", "reason": str(e), "check": "not-checked",
+                        "prev": None})
             new.append(rec)
             continue
+        if hashed != url:
+            rec["resolved_url"] = hashed
+            status, ctype = status2, ctype2
+        prev = last_ok(recs, wid, url, hashed)
+        rec["prev"] = ({"date": prev["date"], "n": prev["n"], "sha256": prev["sha256"]}
+                       if prev else None)
         n = b.count(b"\n")
         rec.update({"fetch": "ok", "http": status, "content_type": ctype, "bytes": len(b),
                     "n": n, "sha256": prefix(b, n),
