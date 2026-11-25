@@ -34,7 +34,14 @@ one id per line): one public item with no ledger id stops the run before it
 writes anything, because a write the record cannot see means the key may be
 in other hands. The account's listings are read by limit/offset to the end and
 the precheck fails closed: a page it cannot read as complete, or a count that
-does not match the served total, stops the run the same way (listing_ids). Each draft is then checked against the rules above with the
+does not match the served total, stops the run the same way (listing_ids).
+With --ledger-dir the check also runs the other way: every ledger row of kind
+comment, reply or post whose colony_id the site no longer serves stops the run
+too, so a comment of ours that was removed or moderated is seen before the next
+write; a row a sitting has marked `removed` (the date it learned of it) is
+not expected. With --ledger-ids the rows' kinds are unknown, so the reverse
+check does not run and the summary says so (queue/prompt-batch-2026-W48
+line 25). Each draft is then checked against the rules above with the
 thread read fresh; a draft that fails a rule is SKIPPED with its reason, never
 reshaped. A reply is skipped if one of ours already sits under that parent; a
 new-thread comment is skipped if the account is already in the thread. Each
@@ -184,14 +191,17 @@ def check_comment(d, thread, post):
     return None
 
 
-def ledger_ids_from_dir(path):
-    """Every `colony_id` and `id` value of the ledger's colony rows, as read_db saves them."""
+SERVED_KINDS = ("comment", "reply", "post")
+
+
+def ledger_rows_from_dir(path):
+    """The ledger's colony rows as read_db saves them, each unwrapped from `data`."""
     sub = os.path.join(path, "colony")
     base = sub if os.path.isdir(sub) else path
     names = sorted(n for n in os.listdir(base) if n.endswith(".json"))
     if not names:
         raise ValueError("no colony rows under the ledger dir")
-    ids = set()
+    rows = []
     for n in names:
         with open(os.path.join(base, n), encoding="utf-8") as f:
             row = json.load(f)
@@ -199,11 +209,33 @@ def ledger_ids_from_dir(path):
             raise ValueError("a colony row is not a JSON object")
         if isinstance(row.get("data"), dict) and "colony_id" not in row:
             row = row["data"]
+        rows.append(row)
+    return rows
+
+
+def ledger_ids_from_dir(path):
+    """Every `colony_id` and `id` value of the ledger's colony rows."""
+    return ledger_ids(ledger_rows_from_dir(path))
+
+
+def ledger_ids(rows):
+    ids = set()
+    for row in rows:
         for k in ("colony_id", "id"):
             v = row.get(k)
             if isinstance(v, str) and v.strip():
                 ids.add(v.strip())
     return ids
+
+
+def expected_public(rows):
+    """colony_id of every row of ours the site should still serve."""
+    out = set()
+    for row in rows:
+        v = row.get("colony_id")
+        if row.get("kind") in SERVED_KINDS and not row.get("removed") and isinstance(v, str) and v.strip():
+            out.add(v.strip())
+    return out
 
 
 def check_upvote(d, thread, post):
@@ -231,8 +263,11 @@ def main():
     try:
         with open(a.drafts, encoding="utf-8") as f:
             drafts = json.load(f)
+        expected = None
         if a.ledger_dir:
-            ledger = ledger_ids_from_dir(a.ledger_dir)
+            rows = ledger_rows_from_dir(a.ledger_dir)
+            ledger = ledger_ids(rows)
+            expected = expected_public(rows)
         else:
             with open(a.ledger_ids, encoding="utf-8") as f:
                 ledger = set(l.strip() for l in f if l.strip())
@@ -274,6 +309,16 @@ def main():
         out({"summary": {"status": "stopped", "reason": "public items with no ledger row; nothing written",
                          "unrecorded": unrecorded}})
         return 3
+    if expected is None:
+        reverse = "not run: --ledger-ids carries no row kinds"
+    else:
+        missing = sorted(expected - public)
+        if missing:
+            out({"summary": {"status": "stopped",
+                             "reason": "ledger rows whose item the site no longer serves; nothing written",
+                             "missing": missing}})
+            return 3
+        reverse = "ok: %d ledger items all served" % len(expected)
 
     threads, posts = {}, {}
     written, skipped, failed = 0, 0, 0
@@ -338,7 +383,8 @@ def main():
             failed += 1
     out({"summary": {"status": "ok" if not failed else "partial", "dry_run": a.dry_run,
                      "replies": len(replies), "comments": len(comments), "upvotes": len(upvotes),
-                     "written": written, "skipped": skipped, "failed": failed}})
+                     "written": written, "skipped": skipped, "failed": failed,
+                     "reverse_check": reverse}})
     return 1 if failed else 0
 
 
