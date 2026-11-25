@@ -16,6 +16,7 @@ expect() {
 }
 key() { printf '%s' "$1" | python3 -c 'import hashlib,sys;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'; }
 put() { printf '%b' "$2" > "$fx/$(key "$1")"; }
+lacks_in_text() { if printf '%s\n' "$1" | grep -q "$2"; then return 1; fi; return 0; }
 lacks_in() { if grep -q "$2" "$1"; then return 1; fi; return 0; }
 says() { printf '%s\n' "$1" | grep -q "$2"; }
 grew_from() { [ "$(head -c "$2" "$1" | wc -c | tr -d ' ')" = "$2" ] && [ "$(wc -l < "$1" | tr -d ' ')" = "$3" ]; }
@@ -77,5 +78,40 @@ expect "directory failure recorded" last_has "$OUT" directory-failed
 # The prefix hash agrees with an independent computation (head -n | sha256).
 want=$(printf '{"l":1}\n{"l":2}\n' | python3 -c 'import hashlib,sys;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')
 expect "prefix hash is sha-256 of the first n lines" [ "$(col 2026-11-22 2 sha256)" = "$want" ]
+
+# HTML index pages (queue/task-2026-11-24-cross-check-html-rows). F links its
+# store by a relative <link rel=alternate type=application/jsonl>; G has no such
+# link; H's link leads off the host. A record of F's page taken before the rule
+# (v1, url = the page) must never be the baseline for the store.
+REG2=https://registry2.example/api/witnesses
+F=https://f.example/; FS=https://f.example/countersignatures.jsonl
+G=https://g.example/; H=https://h.example/; HS=https://evil.example/c.jsonl
+put "$REG2" '{"witnesses":[{"id":9,"operator":"f","url":"'$F'"},{"id":10,"operator":"g","url":"'$G'"},{"id":11,"operator":"h","url":"'$H'"}],"has_more":false}'
+put "$F" '<!DOCTYPE html>\n<html><head>\n<link rel="icon" href="favicon.svg">\n<link rel="alternate" type="application/jsonl" href="countersignatures.jsonl" title="every line">\n</head><body>page</body></html>\n'
+put "$FS" '{"l":1}\n{"l":2}\n'
+put "$G" '<html><head><title>no store here</title></head><body>x</body></html>\n'
+put "$H" '<!doctype html><link type="application/jsonl" rel="alternate" href="'$HS'">\n'
+put "$HS" '{"l":1}\n'
+OUT2="$t/out2/prefixes.jsonl"; mkdir -p "$t/out2"
+old_page_sha=$(key "$(printf '<!DOCTYPE html>\n<html><head>\n')")
+printf '{"v":1,"date":"2026-11-23","at":"2026-11-23T08:37:00Z","witness_id":9,"operator":"f","url":"%s","fetch":"ok","http":200,"content_type":"text/html","bytes":200,"n":5,"sha256":"%s","partial_tail":false,"prev":null,"check":"first"}\n' "$F" "$old_page_sha" > "$OUT2"
+run2() { python3 "$X" --out "$OUT2" --registry "$REG2" --offline-dir "$fx" --tmp-dir "$t/tmp" --now "$1"; }
+col2() { python3 -c 'import json,sys
+for l in open(sys.argv[1]):
+  r=json.loads(l)
+  if r.get("date")==sys.argv[2] and r.get("witness_id")==int(sys.argv[3]): print(r.get(sys.argv[4]))' "$OUT2" "$@"; }
+out=$(run2 2026-11-24T12:37:00+00:00); rc=$?
+expect "html day exits 0" [ "$rc" = 0 ]
+expect "F resolved to its store" [ "$(col2 2026-11-24 9 resolved_url)" = "$FS" ]
+expect "F counted the store, not the page" [ "$(col2 2026-11-24 9 n)" = 2 ]
+expect "F old page record is not the baseline" [ "$(col2 2026-11-24 9 check)" = first ]
+expect "F no false rewrite alert" lacks_in_text "$out" "ALERT witness 9"
+expect "G page without a store link not-checked" [ "$(col2 2026-11-24 10 check)" = not-checked ]
+expect "G reason names the missing link" [ "$(col2 2026-11-24 10 reason)" = "html page with no application/jsonl alternate link" ]
+expect "H off-host link not-checked" [ "$(col2 2026-11-24 11 reason)" = "jsonl alternate leads off the host" ]
+put "$FS" '{"l":1}\n{"l":2}\n{"l":3}\n'
+run2 2026-11-25T12:37:00+00:00 >/dev/null
+expect "F next day matches its own store" [ "$(col2 2026-11-25 9 check)" = match ]
+expect "F next day prev is the store record" [ "$(col2 2026-11-25 9 prev | grep -c "'n': 2")" = 1 ]
 
 if [ "$fail" = 0 ]; then echo "PASSED"; else echo "FAILED"; exit 1; fi
