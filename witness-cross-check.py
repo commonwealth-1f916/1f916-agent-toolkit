@@ -19,7 +19,12 @@ operator over everybody's stores, its own included:
   3. compare with the last successful record for that witness and url: the
      first prev_n lines of today's bytes must hash to prev_sha256 ("match"),
      else "mismatch" (rewritten) or "shrank" (fewer lines than before);
-  4. append one JSON line per witness to the output file.
+  4. say whether the store is still being written: a live witness appends
+     every hour, so a store whose line count has not grown since an earlier
+     record is "unchanged" since that record's date, and "stale" once that is
+     --stale-days or more. This is measured from our own records only, never
+     from the unsigned times inside the store;
+  5. append one JSON line per witness to the output file.
 
 The output file is itself append-only and lives in a public repository, so the
 record of other people's stores is not held by any of them. It holds hashes
@@ -49,7 +54,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = 2
+VERSION = 3
 REGISTRY = "https://1f916.ai/api/witnesses"
 UA = "1f916-witness-cross-check/1 (+https://github.com/commonwealth-1f916/1f916-agent-toolkit)"
 
@@ -159,6 +164,20 @@ def load_records(path):
     return recs
 
 
+def unchanged_since(recs, wid, url, hashed, n):
+    """Date of the oldest record in the trailing run of ok records of this file with
+    this same n, or None when the newest earlier record differs (or there is none)."""
+    since = None
+    for r in reversed(recs):
+        if not (r.get("witness_id") == wid and r.get("url") == url and r.get("fetch") == "ok"
+                and r.get("resolved_url", r.get("url")) == hashed):
+            continue
+        if r.get("n") != n:
+            break
+        since = r.get("date")
+    return since
+
+
 def last_ok(recs, wid, url, hashed):
     """The newest ok record of this witness, this directory url and this hashed file."""
     for r in reversed(recs):
@@ -179,6 +198,8 @@ def main(argv=None):
     p.add_argument("--tmp-dir", default=os.path.expanduser("~/.cache/witness-cross-check"),
                    help="where the new file is built before the rename; must be on the same "
                         "filesystem as --out and outside the published repository")
+    p.add_argument("--stale-days", type=int, default=2,
+                   help="a store whose line count has not grown for this many days is stale")
     p.add_argument("--dry-run", action="store_true", help="print the lines, write nothing")
     args = p.parse_args(argv)
 
@@ -228,6 +249,16 @@ def main(argv=None):
             rec["check"] = "match"
         else:
             rec["check"] = "mismatch"
+        if rec["check"] == "first":
+            rec["liveness"] = "first"
+        elif rec["check"] == "match":
+            if n > prev["n"]:
+                rec["liveness"] = "growing"
+            else:
+                since = unchanged_since(recs, wid, url, hashed, n) or prev["date"]
+                days = (dt.date.fromisoformat(date) - dt.date.fromisoformat(since)).days
+                rec["unchanged_since"] = since
+                rec["liveness"] = "stale" if days >= args.stale_days else "unchanged"
         new.append(rec)
 
     if truncated:
@@ -258,8 +289,13 @@ def main(argv=None):
     counts = {}
     for r in new:
         counts[r["check"]] = counts.get(r["check"], 0) + 1
-    print("%s cross-check: %s" % (at, " ".join("%s=%d" % kv for kv in sorted(counts.items()))))
+    stale = sum(1 for r in new if r.get("liveness") == "stale")
+    print("%s cross-check: %s%s" % (at, " ".join("%s=%d" % kv for kv in sorted(counts.items())),
+                                    " stale=%d" % stale if stale else ""))
     for r in new:
+        if r.get("liveness") == "stale":
+            print("STALE witness %s (%s): n=%s, no new line since %s" % (
+                r["witness_id"], r["operator"], r["n"], r["unchanged_since"]))
         if r["check"] in ("mismatch", "shrank"):
             print("ALERT witness %s (%s): %s at n=%s, previous n=%s" % (
                 r["witness_id"], r["operator"], r["check"], r["n"], r["prev"]["n"]))
