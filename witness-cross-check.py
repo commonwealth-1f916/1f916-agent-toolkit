@@ -24,7 +24,10 @@ operator over everybody's stores, its own included:
      record is "unchanged" since that record's date, and "stale" once that is
      --stale-days or more. This is measured from our own records only, never
      from the unsigned times inside the store;
-  5. append one JSON line per witness to the output file.
+  5. append one JSON line per witness to the output file, and rewrite
+     STATUS.md beside it: the same walk as a table a person can read
+     (--status, --no-status). Operator names and urls come from other people's
+     registry rows, so the table carries only safe characters from them.
 
 The output file is itself append-only and lives in a public repository, so the
 record of other people's stores is not held by any of them. It holds hashes
@@ -164,6 +167,87 @@ def load_records(path):
     return recs
 
 
+SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
+SAFE_URL = re.compile(r"[^A-Za-z0-9._~:/?#@!$&'()*+,;=%-]")
+
+
+def safe_name(v):
+    v = SAFE_NAME.sub("", str(v or ""))[:40]
+    return v or "?"
+
+
+def safe_url(v):
+    """A url as inline code: no backtick, pipe, angle bracket, space or newline survives."""
+    v = SAFE_URL.sub("", str(v or ""))[:120].replace("|", "")
+    return "`%s`" % v if v else "?"
+
+
+def status_table(new, at, stale_days):
+    """STATUS.md: today's walk, one row per witness, in words."""
+    def words(r):
+        c = r.get("check")
+        if c == "not-checked":
+            raw = str(r.get("reason") or "")
+            if "CERTIFICATE_VERIFY_FAILED" in raw:
+                reason = "its TLS certificate is not trusted"
+            elif re.fullmatch(r"http \d{3}", raw):
+                reason = {"http 404": "not found (http 404)"}.get(raw, "the server answered %s" % raw)
+            else:
+                reason = re.sub(r"[^A-Za-z0-9 .:/_-]", "", raw)[:70]
+            return "not checked", "not known", reason
+        rewritten = {"match": "no", "first": "first look", "mismatch": "**YES: changed**",
+                     "shrank": "**YES: lines removed**"}.get(c, c)
+        lv = r.get("liveness")
+        if lv == "growing":
+            alive = "yes"
+        elif lv == "unchanged":
+            alive = "no new line since %s" % r.get("unchanged_since")
+        elif lv == "stale":
+            alive = "**stale**: no new line since %s" % r.get("unchanged_since")
+        else:
+            alive = "not known yet"
+        note = "store found through the page's link" if r.get("resolved_url") else ""
+        return rewritten, alive, note
+
+    rows = [r for r in new if "witness_id" in r]
+    rows.sort(key=lambda r: (r["witness_id"] if isinstance(r["witness_id"], int) else 10 ** 9))
+    out = ["# Witness stores, checked from outside",
+           "",
+           "Written by `witness-cross-check.py` (commonwealth-1f916/1f916-agent-toolkit) on the walk of "
+           "**%s**. Do not edit: the next walk replaces this file. Every line it is built from is in "
+           "[`prefixes.jsonl`](prefixes.jsonl)." % at,
+           "",
+           "- **Rewritten?** no means every line we recorded before is still there, byte for byte.",
+           "- **Still writing?** yes means the store has more lines than at our last walk; **stale** means "
+           "no new line for %d days or more. Measured from our own records, not from the times inside a "
+           "store." % stale_days,
+           "",
+           "| Witness | Operator | Store | Lines | New since last walk | Rewritten? | Still writing? | Note |",
+           "|---:|---|---|---:|---:|---|---|---|"]
+    for r in rows:
+        rewritten, alive, note = words(r)
+        n = r.get("n")
+        prev = (r.get("prev") or {}).get("n")
+        delta = ("+%d" % (n - prev)) if (isinstance(n, int) and isinstance(prev, int)) else "-"
+        out.append("| %s | %s | %s | %s | %s | %s | %s | %s |" % (
+            r["witness_id"], safe_name(r.get("operator")),
+            safe_url(r.get("resolved_url") or r.get("url")),
+            "{:,}".format(n) if isinstance(n, int) else "-", delta, rewritten, alive, note))
+    for r in new:
+        if r.get("check") == "directory-failed":
+            out.append("")
+            out.append("**The registry's witness directory could not be read on this walk.**")
+        if r.get("check") == "directory-truncated":
+            out.append("")
+            out.append("**The registry's witness directory said it had more rows than this walk read.**")
+    out += ["",
+            "What this cannot show: anything before a store's first line in `prefixes.jsonl`, a rewrite "
+            "undone between two walks, or whether a store's signatures verify. A store we could not "
+            "fetch is not checked, never passed.",
+            ""]
+    return "\n".join(out)
+
+
 def unchanged_since(recs, wid, url, hashed, n):
     """Date of the oldest record in the trailing run of ok records of this file with
     this same n, or None when the newest earlier record differs (or there is none)."""
@@ -200,6 +284,8 @@ def main(argv=None):
                         "filesystem as --out and outside the published repository")
     p.add_argument("--stale-days", type=int, default=2,
                    help="a store whose line count has not grown for this many days is stale")
+    p.add_argument("--status", help="the human-readable table (default: STATUS.md beside --out)")
+    p.add_argument("--no-status", action="store_true", help="write no table")
     p.add_argument("--dry-run", action="store_true", help="print the lines, write nothing")
     args = p.parse_args(argv)
 
@@ -285,6 +371,13 @@ def main(argv=None):
             f.write(old + ("\n".join(lines) + "\n").encode())
         os.chmod(tmp, 0o644)
         os.replace(tmp, args.out)
+        if not args.no_status:
+            status = args.status or os.path.join(out_dir, "STATUS.md")
+            fd, tmp = tempfile.mkstemp(prefix=".xs-", dir=args.tmp_dir)
+            with os.fdopen(fd, "wb") as f:
+                f.write(status_table(new, at, args.stale_days).encode())
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, status)
 
     counts = {}
     for r in new:
