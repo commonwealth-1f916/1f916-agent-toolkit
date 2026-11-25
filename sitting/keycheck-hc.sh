@@ -25,7 +25,9 @@ case "${D##*/}" in
   *) echo "keycheck-hc: DIR must be a dated folder named 1f916-YYYY-MM-DD" >&2; exit 2 ;;
 esac
 [ -d "$D" ] || { echo "keycheck-hc: no such folder: $D" >&2; exit 2; }
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+# ghostty-tab.sh already puts Homebrew first; appended here so a caller's own
+# PATH (a test's stubs) wins.
+export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
 TK=$(cd "$(dirname "$0")/.." && pwd)
 GATE=${GATE:-$HOME/bin/1f916-gate}
 HC_STATUS=${HC_STATUS:-$TK/sitting/hc-status.sh}
