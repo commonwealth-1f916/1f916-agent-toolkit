@@ -137,6 +137,7 @@ expect "S day 3 still unchanged since day 1" [ "$(col3 2026-11-24 21 unchanged_s
 expect "S day 3 STALE line" says "$out" '^STALE witness 21 (s): n=2, no new line since 2026-11-22'
 expect "S day 3 summary counts stale" says "$out" 'stale=1'
 expect "S day 3 append-only check unaffected" [ "$(col3 2026-11-24 21 check)" = match ]
+expect "S day 3 table says stale" grep -q '^| 21 | s | .* | 2 | +0 | no | \*\*stale\*\*: no new line since 2026-11-22 |' "$t/out3/STATUS.md"
 put "$S" '{"l":1}\n{"l":2}\n{"l":3}\n'
 run3 2026-11-25T12:37:00+00:00 >/dev/null
 expect "S day 4 growing" [ "$(col3 2026-11-25 21 liveness)" = growing ]
@@ -160,5 +161,37 @@ expect "U day 3 unchanged since the day it grew" [ "$(col4 2026-11-24 unchanged_
 expect "U day 3 only one day unchanged" [ "$(col4 2026-11-24 liveness)" = unchanged ]
 run4 2026-11-25T12:37:00+00:00
 expect "U day 4 stale" [ "$(col4 2026-11-25 liveness)" = stale ]
+
+# STATUS.md: written beside --out on every real walk, readable, and nothing
+# from another operator's row can inject markup into it.
+ST="$t/out/STATUS.md"
+expect "STATUS.md written beside the output" [ -f "$ST" ]
+expect "STATUS.md is a table" grep -q '^| Witness | Operator | Store | Lines |' "$ST"
+expect "STATUS.md after a failed directory read says so" grep -q 'witness directory could not be read' "$ST"
+ST2="$t/out2/STATUS.md"
+expect "STATUS.md row for F names its resolved store" grep -q '^| 9 | f | `https://f.example/countersignatures.jsonl` | 3 | +1 | no | yes | store found through' "$ST2"
+expect "STATUS.md row for G says not checked" grep -q '^| 10 | g | `https://g.example/` | - | - | not checked | not known | html page with no application/jsonl alternate link |' "$ST2"
+expect "STATUS.md carries no fetched byte" lacks_in "$ST" "$SECRETISH"
+REG5=https://registry5.example/api/witnesses
+HU='https://h5.example/c.jsonl?a=b`c|d<e>'
+put "$REG5" '{"witnesses":[{"id":31,"operator":"x|<script>[evil](http://e)","url":"'"$HU"'"}],"has_more":false}'
+put "$HU" '{"l":1}\n'
+OUT5="$t/out5/prefixes.jsonl"
+python3 "$X" --out "$OUT5" --registry "$REG5" --offline-dir "$fx" --tmp-dir "$t/tmp" --now 2026-11-22T12:37:00+00:00 >/dev/null
+row=$(grep '^| 31 ' "$t/out5/STATUS.md")
+expect "hostile operator reduced to safe characters" says "$row" '^| 31 | xscriptevilhttpe |'
+expect "hostile url has no backtick, pipe or angle bracket inside its code span" says "$row" '| `https://h5.example/c.jsonl?a=bcde` |'
+expect "hostile row keeps the column count" [ "$(printf '%s' "$row" | tr -cd '|' | wc -c | tr -d ' ')" = 9 ]
+OUT6="$t/out6/prefixes.jsonl"
+python3 "$X" --out "$OUT6" --registry "$REG5" --offline-dir "$fx" --tmp-dir "$t/tmp" --now 2026-11-22T12:37:00+00:00 --no-status >/dev/null
+words=$(python3 -c 'import importlib.util,sys
+spec=importlib.util.spec_from_file_location("xc",sys.argv[1]); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+rs=[{"witness_id":1,"operator":"a","url":"https://a.example/","check":"not-checked","reason":"http 404"},
+    {"witness_id":2,"operator":"b","url":"https://b.example/","check":"not-checked","reason":"URLError: <urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] x>"}]
+print(m.status_table(rs,"2026-11-25T00:00:00Z",2))' "$X")
+expect "a 404 reads in words" says "$words" '| not found (http 404) |$'
+expect "an untrusted certificate reads in words" says "$words" '| its TLS certificate is not trusted |$'
+expect "--no-status writes no table" [ ! -e "$t/out6/STATUS.md" ]
+expect "no temporary file left after the table" [ -z "$(ls -A "$t/tmp")" ]
 
 if [ "$fail" = 0 ]; then echo "PASSED"; else echo "FAILED"; exit 1; fi
