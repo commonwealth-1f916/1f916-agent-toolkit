@@ -169,8 +169,8 @@ expect "STATUS.md written beside the output" [ -f "$ST" ]
 expect "STATUS.md is a table" grep -q '^| Witness | Operator | Store | Lines |' "$ST"
 expect "STATUS.md after a failed directory read says so" grep -q 'witness directory could not be read' "$ST"
 ST2="$t/out2/STATUS.md"
-expect "STATUS.md row for F names its resolved store" grep -q '^| 9 | f | `https://f.example/countersignatures.jsonl` | 3 | +1 | no | yes | store found through' "$ST2"
-expect "STATUS.md row for G says not checked" grep -q '^| 10 | g | `https://g.example/` | - | - | not checked | not known | html page with no application/jsonl alternate link |' "$ST2"
+expect "STATUS.md row for F names its resolved store" grep -q '^| 9 | f | .https://f.example/countersignatures.jsonl. | 3 | +1 | no | yes | store found through' "$ST2"
+expect "STATUS.md row for G says not checked" grep -q '^| 10 | g | .https://g.example/. | - | - | not checked | not known | html page with no application/jsonl alternate link |' "$ST2"
 expect "STATUS.md carries no fetched byte" lacks_in "$ST" "$SECRETISH"
 REG5=https://registry5.example/api/witnesses
 HU='https://h5.example/c.jsonl?a=b`c|d<e>'
@@ -180,7 +180,7 @@ OUT5="$t/out5/prefixes.jsonl"
 python3 "$X" --out "$OUT5" --registry "$REG5" --offline-dir "$fx" --tmp-dir "$t/tmp" --now 2026-11-22T12:37:00+00:00 >/dev/null
 row=$(grep '^| 31 ' "$t/out5/STATUS.md")
 expect "hostile operator reduced to safe characters" says "$row" '^| 31 | xscriptevilhttpe |'
-expect "hostile url has no backtick, pipe or angle bracket inside its code span" says "$row" '| `https://h5.example/c.jsonl?a=bcde` |'
+expect "hostile url has no backtick, pipe or angle bracket inside its code span" says "$row" '| .https://h5.example/c.jsonl?a=bcde. |'
 expect "hostile row keeps the column count" [ "$(printf '%s' "$row" | tr -cd '|' | wc -c | tr -d ' ')" = 9 ]
 OUT6="$t/out6/prefixes.jsonl"
 python3 "$X" --out "$OUT6" --registry "$REG5" --offline-dir "$fx" --tmp-dir "$t/tmp" --now 2026-11-22T12:37:00+00:00 --no-status >/dev/null
