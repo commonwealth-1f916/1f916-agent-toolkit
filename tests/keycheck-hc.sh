@@ -17,7 +17,7 @@ has() { printf '%s\n' "$1" | grep -q "$2"; }
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/home/.config/1f916" "$tmp/bin" "$tmp/1f916-2026-01-02" "$tmp/notdated"
-REF=op://SPECIMENvault/SPECIMENitemNOTREAL
+REF='op://<SPECIMEN-vault>/<SPECIMEN-item>'
 printf 'GATE_ITEM_REF=%s\n' "$REF" > "$tmp/home/.config/1f916/sitting.env"
 # op stub: drop everything up to --, then run the child with the referenced
 # variables replaced by placeholders, as op run does with real values.
