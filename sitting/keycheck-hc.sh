@@ -38,6 +38,8 @@ LOG=$D/keycheck.log
 {
   echo "toolkit $(git -C "$TK" rev-parse HEAD) branch $(git -C "$TK" rev-parse --abbrev-ref HEAD) dirty=$(git -C "$TK" status --porcelain | wc -l | tr -d ' ')"
   I=$GATE_ITEM_REF
+  # The child expands $GATE and $?, inside op run, not this shell.
+  # shellcheck disable=SC2016
   BEARER=$I/bearer ED25519_PRIV=$I/ed25519_priv HANDLE=$I/handle CITIZEN=$I/citizen GATE=$GATE \
     op run -- /bin/sh -c '"$GATE" key-check; echo "key_check_exit=$?"'
   echo "op_exit=$?"
