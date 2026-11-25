@@ -35,7 +35,7 @@ run() { python3 "$X" --out "$OUT" --registry "$REG" --offline-dir "$fx" --tmp-di
 col() { python3 -c 'import json,sys
 for l in open(sys.argv[1]):
   r=json.loads(l)
-  if r.get("date")==sys.argv[2] and r.get("witness_id")==int(sys.argv[3]): print(r[sys.argv[4]])' "$OUT" "$@"; }
+  if r.get("date")==sys.argv[2] and r.get("witness_id")==int(sys.argv[3]): print(r.get(sys.argv[4]))' "$OUT" "$@"; }
 
 run 2026-11-22T12:37:00+00:00 >/dev/null; rc=$?
 expect "day 1 exits 0" [ "$rc" = 0 ]
@@ -113,5 +113,52 @@ put "$FS" '{"l":1}\n{"l":2}\n{"l":3}\n'
 run2 2026-11-25T12:37:00+00:00 >/dev/null
 expect "F next day matches its own store" [ "$(col2 2026-11-25 9 check)" = match ]
 expect "F next day prev is the store record" [ "$(col2 2026-11-25 9 prev | grep -c "'n': 2")" = 1 ]
+
+# Liveness, from our own records only. S never grows from day 1 to day 3, then
+# grows on day 4. --stale-days 2: day 2 unchanged, day 3 stale, day 4 growing.
+REG3=https://registry3.example/api/witnesses; S=https://s.example/c.jsonl
+put "$REG3" '{"witnesses":[{"id":21,"operator":"s","url":"'$S'"}],"has_more":false}'
+put "$S" '{"l":1}\n{"l":2}\n'
+OUT3="$t/out3/prefixes.jsonl"
+run3() { python3 "$X" --out "$OUT3" --registry "$REG3" --offline-dir "$fx" --tmp-dir "$t/tmp" --now "$1"; }
+col3() { python3 -c 'import json,sys
+for l in open(sys.argv[1]):
+  r=json.loads(l)
+  if r.get("date")==sys.argv[2] and r.get("witness_id")==int(sys.argv[3]): print(r.get(sys.argv[4]))' "$OUT3" "$@"; }
+run3 2026-11-22T12:37:00+00:00 >/dev/null
+expect "S day 1 liveness first" [ "$(col3 2026-11-22 21 liveness)" = first ]
+out=$(run3 2026-11-23T12:37:00+00:00)
+expect "S day 2 unchanged" [ "$(col3 2026-11-23 21 liveness)" = unchanged ]
+expect "S day 2 unchanged since day 1" [ "$(col3 2026-11-23 21 unchanged_since)" = 2026-11-22 ]
+expect "S day 2 not yet flagged" lacks_in_text "$out" "STALE witness 21"
+out=$(run3 2026-11-24T12:37:00+00:00)
+expect "S day 3 stale" [ "$(col3 2026-11-24 21 liveness)" = stale ]
+expect "S day 3 still unchanged since day 1" [ "$(col3 2026-11-24 21 unchanged_since)" = 2026-11-22 ]
+expect "S day 3 STALE line" says "$out" '^STALE witness 21 (s): n=2, no new line since 2026-11-22'
+expect "S day 3 summary counts stale" says "$out" 'stale=1'
+expect "S day 3 append-only check unaffected" [ "$(col3 2026-11-24 21 check)" = match ]
+put "$S" '{"l":1}\n{"l":2}\n{"l":3}\n'
+run3 2026-11-25T12:37:00+00:00 >/dev/null
+expect "S day 4 growing" [ "$(col3 2026-11-25 21 liveness)" = growing ]
+expect "S day 4 no unchanged_since" [ "$(col3 2026-11-25 21 unchanged_since)" = None ]
+expect "A day 2 growing" [ "$(col 2026-11-23 1 liveness)" = growing ]
+
+# U grows once (day 1 -> 2) and then stops: "unchanged since" is the day it
+# reached its present count, never an older record with a smaller count.
+REG4=https://registry4.example/api/witnesses; U=https://u.example/c.jsonl
+put "$REG4" '{"witnesses":[{"id":22,"operator":"u","url":"'$U'"}],"has_more":false}'
+OUT4="$t/out4/prefixes.jsonl"
+run4() { python3 "$X" --out "$OUT4" --registry "$REG4" --offline-dir "$fx" --tmp-dir "$t/tmp" --now "$1" >/dev/null; }
+col4() { python3 -c 'import json,sys
+for l in open(sys.argv[1]):
+  r=json.loads(l)
+  if r.get("date")==sys.argv[2]: print(r.get(sys.argv[3]))' "$OUT4" "$@"; }
+put "$U" '{"l":1}\n'; run4 2026-11-22T12:37:00+00:00
+put "$U" '{"l":1}\n{"l":2}\n'; run4 2026-11-23T12:37:00+00:00
+run4 2026-11-24T12:37:00+00:00
+expect "U day 3 unchanged since the day it grew" [ "$(col4 2026-11-24 unchanged_since)" = 2026-11-23 ]
+expect "U day 3 only one day unchanged" [ "$(col4 2026-11-24 liveness)" = unchanged ]
+run4 2026-11-25T12:37:00+00:00
+expect "U day 4 stale" [ "$(col4 2026-11-25 liveness)" = stale ]
 
 if [ "$fail" = 0 ]; then echo "PASSED"; else echo "FAILED"; exit 1; fi
