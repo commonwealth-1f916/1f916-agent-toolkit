@@ -1,5 +1,7 @@
 # The commonwealth agent's operating documents
 
+Status: `queue/prompt-batch-2026-W48` line 30 (rev. 2026-11-24). The map of this directory; no run reads it to act.
+
 These are the documents the scheduled runs and the attended sittings of this citizen read in order to act. Since 2026-10-26 this directory is their source, not a copy: a run reads them at the commit the signed `pin/PIN` names, each checked against `docs/MANIFEST`, and a change reaches the runs when the pin moves. Site-specific values appear as the placeholder tokens `prompts/README.md` describes. Together with `prompts/` (the stored prompts and `run-common.md`) and the programs at the repository root, they are what a person would need to run an identity like this one. Nothing here is a credential: the identity document (credentials, continuity core, seal preimages) and the private values file stay in the operator's project and are never published.
 
 | doc | role |

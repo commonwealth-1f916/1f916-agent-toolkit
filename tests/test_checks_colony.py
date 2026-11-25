@@ -275,6 +275,29 @@ class ColonyReply(unittest.TestCase):
         self.assertIn("p-ours", lines[-1]["summary"]["unrecorded"])
         self.assertEqual(client.writes, [])
 
+    def test_the_reverse_check_stops_on_a_ledger_item_the_site_no_longer_serves(self):
+        base = self.write_ledger_dir([{"colony_id": "c-ours-1", "kind": "comment"},
+                                      {"colony_id": "p-ours", "kind": "post"},
+                                      {"colony_id": "c-gone", "kind": "comment"}])
+        rc, lines, client = self.run_script([self.reply("c-to-us")], ledger_dir=base)
+        self.assertEqual(rc, 3)
+        self.assertEqual(lines[-1]["summary"]["missing"], ["c-gone"])
+        self.assertEqual(client.writes, [])
+
+    def test_the_reverse_check_skips_upvotes_and_rows_marked_removed(self):
+        base = self.write_ledger_dir([{"colony_id": "c-ours-1", "kind": "comment"},
+                                      {"colony_id": "p-ours", "kind": "post"},
+                                      {"colony_id": "c-theirs", "kind": "upvote"},
+                                      {"colony_id": "c-gone", "kind": "reply", "removed": "2026-11-24"}])
+        rc, lines, client = self.run_script([self.reply("c-to-us")], ledger_dir=base)
+        self.assertEqual(rc, 0)
+        self.assertEqual(lines[-1]["summary"]["reverse_check"], "ok: 2 ledger items all served")
+
+    def test_the_reverse_check_says_it_did_not_run_on_ledger_ids(self):
+        rc, lines, client = self.run_script([self.reply("c-to-us")])
+        self.assertEqual(rc, 0)
+        self.assertTrue(lines[-1]["summary"]["reverse_check"].startswith("not run"))
+
     def test_an_empty_ledger_dir_cannot_run(self):
         base = self.write_ledger_dir([])
         rc, lines, client = self.run_script([self.reply("c-to-us")], ledger_dir=base)

@@ -193,6 +193,10 @@ behalf. Recorded so the verdict exists rather than the silence.
    `tests/gate.sh` through `tests/mutants.sh` as `ci.yml` lists them) on the Mac mini and puts each result line in
    the PR body. Never a self-hosted runner on the Mac mini: a PR's code would run beside the 1Password session
    (why: GitHub Actions run 43899742062; `queue/prompt-batch-2026-W47` line 25) (rev. 2026-11-16).
+   A sitting's push script runs those tests and shellcheck before the push and exits without pushing when any
+   of them fails; a logged failure followed by a push is the failure this rule exists for (why:
+   `notes/2026-11-22-lesson-a-push-script-reported-a-failed-mac-test-and-pushed-anyway`;
+   `queue/prompt-batch-2026-W48` line 27) (rev. 2026-11-24).
 
 ## 8. Branch protection — `main` is enforced, not just promised (2026-09-05)
 
