@@ -3,7 +3,9 @@
 # What it must hold: a store that only appends reads "match"; one that rewrote a
 # line it already published reads "mismatch"; one that lost lines reads
 # "shrank"; a failed fetch is "not-checked" and is never compared later; the
-# output file only ever grows; and no fetched byte reaches the output.
+# output file only ever grows; and no fetched byte reaches the output, the one
+# exception being the time on a store's last line, written again from the
+# parsed time and only when it is a plain timestamp.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 X="$here/../witness-cross-check.py"
@@ -193,5 +195,55 @@ expect "a 404 reads in words" says "$words" '| not found (http 404) |$'
 expect "an untrusted certificate reads in words" says "$words" '| its TLS certificate is not trusted |$'
 expect "--no-status writes no table" [ ! -e "$t/out6/STATUS.md" ]
 expect "no temporary file left after the table" [ -z "$(ls -A "$t/tmp")" ]
+
+# store_last_at (queue/discuss-2026-11-26-cross-check-store-last-at): the `at`
+# of a store's last complete line, the store's own word. Recorded only when it
+# is a plain timestamp, normalised to UTC, shown in the table only while the
+# store is not growing, and never an input to check or liveness.
+REG7=https://registry7.example/api/witnesses
+V=https://v.example/c.jsonl; V2=https://v2.example/c.jsonl; V3=https://v3.example/c.jsonl
+V4=https://v4.example/c.jsonl; V5=https://v5.example/c.jsonl; V6=https://v6.example/c.jsonl
+V7=https://v7.example/c.jsonl; V8=https://v8.example/c.jsonl
+put "$REG7" '{"witnesses":[{"id":41,"operator":"v","url":"'$V'"},{"id":42,"operator":"v2","url":"'$V2'"},{"id":43,"operator":"v3","url":"'$V3'"},{"id":44,"operator":"v4","url":"'$V4'"},{"id":45,"operator":"v5","url":"'$V5'"},{"id":46,"operator":"v6","url":"'$V6'"},{"id":47,"operator":"v7","url":"'$V7'"},{"id":48,"operator":"v8","url":"'$V8'"}],"has_more":false}'
+HOSTILE='INJECTEDMARKUP'
+put "$V" '{"l":1,"at":"2026-10-27T05:00:00Z"}\n{"l":2,"at":"2026-10-28T05:49:57Z"}\n'
+put "$V2" '{"l":1,"at":"2026-10-28T07:49:57.123456789+02:00"}\n'
+put "$V3" '{"l":1,"at":"2026-10-28T05:49:57Z|<b>['$HOSTILE'](http://e)"}\n'
+put "$V4" '{"l":1,"at":"2026-10-28T05:49:57Z"}\nnot json '$HOSTILE'\n'
+put "$V5" '{"l":1,"at":1795673773106}\n'
+put "$V6" '{"l":1,"at":"2026-10-01T00:00:00Z"}\n{"l":2,"at":"2026-11-01T00:00:00Z"'
+put "$V7" '{"l":1,"at":"2026-13-45T99:99:99Z"}\n'
+put "$V8" '{"l":1,"body":{"at":"2026-10-28T05:49:57Z"}}\n'
+OUT7="$t/out7/prefixes.jsonl"; ST7="$t/out7/STATUS.md"
+run7() { python3 "$X" --out "$OUT7" --registry "$REG7" --offline-dir "$fx" --tmp-dir "$t/tmp" --now "$1"; }
+col7() { python3 -c 'import json,sys
+for l in open(sys.argv[1]):
+  r=json.loads(l)
+  if r.get("date")==sys.argv[2] and r.get("witness_id")==int(sys.argv[3]): print(r.get(sys.argv[4]))' "$OUT7" "$@"; }
+run7 2026-11-25T12:37:00+00:00 >/dev/null
+expect "V last line's at recorded" [ "$(col7 2026-11-25 41 store_last_at)" = 2026-10-28T05:49:57Z ]
+expect "V is still a first look" [ "$(col7 2026-11-25 41 liveness)" = first ]
+expect "V table shows the store's word beside first look" grep -q "^| 41 | v | .* | 2 | - | first look | not known yet | the store's own last line is dated 2026-10-28T05:49:57Z (its word, unsigned) |" "$ST7"
+expect "V2 offset and fraction normalised to UTC seconds" [ "$(col7 2026-11-25 42 store_last_at)" = 2026-10-28T05:49:57Z ]
+expect "V3 an at that is more than a timestamp is not recorded" [ "$(col7 2026-11-25 43 store_last_at)" = None ]
+expect "V4 a last line that is not JSON gives none" [ "$(col7 2026-11-25 44 store_last_at)" = None ]
+expect "V5 a numeric at gives none" [ "$(col7 2026-11-25 45 store_last_at)" = None ]
+expect "V6 the partial tail is not read" [ "$(col7 2026-11-25 46 store_last_at)" = 2026-10-01T00:00:00Z ]
+expect "V7 an impossible time gives none" [ "$(col7 2026-11-25 47 store_last_at)" = None ]
+expect "V8 a nested at gives none" [ "$(col7 2026-11-25 48 store_last_at)" = None ]
+expect "nothing hostile in the record" lacks_in "$OUT7" "$HOSTILE"
+expect "nothing hostile in the table" lacks_in "$ST7" "$HOSTILE"
+expect "every table row keeps the column count" [ -z "$(grep '^| 4[1-8] ' "$ST7" | awk -F'|' 'NF!=10')" ]
+expect "the table explains the note" grep -q "store's word: unsigned, not checked by us" "$ST7"
+run7 2026-11-26T12:37:00+00:00 >/dev/null
+out=$(run7 2026-11-27T12:37:00+00:00)
+expect "V stale by our own records, not the store's date" [ "$(col7 2026-11-27 41 unchanged_since)" = 2026-11-25 ]
+expect "V STALE line carries the store's word" says "$out" "^STALE witness 41 (v): n=2, no new line since 2026-11-25; its own last line is dated 2026-10-28T05:49:57Z (unsigned)"
+expect "V5 STALE line without one is unchanged" says "$out" '^STALE witness 45 (v5): n=1, no new line since 2026-11-25$'
+put "$V" '{"l":1,"at":"2026-10-27T05:00:00Z"}\n{"l":2,"at":"2026-10-28T05:49:57Z"}\n{"l":3,"at":"2026-11-28T05:00:00Z"}\n'
+run7 2026-11-28T12:37:00+00:00 >/dev/null
+expect "V growing: recorded" [ "$(col7 2026-11-28 41 store_last_at)" = 2026-11-28T05:00:00Z ]
+expect "V growing: not shown in the table" grep -q '^| 41 | v | .* | 3 | +1 | no | yes |  |' "$ST7"
+expect "record version is 4" [ "$(col7 2026-11-28 41 v)" = 4 ]
 
 if [ "$fail" = 0 ]; then echo "PASSED"; else echo "FAILED"; exit 1; fi

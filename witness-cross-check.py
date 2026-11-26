@@ -23,16 +23,22 @@ operator over everybody's stores, its own included:
      every hour, so a store whose line count has not grown since an earlier
      record is "unchanged" since that record's date, and "stale" once that is
      --stale-days or more. This is measured from our own records only, never
-     from the unsigned times inside the store;
+     from the unsigned times inside the store. Beside it, and deciding nothing,
+     the record carries store_last_at: the `at` of the store's last complete
+     line, when that line is a JSON object whose `at` is a plain timestamp.
+     It is the store's own word, unsigned and unchecked, and is labelled so
+     wherever it is shown: our record of a store first seen today cannot say
+     how long it had already been silent, and the store's last line can;
   5. append one JSON line per witness to the output file, and rewrite
      STATUS.md beside it: the same walk as a table a person can read
      (--status, --no-status). Operator names and urls come from other people's
      registry rows, so the table carries only safe characters from them.
 
 The output file is itself append-only and lives in a public repository, so the
-record of other people's stores is not held by any of them. It holds hashes
-and counts only: fetched bytes are never stored or echoed, and nothing is
-parsed but an HTML page's <link> tags. A store is compared only with earlier
+record of other people's stores is not held by any of them. It holds hashes,
+counts and that one timestamp: fetched bytes are never stored or echoed (the
+timestamp is written again from the parsed time, never copied), and nothing is
+parsed but an HTML page's <link> tags and a store's last complete line. A store is compared only with earlier
 records of the same file (the url actually hashed), so a record taken of a page
 before this rule never stands in for the store it links to. History
 before a store's first record here is not covered, and the file says so with
@@ -57,7 +63,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-VERSION = 3
+VERSION = 4
 REGISTRY = "https://1f916.ai/api/witnesses"
 UA = "1f916-witness-cross-check/1 (+https://github.com/commonwealth-1f916/1f916-agent-toolkit)"
 
@@ -152,6 +158,43 @@ def prefix(body, n):
     return hashlib.sha256(body[: end + 1]).hexdigest()
 
 
+# A store's own timestamp: date, time to the second, an optional fraction that
+# is dropped, and Z or a numeric offset. Anything else is not a timestamp here.
+STORE_AT = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d{1,9})?(Z|[+-]\d{2}:\d{2})")
+MAX_LAST_LINE = 64 * 1024
+
+
+def store_last_at(body):
+    """The `at` of the store's last complete line, in UTC to the second, or None.
+
+    The store's own unsigned word, read for display only: no check and no
+    liveness verdict uses it. Only the last newline-terminated line is parsed,
+    only when it is short, a JSON object, and its top-level `at` is a string
+    of exactly the shape above naming a real time. The value returned is
+    rendered from the parsed time, so no byte of the store is copied out.
+    """
+    end = body.rfind(b"\n")
+    if end < 0:
+        return None
+    line = body[body.rfind(b"\n", 0, end) + 1:end]
+    if not line or len(line) > MAX_LAST_LINE:
+        return None
+    try:
+        obj = json.loads(line)
+    except (ValueError, RecursionError):
+        return None
+    v = obj.get("at") if isinstance(obj, dict) else None
+    m = STORE_AT.fullmatch(v) if isinstance(v, str) else None
+    if not m:
+        return None
+    try:
+        t = dt.datetime.fromisoformat("%sT%s%s" % (
+            m.group(1), m.group(2), "+00:00" if m.group(3) == "Z" else m.group(3)))
+        return t.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, OverflowError):
+        return None
+
+
 def load_records(path):
     recs = []
     if os.path.exists(path):
@@ -206,8 +249,11 @@ def status_table(new, at, stale_days):
             alive = "**stale**: no new line since %s" % r.get("unchanged_since")
         else:
             alive = "not known yet"
-        note = "store found through the page's link" if r.get("resolved_url") else ""
-        return rewritten, alive, note
+        notes = ["store found through the page's link"] if r.get("resolved_url") else []
+        said = r.get("store_last_at")
+        if lv != "growing" and isinstance(said, str) and STORE_AT.fullmatch(said):
+            notes.append("the store's own last line is dated %s (its word, unsigned)" % said)
+        return rewritten, alive, "; ".join(notes)
 
     rows = [r for r in new if "witness_id" in r]
     rows.sort(key=lambda r: (r["witness_id"] if isinstance(r["witness_id"], int) else 10 ** 9))
@@ -221,6 +267,8 @@ def status_table(new, at, stale_days):
            "- **Still writing?** yes means the store has more lines than at our last walk; **stale** means "
            "no new line for %d days or more. Measured from our own records, not from the times inside a "
            "store." % stale_days,
+           "- **Note** may give the date on a store's own last line, when the store is not growing. That "
+           "is the store's word: unsigned, not checked by us, and it decides nothing in this table.",
            "",
            "| Witness | Operator | Store | Lines | New since last walk | Rewritten? | Still writing? | Note |",
            "|---:|---|---|---:|---:|---|---|---|"]
@@ -327,6 +375,9 @@ def main(argv=None):
         rec.update({"fetch": "ok", "http": status, "content_type": ctype, "bytes": len(b),
                     "n": n, "sha256": prefix(b, n),
                     "partial_tail": not b.endswith(b"\n") and len(b) > 0})
+        said = store_last_at(b)
+        if said:
+            rec["store_last_at"] = said
         if prev is None:
             rec["check"] = "first"
         elif n < prev["n"]:
@@ -387,8 +438,10 @@ def main(argv=None):
                                     " stale=%d" % stale if stale else ""))
     for r in new:
         if r.get("liveness") == "stale":
-            print("STALE witness %s (%s): n=%s, no new line since %s" % (
-                r["witness_id"], r["operator"], r["n"], r["unchanged_since"]))
+            print("STALE witness %s (%s): n=%s, no new line since %s%s" % (
+                r["witness_id"], r["operator"], r["n"], r["unchanged_since"],
+                "; its own last line is dated %s (unsigned)" % r["store_last_at"]
+                if r.get("store_last_at") else ""))
         if r["check"] in ("mismatch", "shrank"):
             print("ALERT witness %s (%s): %s at n=%s, previous n=%s" % (
                 r["witness_id"], r["operator"], r["check"], r["n"], r["prev"]["n"]))
